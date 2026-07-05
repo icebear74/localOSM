@@ -306,7 +306,7 @@ data:
                     return
                 try:
                     req = urllib.request.Request(
-                        f"{NOMINATIM_URL}/search?q={urllib.parse.quote(q)}&format=jsonv2&limit=5",
+                        f"{NOMINATIM_URL}/search?q={urllib.parse.quote(q)}&format=jsonv2&limit=1",
                         headers={"User-Agent": "localosm-web/1.0"}
                     )
                     with urllib.request.urlopen(req, timeout=5) as response:
