@@ -12,6 +12,9 @@ data:
         "traffic_extract": "/data/traffic.tar",
         "timezone": "/data/timezone.sqlite",
         "admin": "/data/admin.sqlite",
+        "default_speeds_config": "/usr/local/share/valhalla/mjolnir/default_speeds.lua",
+        "max_speed": 200,
+        "num_threads": 6,
         "logging": {
           "type": "std_out",
           "color": false
