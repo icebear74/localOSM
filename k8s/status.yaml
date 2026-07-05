@@ -1153,6 +1153,17 @@ data:
     
     if __name__ == "__main__":
         ensure_dirs()
+        # If the process was restarted while a workflow was running, clear the
+        # stale "running" flag so the UI doesn't stay stuck in a phantom state.
+        _startup_state = read_workflow_state()
+        if _startup_state.get("running"):
+            write_workflow_state(
+                running=False,
+                phase="interrupted",
+                message="Workflow was interrupted by a pod restart.",
+                detail="Start a new workflow to continue.",
+                error="",
+            )
         server = ThreadingHTTPServer((HOST, PORT), Handler)
         print(f"OSM status server listening on {HOST}:{PORT}")
         try:
