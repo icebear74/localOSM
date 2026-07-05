@@ -46,6 +46,13 @@ if ! kubectl cluster-info >/dev/null 2>&1; then
   exit 1
 fi
 
+PY_BIN=""
+if command -v python3 >/dev/null 2>&1; then
+  PY_BIN="python3"
+elif command -v python >/dev/null 2>&1; then
+  PY_BIN="python"
+fi
+
 run_cmd() {
   if [ "${DRY_RUN}" = true ]; then
     echo "[dry-run] $*"
@@ -75,9 +82,14 @@ force_namespace_finalize() {
     return 0
   fi
 
+  if [ -z "${PY_BIN}" ]; then
+    echo "WARNING: python not found; could not force finalizer cleanup for namespace ${ns}." >&2
+    return 1
+  fi
+
   kubectl patch namespace "${ns}" --type=merge -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
   kubectl get namespace "${ns}" -o json 2>/dev/null \
-    | python3 -c 'import json,sys;o=json.load(sys.stdin);o.setdefault("spec",{});o["spec"]["finalizers"]=[];print(json.dumps(o))' \
+    | "${PY_BIN}" -c $'import json,sys\nobj=json.load(sys.stdin)\nobj.setdefault("spec",{})\nobj["spec"]["finalizers"]=[]\nprint(json.dumps(obj))' \
     | kubectl replace --raw "/api/v1/namespaces/${ns}/finalize" -f - >/dev/null 2>&1 || true
 }
 
@@ -119,20 +131,15 @@ echo "  Helm releases: ${#HELM_RELEASES[@]}"
 echo ""
 echo "=== Removing Helm releases (if any) ==="
 if command -v helm >/dev/null 2>&1; then
-  while IFS=$'\t' read -r rel ns; do
-    [ -z "${rel}" ] && continue
-    run_cmd helm uninstall "${rel}" -n "${ns}"
-  done < <(helm ls -A -o json 2>/dev/null \
-            | python3 - <<'PY'
-import json,sys,re
-data = json.load(sys.stdin)
-for r in data:
-    name = r.get("name","")
-    ns = r.get("namespace","")
-    if re.search(r"(rancher|cattle|fleet)", name):
-        print(f"{name}\t{ns}")
-PY
-          )
+  if [ -z "${PY_BIN}" ]; then
+    echo "python not found; skipping Helm release cleanup."
+  else
+    while IFS=$'\t' read -r rel ns; do
+      [ -z "${rel}" ] && continue
+      run_cmd helm uninstall "${rel}" -n "${ns}"
+    done < <(helm ls -A -o json 2>/dev/null \
+              | "${PY_BIN}" -c $'import json,sys,re\ndata=json.load(sys.stdin)\nfor r in data:\n  name=r.get("name","")\n  ns=r.get("namespace","")\n  if re.search(r"(rancher|cattle|fleet)", name):\n    print(f"{name}\\t{ns}")')
+  fi
 else
   echo "helm not found; skipping Helm release cleanup."
 fi
