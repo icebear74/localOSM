@@ -17,6 +17,7 @@ A self-hosted OSM stack running on Kubernetes (K3s) with routing, geocoding, map
 | `k8s/web.yaml` | Browser routing UI with Leaflet map, geocoding, distance & route calculation |
 | `scripts/deploy-osm.sh` | Create host directories and install or update all manifests |
 | `scripts/run-import.sh` | Download an OSM PBF file and start the Valhalla import job |
+| `scripts/remove-rancher.sh` | Helper to remove Rancher/Fleet leftovers from a cluster |
 | `status/app.py` | Source for the status container |
 
 ## Host directories
@@ -107,6 +108,17 @@ kubectl -n osm get all
 kubectl -n osm get svc
 kubectl -n osm logs job/valhalla-import
 ```
+
+## Optional: remove Rancher leftovers
+
+If namespace deletion is stuck because of stale `ext.cattle.io` or other Rancher APIs:
+
+```bash
+bash scripts/remove-rancher.sh --dry-run
+bash scripts/remove-rancher.sh --yes
+```
+
+The script removes Rancher/Fleet namespaces, CRDs, APIService entries, webhooks, and related cluster roles, then forces namespace finalizer cleanup if needed.
 
 ## Notes
 
