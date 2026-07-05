@@ -1114,6 +1114,7 @@ if __name__ == "__main__":
         write_workflow_state(
             running=False,
             phase="interrupted",
+            progress=0,
             message="Workflow was interrupted by a pod restart.",
             detail="Start a new workflow to continue.",
             error="",
