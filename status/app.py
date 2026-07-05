@@ -704,7 +704,7 @@ def validate_pbf_file(path, *, label="OSM extract"):
         raise RuntimeError(f"{label} not found: {path}")
     if os.path.getsize(path) <= 0:
         raise RuntimeError(f"{label} is empty: {path}")
-    run_command(["osmium", "fileinfo", path], timeout=120)
+    run_command(["osmium", "fileinfo", "-F", "pbf", path], timeout=120)
 
 
 def clear_directory(path):
