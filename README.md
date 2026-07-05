@@ -26,6 +26,7 @@ Persistent data is stored under `/mnt/data/OSM/`:
 ```
 /mnt/data/OSM/
   postgres/data   – PostgreSQL data
+  library/        – downloaded country extracts used for merged rebuilds
   tileserver/     – TileServer GL styles & tiles
   nominatim/      – Nominatim PostgreSQL data (pg15)
   valhalla/       – Valhalla routing graph (tiles/)
@@ -69,7 +70,7 @@ kubectl -n osm logs -f job/valhalla-import
 | Service | URL | NodePort |
 |---|---|---|
 | **Routing UI** (Leaflet map + routing) | `http://<node-ip>:30084/` | 30084 |
-| **Status dashboard** (auto-refresh) | `http://<node-ip>:30083/` | 30083 |
+| **Status dashboard** (auto-refresh + country library manager) | `http://<node-ip>:30083/` | 30083 |
 | TileServer GL | `http://<node-ip>:30085/` | 30085 |
 | Nominatim | `http://<node-ip>:30081/` | 30081 |
 | Valhalla API | `http://<node-ip>:30082/` | 30082 |
@@ -91,9 +92,13 @@ Open `http://<node-ip>:30084/`:
 Open `http://<node-ip>:30083/`:
 
 - Colour-coded health indicators for all services (green = reachable, red = down)
+- Country library dropdown for adding predefined countries such as the Netherlands, Germany, Belgium, and more
+- Optional custom country name + `.osm.pbf` URL fields for extra extracts
+- Live workflow progress while the dashboard downloads, merges, rebuilds Valhalla, and refreshes Nominatim
+- Added-country cards that show which countries are already part of the merged library
 - Import directory listing with file sizes and timestamps
 - Valhalla tile graph size – shows "Routing bereit" once tiles exist
-- Auto-refreshes every 10 seconds
+- Auto-refreshes every 5 seconds
 
 ## Verify the deployment
 
@@ -130,6 +135,7 @@ The deployment now covers the main OSM building blocks:
 The deployment stores persistent data under:
 
 - `/mnt/data/OSM/postgres/data`
+- `/mnt/data/OSM/library`
 - `/mnt/data/OSM/tileserver`
 - `/mnt/data/OSM/nominatim`
 - `/mnt/data/OSM/valhalla`
@@ -164,7 +170,7 @@ Once deployed, the services are exposed as NodePorts:
 - TileServer GL: `http://<node-ip>:30085`
 - Nominatim: `http://<node-ip>:30081`
 - Valhalla: `http://<node-ip>:30082`
-- Status UI: `http://<node-ip>:30083/`
+- Status UI + country library manager: `http://<node-ip>:30083/`
 - Web UI / routing UI: `http://<node-ip>:30084/`
 
 ## Import OSM data

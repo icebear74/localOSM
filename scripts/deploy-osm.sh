@@ -23,6 +23,7 @@ fi
 echo "Creating host directories under ${BASE_DIR}"
 for dir in \
   "${BASE_DIR}/postgres/data" \
+  "${BASE_DIR}/library" \
   "${BASE_DIR}/tileserver" \
   "${BASE_DIR}/nominatim" \
   "${BASE_DIR}/valhalla/tiles" \
