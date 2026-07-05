@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: valhalla
-          image: ghcr.io/gis-ops/valhalla:latest
+          image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
           imagePullPolicy: Always
           command: ["/bin/sh", "-c"]
           args:
