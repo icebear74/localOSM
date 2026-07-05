@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 import socket
+import ssl
 import subprocess
 import threading
 import time
@@ -89,6 +90,106 @@ COUNTRY_LIBRARY = [
 
 WORKFLOW_LOCK = threading.Lock()
 ACTIVE_WORKFLOW = {"thread": None}
+
+
+_SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount"
+
+
+class KubeClient:
+    """Minimal Kubernetes REST API client using in-cluster credentials."""
+
+    def __init__(self, namespace, timeout=30):
+        self.namespace = namespace
+        self.timeout = timeout
+        host = os.environ.get("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
+        port = os.environ.get("KUBERNETES_SERVICE_PORT", "443")
+        self._base = f"https://{host}:{port}"
+        token_path = os.path.join(_SA_DIR, "token")
+        ca_path = os.path.join(_SA_DIR, "ca.crt")
+        try:
+            with open(token_path) as fh:
+                self._token = fh.read().strip()
+        except OSError:
+            self._token = None
+        self._ssl = ssl.create_default_context(cafile=ca_path if os.path.exists(ca_path) else None)
+        if not os.path.exists(ca_path):
+            self._ssl.check_hostname = False
+            self._ssl.verify_mode = ssl.CERT_NONE
+
+    def _request(self, method, path, body=None, params=None, content_type="application/json"):
+        url = self._base + path
+        if params:
+            url += "?" + urllib.parse.urlencode(params)
+        data = json.dumps(body).encode() if body is not None else None
+        headers = {"Accept": "application/json"}
+        if data:
+            headers["Content-Type"] = content_type
+        if self._token:
+            headers["Authorization"] = "Bearer " + self._token
+        try:
+            with urllib.request.urlopen(req, context=self._ssl, timeout=self.timeout) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            body_text = exc.read().decode(errors="replace")
+            raise RuntimeError(f"K8s API {method} {path} → {exc.code}: {body_text}") from exc
+
+    def get_job(self, name):
+        return self._request("GET", f"/apis/batch/v1/namespaces/{self.namespace}/jobs/{name}")
+
+    def create_job(self, manifest):
+        return self._request("POST", f"/apis/batch/v1/namespaces/{self.namespace}/jobs", body=manifest)
+
+    def delete_job(self, name):
+        try:
+            self._request(
+                "DELETE",
+                f"/apis/batch/v1/namespaces/{self.namespace}/jobs/{name}",
+                body={"propagationPolicy": "Background"},
+            )
+        except RuntimeError as exc:
+            if "404" not in str(exc):
+                raise
+
+    def get_job_logs(self, name, tail_lines=80):
+        pods = self._request(
+            "GET",
+            f"/api/v1/namespaces/{self.namespace}/pods",
+            params={"labelSelector": f"job-name={name}"},
+        )
+        items = pods.get("items", [])
+        if not items:
+            return ""
+        pod_name = items[-1]["metadata"]["name"]
+        url = self._base + f"/api/v1/namespaces/{self.namespace}/pods/{pod_name}/log?tailLines={tail_lines}"
+        headers = {}
+        if self._token:
+            headers["Authorization"] = "Bearer " + self._token
+        try:
+            with urllib.request.urlopen(req, context=self._ssl, timeout=self.timeout) as resp:
+                return resp.read().decode(errors="replace")
+        except urllib.error.HTTPError:
+            return ""
+
+    def get_deployment(self, name):
+        return self._request("GET", f"/apis/apps/v1/namespaces/{self.namespace}/deployments/{name}")
+
+    def scale_deployment(self, name, replicas):
+        self._request(
+            "PATCH",
+            f"/apis/apps/v1/namespaces/{self.namespace}/deployments/{name}",
+            body={"spec": {"replicas": replicas}},
+            content_type="application/merge-patch+json",
+        )
+
+    def list_pods(self, label_selector):
+        return self._request(
+            "GET",
+            f"/api/v1/namespaces/{self.namespace}/pods",
+            params={"labelSelector": label_selector},
+        )
+
+
+KUBE = KubeClient(NAMESPACE)
 
 
 INDEX_HTML = """<!doctype html>
@@ -757,7 +858,7 @@ def build_valhalla_job_manifest():
 
 def rebuild_valhalla(country):
     clear_directory(VALHALLA_TILE_DIR)
-    run_command(["kubectl", "-n", NAMESPACE, "delete", "job", "valhalla-import", "--ignore-not-found=true"], check=False)
+    KUBE.delete_job("valhalla-import")
     write_workflow_state(
         running=True,
         phase="routing",
@@ -767,16 +868,15 @@ def rebuild_valhalla(country):
         country=country["name"],
         error="",
     )
-    manifest = json.dumps(build_valhalla_job_manifest())
-    run_command(["kubectl", "apply", "-f", "-"], input_text=manifest)
+    KUBE.create_job(build_valhalla_job_manifest())
 
     deadline = time.time() + 7200
     while time.time() < deadline:
-        job_text = run_command(["kubectl", "-n", NAMESPACE, "get", "job", "valhalla-import", "-o", "json"], check=False)
-        if not job_text:
+        try:
+            job_data = KUBE.get_job("valhalla-import")
+        except RuntimeError:
             time.sleep(3)
             continue
-        job_data = json.loads(job_text)
         status = job_data.get("status", {})
         if status.get("succeeded", 0) >= 1:
             write_workflow_state(
@@ -790,7 +890,7 @@ def rebuild_valhalla(country):
             )
             return
         if status.get("failed", 0) > 0:
-            logs = run_command(["kubectl", "-n", NAMESPACE, "logs", "job/valhalla-import", "--tail=80"], check=False)
+            logs = KUBE.get_job_logs("valhalla-import")
             raise RuntimeError(logs or "Valhalla import job failed.")
         active = status.get("active", 0)
         write_workflow_state(
@@ -798,7 +898,7 @@ def rebuild_valhalla(country):
             phase="routing",
             progress=68,
             message="Valhalla is rebuilding routing tiles ...",
-            detail=f"Job active: {active}. Polling kubectl for completion.",
+            detail=f"Job active: {active}. Waiting for completion.",
             country=country["name"],
             error="",
         )
@@ -807,18 +907,18 @@ def rebuild_valhalla(country):
 
 
 def scale_nominatim(replicas):
-    run_command(["kubectl", "-n", NAMESPACE, "scale", "deployment", "nominatim", f"--replicas={replicas}"])
+    KUBE.scale_deployment("nominatim", replicas)
 
 
 def wait_for_nominatim_pods_to_stop(timeout_seconds=300):
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
-        pod_data = run_command(
-            ["kubectl", "-n", NAMESPACE, "get", "pods", "-l", "app=nominatim", "-o", "json"],
-            check=False,
-        )
-        items = json.loads(pod_data or "{}").get("items", [])
-        if not items:
+        try:
+            pods = KUBE.list_pods("app=nominatim")
+        except RuntimeError:
+            time.sleep(3)
+            continue
+        if not pods.get("items"):
             return
         time.sleep(3)
     raise RuntimeError("Timed out waiting for the Nominatim pod to stop.")
@@ -827,11 +927,11 @@ def wait_for_nominatim_pods_to_stop(timeout_seconds=300):
 def wait_for_nominatim_ready(country):
     deadline = time.time() + 7200
     while time.time() < deadline:
-        deployment_text = run_command(
-            ["kubectl", "-n", NAMESPACE, "get", "deployment", "nominatim", "-o", "json"],
-            check=False,
-        )
-        deployment = json.loads(deployment_text or "{}")
+        try:
+            deployment = KUBE.get_deployment("nominatim")
+        except RuntimeError:
+            time.sleep(10)
+            continue
         status = deployment.get("status", {})
         ready = status.get("readyReplicas", 0)
         ok, detail = check_http("http://nominatim.osm.svc.cluster.local:8080/")
