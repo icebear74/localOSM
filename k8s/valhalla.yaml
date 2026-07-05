@@ -19,35 +19,25 @@ spec:
         - name: valhalla
           image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
           imagePullPolicy: Always
-          command: ["/bin/sh", "-c"]
-          args:
-            - |
-              mkdir -p /data/tiles
-              echo "Waiting for Valhalla tiles to be available..."
-              while [ ! -f /data/valhalla_tiles.tar ] && [ -z "$(ls -A /data/tiles 2>/dev/null)" ]; do
-                echo "No tiles found yet, retrying in 30s..."
-                sleep 30
-              done
-              echo "Tiles found, starting valhalla_service..."
-              exec valhalla_service /config/valhalla.json 1
           env:
-            - name: PORT
-              value: "8002"
+            # Use pre-built tiles if they exist, skip rebuilding from PBF
+            - name: use_tiles_ignore_pbf
+              value: "True"
+            # Only serve tiles, do not attempt to rebuild
+            - name: serve_tiles
+              value: "True"
+            - name: force_rebuild
+              value: "False"
           ports:
             - containerPort: 8002
           volumeMounts:
             - name: valhalla-data
-              mountPath: /data
-            - name: valhalla-config
-              mountPath: /config
+              mountPath: /custom_files
       volumes:
         - name: valhalla-data
           hostPath:
             path: /mnt/data/OSM/valhalla
             type: DirectoryOrCreate
-        - name: valhalla-config
-          configMap:
-            name: osm-valhalla-config
 ---
 apiVersion: v1
 kind: Service
