@@ -699,6 +699,14 @@ def run_command(args, *, input_text=None, check=True, timeout=60):
     return result.stdout.strip()
 
 
+def validate_pbf_file(path, *, label="OSM extract"):
+    if not os.path.isfile(path):
+        raise RuntimeError(f"{label} not found: {path}")
+    if os.path.getsize(path) <= 0:
+        raise RuntimeError(f"{label} is empty: {path}")
+    run_command(["osmium", "fileinfo", path], timeout=120)
+
+
 def clear_directory(path):
     os.makedirs(path, exist_ok=True)
     for entry in os.listdir(path):
@@ -713,17 +721,22 @@ def download_country_file(country):
     destination = os.path.join(LIBRARY_DIR, f"{country['slug']}.osm.pbf")
     temp_path = f"{destination}.part"
     if os.path.exists(destination) and os.path.getsize(destination) > 0:
-        write_workflow_state(
-            running=True,
-            phase="download",
-            progress=35,
-            message=f"Using cached extract for {country['name']}.",
-            detail=destination,
-            country=country["name"],
-            error="",
-        )
-        upsert_country_record(country, pbf_path=destination, pbf_size_mb=file_size_mb(destination))
-        return destination
+        try:
+            validate_pbf_file(destination, label=f"Cached extract for {country['name']}")
+        except RuntimeError:
+            os.unlink(destination)
+        else:
+            write_workflow_state(
+                running=True,
+                phase="download",
+                progress=35,
+                message=f"Using cached extract for {country['name']}.",
+                detail=destination,
+                country=country["name"],
+                error="",
+            )
+            upsert_country_record(country, pbf_path=destination, pbf_size_mb=file_size_mb(destination))
+            return destination
 
     request = urllib.request.Request(country["url"], headers={"User-Agent": "localosm-status/1.0"})
     os.makedirs(os.path.dirname(destination), exist_ok=True)
@@ -756,6 +769,7 @@ def download_country_file(country):
                     error="",
                 )
                 last_update = now
+    validate_pbf_file(temp_path, label=f"Downloaded extract for {country['name']}")
     os.replace(temp_path, destination)
     upsert_country_record(
         country,
@@ -788,7 +802,8 @@ def merge_library_files(country):
     if len(input_paths) == 1:
         shutil.copyfile(input_paths[0], tmp_path)
     else:
-        run_command(["osmium", "merge", "--overwrite", "-o", tmp_path, *input_paths])
+        run_command(["osmium", "merge", "--overwrite", "-o", tmp_path, "-f", "pbf", *input_paths], timeout=7200)
+    validate_pbf_file(tmp_path, label="Merged library extract")
     os.replace(tmp_path, MERGED_PBF)
 
     meta_path = f"{MERGED_PBF}.meta"
