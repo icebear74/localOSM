@@ -23,7 +23,13 @@ spec:
           args:
             - |
               mkdir -p /data/tiles
-              valhalla_service /config/valhalla.json
+              echo "Waiting for Valhalla tiles to be available..."
+              while [ ! -f /data/valhalla_tiles.tar ] && [ -z "$(ls -A /data/tiles 2>/dev/null)" ]; do
+                echo "No tiles found yet, retrying in 30s..."
+                sleep 30
+              done
+              echo "Tiles found, starting valhalla_service..."
+              exec valhalla_service /config/valhalla.json 1
           env:
             - name: PORT
               value: "8002"
