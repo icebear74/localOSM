@@ -1,6 +1,119 @@
 # localOSM
 
-This repository contains a complete Kubernetes workflow for a local OSM stack on K3s with a built-in status service and a simple routing web UI.
+A self-hosted OSM stack running on Kubernetes (K3s) with routing, geocoding, map tiles, a visual status dashboard, and a browser-based routing UI.
+
+## What is included
+
+| File | Purpose |
+|---|---|
+| `k8s/namespace.yaml` | Kubernetes namespace `osm` |
+| `k8s/postgres.yaml` | PostgreSQL + PostGIS |
+| `k8s/tileserver.yaml` | TileServer GL – raster/vector tiles |
+| `k8s/nominatim.yaml` | Nominatim – address search & geocoding |
+| `k8s/valhalla-config.yaml` | Valhalla service configuration (full 3.x format) |
+| `k8s/valhalla.yaml` | Valhalla – routing engine |
+| `k8s/valhalla-import-job.yaml` | Batch job to build the Valhalla routing graph from a `.osm.pbf` file |
+| `k8s/status.yaml` | Auto-refreshing status dashboard (service health, import files, tile size) |
+| `k8s/web.yaml` | Browser routing UI with Leaflet map, geocoding, distance & route calculation |
+| `scripts/deploy-osm.sh` | Create host directories and install or update all manifests |
+| `scripts/run-import.sh` | Download an OSM PBF file and start the Valhalla import job |
+| `status/app.py` | Source for the status container |
+
+## Host directories
+
+Persistent data is stored under `/mnt/data/OSM/`:
+
+```
+/mnt/data/OSM/
+  postgres/data   – PostgreSQL data
+  library/        – downloaded country extracts used for merged rebuilds
+  tileserver/     – TileServer GL styles & tiles
+  nominatim/      – Nominatim PostgreSQL data (pg15)
+  valhalla/       – Valhalla routing graph (tiles/)
+  import/         – Downloaded .osm.pbf files
+  cache/          – Scratch space
+  status/         – Status metadata
+```
+
+## Prerequisites
+
+- Kubernetes cluster (K3s recommended)
+- `kubectl` configured and pointing at the cluster
+- Outbound internet access from the node (to pull images and download PBF)
+
+## Quick start
+
+### 1 – Deploy the stack
+
+```bash
+bash scripts/deploy-osm.sh
+```
+
+This creates the host directories, sets permissions, and installs the stack. Re-running it updates an existing installation.
+
+### 2 – Load OSM data
+
+```bash
+bash scripts/run-import.sh --url https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf
+```
+
+The script downloads the PBF file to `/mnt/data/OSM/import/planet.osm.pbf` with a live progress bar, then starts the Valhalla import job automatically.
+
+Monitor the import:
+
+```bash
+kubectl -n osm logs -f job/valhalla-import
+```
+
+### 3 – Open the UI
+
+| Service | URL | NodePort |
+|---|---|---|
+| **Routing UI** (Leaflet map + routing) | `http://<node-ip>:30084/` | 30084 |
+| **Status dashboard** (auto-refresh + country library manager) | `http://<node-ip>:30083/` | 30083 |
+| TileServer GL | `http://<node-ip>:30085/` | 30085 |
+| Nominatim | `http://<node-ip>:30081/` | 30081 |
+| Valhalla API | `http://<node-ip>:30082/` | 30082 |
+
+## Using the routing UI
+
+Open `http://<node-ip>:30084/`:
+
+- Enter a start and destination address in the search boxes and press 🔍 to geocode them (requires Nominatim with imported data)
+- Or enter coordinates directly / click on the map (first click = start, second click = destination)
+- Choose vehicle type (Auto, Zu Fuß, Fahrrad, LKW) and units
+- Click **Route berechnen** to draw the route on the map and show distance + travel time
+- Click **Nur Distanz** for a quick distance/time answer without a map drawing
+
+> **Note:** Routing requires the Valhalla import job to have completed successfully (see Status dashboard → "Valhalla Tiles" card).
+
+## Status dashboard
+
+Open `http://<node-ip>:30083/`:
+
+- Colour-coded health indicators for all services (green = reachable, red = down)
+- Country library dropdown for adding predefined countries such as the Netherlands, Germany, Belgium, and more
+- Optional custom country name + `.osm.pbf` URL fields for extra extracts
+- Live workflow progress while the dashboard downloads, merges, rebuilds Valhalla, and refreshes Nominatim
+- Added-country cards that show which countries are already part of the merged library
+- Import directory listing with file sizes and timestamps
+- Valhalla tile graph size – shows "Routing bereit" once tiles exist
+- Auto-refreshes every 5 seconds
+
+## Verify the deployment
+
+```bash
+kubectl -n osm get all
+kubectl -n osm get svc
+kubectl -n osm logs job/valhalla-import
+```
+
+## Notes
+
+- **Nominatim** uses its own internal PostgreSQL 15 instance. The `PBF_PATH` env var triggers data import on first start – this can take a long time for large extracts.
+- **TileServer GL** needs `.mbtiles` or `.pmtiles` files placed in `/mnt/data/OSM/tileserver/` and a `config.json` style definition to serve tiles.
+- The routing UI falls back to OSM tile CDN for the map background if no local TileServer tiles are configured.
+
 
 ## What is included
 
@@ -22,6 +135,7 @@ The deployment now covers the main OSM building blocks:
 The deployment stores persistent data under:
 
 - `/mnt/data/OSM/postgres/data`
+- `/mnt/data/OSM/library`
 - `/mnt/data/OSM/tileserver`
 - `/mnt/data/OSM/nominatim`
 - `/mnt/data/OSM/valhalla`
@@ -53,10 +167,10 @@ kubectl -n osm get svc
 
 Once deployed, the services are exposed as NodePorts:
 
-- TileServer GL: `http://<node-ip>:30080`
+- TileServer GL: `http://<node-ip>:30085`
 - Nominatim: `http://<node-ip>:30081`
 - Valhalla: `http://<node-ip>:30082`
-- Status UI: `http://<node-ip>:30083/`
+- Status UI + country library manager: `http://<node-ip>:30083/`
 - Web UI / routing UI: `http://<node-ip>:30084/`
 
 ## Import OSM data

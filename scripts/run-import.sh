@@ -34,43 +34,79 @@ fi
 
 mkdir -p "$(dirname "$DEST")"
 
-PYTHON_BIN=""
-if command -v python3 >/dev/null 2>&1; then
-  PYTHON_BIN="python3"
-elif command -v python >/dev/null 2>&1; then
-  PYTHON_BIN="python"
-else
-  echo "python not found" >&2
-  exit 1
-fi
+echo "=== localOSM – Download OSM PBF ==="
+echo "Source : $URL"
+echo "Dest   : $DEST"
+echo ""
 
-"${PYTHON_BIN}" - <<'PY' "$URL" "$DEST"
+# Prefer wget for progress display, fall back to Python
+if command -v wget >/dev/null 2>&1; then
+  wget --progress=bar:force:noscroll -O "$DEST" "$URL"
+else
+  PYTHON_BIN=""
+  if command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="python3"
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="python"
+  else
+    echo "Neither wget nor python found" >&2
+    exit 1
+  fi
+
+  "${PYTHON_BIN}" - <<'PY' "$URL" "$DEST"
 import os
 import sys
 import urllib.request
-import datetime
 
-url = sys.argv[1]
+url  = sys.argv[1]
 dest = sys.argv[2]
 
-print(f"Downloading OSM PBF from {url}")
-urllib.request.urlretrieve(url, dest)
+def _progress(block_count, block_size, total_size):
+    downloaded = block_count * block_size
+    if total_size > 0:
+        pct = min(100, downloaded * 100 // total_size)
+        mb_done  = downloaded / (1024 * 1024)
+        mb_total = total_size / (1024 * 1024)
+        bar = "#" * (pct // 5) + "." * (20 - pct // 5)
+        print(f"\r  [{bar}] {pct:3d}%  {mb_done:.1f}/{mb_total:.1f} MB", end="", flush=True)
+    else:
+        mb = downloaded / (1024 * 1024)
+        print(f"\r  {mb:.1f} MB downloaded", end="", flush=True)
 
-with open(dest + ".meta", "w", encoding="utf-8") as handle:
-    handle.write(f"downloaded_at={datetime.datetime.utcnow().isoformat()}Z\n")
-    handle.write(f"source={url}\n")
-    handle.write(f"path={dest}\n")
+print(f"Downloading {url}")
+urllib.request.urlretrieve(url, dest, _progress)
+print()
+PY
+fi
 
-print(f"Saved to {dest}")
+# Write metadata file next to the PBF
+python3 - <<PY "$URL" "$DEST" 2>/dev/null || python - <<PY "$URL" "$DEST"
+import sys, datetime
+url, dest = sys.argv[1], sys.argv[2]
+with open(dest + ".meta", "w", encoding="utf-8") as fh:
+    fh.write(f"downloaded_at={datetime.datetime.utcnow().isoformat()}Z\n")
+    fh.write(f"source={url}\n")
+    fh.write(f"path={dest}\n")
 PY
 
-echo "Downloaded data."
+PBF_SIZE=$(du -sh "$DEST" | cut -f1)
+echo "Downloaded ${PBF_SIZE} → ${DEST}"
+
 if command -v kubectl >/dev/null 2>&1 && kubectl cluster-info >/dev/null 2>&1; then
-  echo "Starting Valhalla import job..."
+  echo ""
+  echo "=== Starting Valhalla import job ==="
   kubectl -n osm delete job valhalla-import --ignore-not-found >/dev/null 2>&1 || true
   kubectl -n osm apply -f "${REPO_ROOT}/k8s/valhalla-import-job.yaml" >/dev/null
-  echo "The import job has been started. Check logs with: kubectl -n osm logs job/valhalla-import"
+  echo "Import job started. Monitor progress with:"
+  echo "  kubectl -n osm logs -f job/valhalla-import"
+  echo ""
+  echo "Check overall status with:"
+  echo "  kubectl -n osm get pods"
+  echo "  http://<node-ip>:30083/    (Status-Dashboard)"
 else
-  echo "kubectl is not available or the cluster is not reachable."
-  echo "You can run the import manually later with: kubectl -n osm apply -f ${REPO_ROOT}/k8s/valhalla-import-job.yaml"
+  echo ""
+  echo "kubectl not available or cluster unreachable."
+  echo "Start the import job manually later with:"
+  echo "  kubectl -n osm apply -f ${REPO_ROOT}/k8s/valhalla-import-job.yaml"
 fi
+

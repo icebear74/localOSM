@@ -20,27 +20,27 @@ spec:
           image: mediagis/nominatim:4.5
           imagePullPolicy: IfNotPresent
           env:
-            - name: PBF_URL
-              value: ""
+            - name: PBF_PATH
+              value: /nominatim/data/import/planet.osm.pbf
             - name: NOMINATIM_PASSWORD
-              value: nominatim
-            - name: PGHOST
-              value: postgres.osm.svc.cluster.local
-            - name: PGUSER
-              value: osm
-            - name: PGPASSWORD
-              value: osm
-            - name: PGDATABASE
               value: nominatim
           ports:
             - containerPort: 8080
           volumeMounts:
+            # mediagis/nominatim:4.5 bundles PostgreSQL 15
             - name: nominatim-data
-              mountPath: /var/lib/postgresql/14/main
+              mountPath: /var/lib/postgresql/15/main
+            - name: import-data
+              mountPath: /nominatim/data/import
+              readOnly: true
       volumes:
         - name: nominatim-data
           hostPath:
             path: /mnt/data/OSM/nominatim
+            type: DirectoryOrCreate
+        - name: import-data
+          hostPath:
+            path: /mnt/data/OSM/import
             type: DirectoryOrCreate
 ---
 apiVersion: v1
