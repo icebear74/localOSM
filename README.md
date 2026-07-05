@@ -1,20 +1,25 @@
 # localOSM
 
-This repository contains a minimal Kubernetes deployment for a local OSM-like stack on K3s.
+This repository contains a Kubernetes deployment scaffold for a local OSM stack on K3s.
 
 ## What is included
 
-- `k8s/namespace.yaml` – creates the `osm` namespace
-- `k8s/postgres.yaml` – deploys PostgreSQL for the OSM stack
-- `k8s/tileserver.yaml` – deploys a local tile server container
-- `scripts/deploy-osm.sh` – creates `/mnt/data/OSM/...` directories and applies the manifests
+The deployment now covers the main OSM building blocks:
+
+- `k8s/postgres.yaml` – PostgreSQL + PostGIS for the OSM data backend
+- `k8s/tileserver.yaml` – TileServer GL for raster tiles
+- `k8s/nominatim.yaml` – Nominatim for address lookup / reverse geocoding
+- `k8s/valhalla.yaml` – Valhalla for routing / distance API
+- `scripts/deploy-osm.sh` – creates the required host directories under `/mnt/data/OSM` and applies the manifests
 
 ## Host paths used
 
-The deployment uses hostPath mounts so data stays on the node under:
+The deployment stores persistent data under:
 
 - `/mnt/data/OSM/postgres/data`
 - `/mnt/data/OSM/tileserver`
+- `/mnt/data/OSM/nominatim`
+- `/mnt/data/OSM/valhalla`
 
 ## Prerequisites
 
@@ -33,10 +38,17 @@ bash scripts/deploy-osm.sh
 
 ```bash
 kubectl -n osm get all
-kubectl -n osm get pvc
+kubectl -n osm get svc
 ```
+
+## Access
+
+Once deployed, the services are exposed as NodePorts:
+
+- TileServer GL: `http://<node-ip>:30080`
+- Nominatim: `http://<node-ip>:30081`
+- Valhalla: `http://<node-ip>:30082`
 
 ## Notes
 
-- The PostgreSQL password is currently set to `osm` for simplicity.
-- The tile server image is a generic placeholder for a local OSM tileserver setup; replace it with your preferred image if needed.
+This is a deployment scaffold. The actual OSM data import and tile generation still require importing a real `.osm.pbf` file (or a regional extract) into PostGIS / Nominatim / Valhalla. The manifests here provide the runtime containers and storage layout so you can plug in the actual import workflow next.

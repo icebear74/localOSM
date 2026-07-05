@@ -1,49 +1,49 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: tileserver-gl
+  name: valhalla
   namespace: osm
   labels:
-    app: tileserver-gl
+    app: valhalla
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: tileserver-gl
+      app: valhalla
   template:
     metadata:
       labels:
-        app: tileserver-gl
+        app: valhalla
     spec:
       containers:
-        - name: tileserver-gl
-          image: maptiler/tileserver-gl:latest
+        - name: valhalla
+          image: ghcr.io/gis-ops/valhalla:latest
           imagePullPolicy: IfNotPresent
           env:
             - name: PORT
-              value: "80"
+              value: "8002"
           ports:
-            - containerPort: 80
+            - containerPort: 8002
           volumeMounts:
-            - name: tileserver-data
+            - name: valhalla-data
               mountPath: /data
       volumes:
-        - name: tileserver-data
+        - name: valhalla-data
           hostPath:
-            path: /mnt/data/OSM/tileserver
+            path: /mnt/data/OSM/valhalla
             type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: tileserver-gl
+  name: valhalla
   namespace: osm
 spec:
   type: NodePort
   selector:
-    app: tileserver-gl
+    app: valhalla
   ports:
     - name: http
-      port: 80
-      targetPort: 80
-      nodePort: 30080
+      port: 8002
+      targetPort: 8002
+      nodePort: 30082
