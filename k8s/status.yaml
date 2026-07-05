@@ -1229,7 +1229,7 @@ spec:
             - |
               set -e
               apk add --no-cache osmium-tool >/dev/null
-              command -v osmium >/dev/null
+              command -v osmium >/dev/null || { echo "ERROR: osmium command not found after apk install"; exit 1; }
               cp /config/app.py /tmp/app.py
               python /tmp/app.py
           env:
