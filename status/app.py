@@ -813,7 +813,7 @@ def build_valhalla_job_manifest():
                     "containers": [
                         {
                             "name": "valhalla-import",
-                            "image": "ghcr.io/gis-ops/valhalla:latest",
+                            "image": "ghcr.io/gis-ops/docker-valhalla/valhalla:latest",
                             "imagePullPolicy": "IfNotPresent",
                             "command": ["/bin/sh", "-c"],
                             "args": [
