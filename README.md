@@ -15,7 +15,7 @@ A self-hosted OSM stack running on Kubernetes (K3s) with routing, geocoding, map
 | `k8s/valhalla-import-job.yaml` | Batch job to build the Valhalla routing graph from a `.osm.pbf` file |
 | `k8s/status.yaml` | Auto-refreshing status dashboard (service health, import files, tile size) |
 | `k8s/web.yaml` | Browser routing UI with Leaflet map, geocoding, distance & route calculation |
-| `scripts/deploy-osm.sh` | Create host directories and apply all manifests |
+| `scripts/deploy-osm.sh` | Create host directories and install or update all manifests |
 | `scripts/run-import.sh` | Download an OSM PBF file and start the Valhalla import job |
 | `status/app.py` | Source for the status container |
 
@@ -49,7 +49,7 @@ Persistent data is stored under `/mnt/data/OSM/`:
 bash scripts/deploy-osm.sh
 ```
 
-This creates the host directories, sets permissions, and applies all manifests.
+This creates the host directories, sets permissions, and installs the stack. Re-running it updates an existing installation.
 
 ### 2 – Load OSM data
 
