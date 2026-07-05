@@ -11,7 +11,7 @@ spec:
       containers:
         - name: valhalla-import
           image: ghcr.io/gis-ops/valhalla:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           command: ["/bin/sh", "-c"]
           args:
             - |

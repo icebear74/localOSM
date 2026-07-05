@@ -18,7 +18,7 @@ spec:
       containers:
         - name: tileserver-gl
           image: maptiler/tileserver-gl:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           env:
             - name: PORT
               value: "80"
