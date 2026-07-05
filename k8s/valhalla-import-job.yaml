@@ -12,6 +12,9 @@ spec:
         - name: valhalla-import
           image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
           imagePullPolicy: Always
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
           env:
             # Build tiles from PBF, do not serve after building
             - name: serve_tiles
