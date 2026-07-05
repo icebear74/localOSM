@@ -577,13 +577,16 @@ def collect_status():
 
 
 def run_command(args, *, input_text=None, check=True):
-    result = subprocess.run(
-        args,
-        input=input_text,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            args,
+            input=input_text,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        raise RuntimeError(f"Command not found: {args[0]!r}. Make sure it is installed and available in PATH.")
     if check and result.returncode != 0:
         output = (result.stderr or result.stdout or "").strip()
         raise RuntimeError(output or f"Command failed: {' '.join(args)}")
