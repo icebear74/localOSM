@@ -16,20 +16,23 @@ spec:
           args:
             - |
               set -e
-              echo "Looking for OSM PBF data"
+              echo "=== Valhalla Import Job ==="
+              echo "Looking for OSM PBF data at /data/import/planet.osm.pbf ..."
               if [ ! -f /data/import/planet.osm.pbf ]; then
-                echo "No OSM PBF file found at /data/import/planet.osm.pbf"
+                echo "ERROR: No OSM PBF file found at /data/import/planet.osm.pbf"
                 exit 1
               fi
+              PBF_SIZE=$(du -sh /data/import/planet.osm.pbf | cut -f1)
+              echo "Found PBF file (${PBF_SIZE}). Building routing graph ..."
               mkdir -p /data/tiles
               cp /config/valhalla.json /tmp/valhalla.json
-              valhalla_build_tiles --config /tmp/valhalla.json /data/import/planet.osm.pbf
-              echo "Import complete"
+              valhalla_build_tiles -c /tmp/valhalla.json /data/import/planet.osm.pbf
+              echo "=== Import complete. Routing graph stored at /data/tiles ==="
           volumeMounts:
             - name: import-data
               mountPath: /data/import
             - name: valhalla-data
-              mountPath: /data/valhalla
+              mountPath: /data
             - name: valhalla-config
               mountPath: /config
       volumes:
