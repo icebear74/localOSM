@@ -64,11 +64,9 @@ kubectl apply -f "${REPO_ROOT}/k8s/valhalla.yaml"
 kubectl apply -f "${REPO_ROOT}/k8s/status.yaml"
 kubectl apply -f "${REPO_ROOT}/k8s/web.yaml"
 
-if [ "${#EXISTING_DEPLOYMENTS[@]}" -gt 0 ]; then
-  for deployment in "${EXISTING_DEPLOYMENTS[@]}"; do
-    kubectl -n "${NAMESPACE}" rollout restart "deployment/${deployment}" >/dev/null 2>&1 || true
-  done
-fi
+for deployment in "${DEPLOYMENTS[@]}"; do
+  kubectl -n "${NAMESPACE}" rollout restart "deployment/${deployment}" >/dev/null 2>&1 || true
+done
 
 for deployment in "${DEPLOYMENTS[@]}"; do
   kubectl -n "${NAMESPACE}" rollout status "deployment/${deployment}" --timeout=180s >/dev/null 2>&1 || true
