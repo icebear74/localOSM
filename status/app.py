@@ -858,6 +858,15 @@ def build_valhalla_job_manifest():
     }
 
 
+def _routing_progress(elapsed_seconds):
+    """Return an estimated progress % (60-77) based on elapsed build time."""
+    # Heuristic: typical valhalla_build_tiles run is 5-30 min for small/medium extracts.
+    # Ramp from 60 % to 77 % over 30 minutes, then hold at 77 %.
+    ramp_seconds = 1800  # 30 min
+    pct = 60 + 17 * min(elapsed_seconds, ramp_seconds) / ramp_seconds
+    return int(pct)
+
+
 def rebuild_valhalla(country):
     clear_directory(VALHALLA_TILE_DIR)
     KUBE.delete_job("valhalla-import")
@@ -872,7 +881,8 @@ def rebuild_valhalla(country):
     )
     KUBE.create_job(build_valhalla_job_manifest())
 
-    deadline = time.time() + 7200
+    job_start = time.time()
+    deadline = job_start + 7200
     while time.time() < deadline:
         try:
             job_data = KUBE.get_job("valhalla-import")
@@ -894,13 +904,31 @@ def rebuild_valhalla(country):
         if status.get("failed", 0) > 0:
             logs = KUBE.get_job_logs("valhalla-import")
             raise RuntimeError(logs or "Valhalla import job failed.")
-        active = status.get("active", 0)
+
+        elapsed = time.time() - job_start
+        elapsed_min = int(elapsed // 60)
+        elapsed_sec = int(elapsed % 60)
+
+        # Grab the last meaningful log line from the running pod for live feedback.
+        last_log = ""
+        try:
+            raw_logs = KUBE.get_job_logs("valhalla-import", tail_lines=10)
+            lines = [l.strip() for l in raw_logs.splitlines() if l.strip()]
+            if lines:
+                last_log = lines[-1]
+        except Exception:  # noqa: BLE001
+            pass
+
+        detail_parts = [f"Läuft seit {elapsed_min:02d}:{elapsed_sec:02d} min."]
+        if last_log:
+            detail_parts.append(f"Log: {last_log}")
+
         write_workflow_state(
             running=True,
             phase="routing",
-            progress=68,
-            message="Valhalla is rebuilding routing tiles ...",
-            detail=f"Job active: {active}. Waiting for completion.",
+            progress=_routing_progress(elapsed),
+            message="Valhalla baut den Routing-Graphen ...",
+            detail=" | ".join(detail_parts),
             country=country["name"],
             error="",
         )
