@@ -814,7 +814,7 @@ def wait_for_nominatim_pods_to_stop(timeout_seconds=300):
             ["kubectl", "-n", NAMESPACE, "get", "pods", "-l", "app=nominatim", "-o", "json"],
             check=False,
         )
-        items = json.loads(pod_data or "{}") .get("items", [])
+        items = json.loads(pod_data or "{}").get("items", [])
         if not items:
             return
         time.sleep(3)

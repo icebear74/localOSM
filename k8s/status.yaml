@@ -860,7 +860,7 @@ data:
                 ["kubectl", "-n", NAMESPACE, "get", "pods", "-l", "app=nominatim", "-o", "json"],
                 check=False,
             )
-            items = json.loads(pod_data or "{}") .get("items", [])
+            items = json.loads(pod_data or "{}").get("items", [])
             if not items:
                 return
             time.sleep(3)
