@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tileserver-gl
+  namespace: osm
+  labels:
+    app: tileserver-gl
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tileserver-gl
+  template:
+    metadata:
+      labels:
+        app: tileserver-gl
+    spec:
+      containers:
+        - name: tileserver-gl
+          image: maptiler/tileserver-gl:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PORT
+              value: "80"
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: tileserver-data
+              mountPath: /data
+      volumes:
+        - name: tileserver-data
+          hostPath:
+            path: /mnt/data/OSM/tileserver
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tileserver-gl
+  namespace: osm
+spec:
+  type: ClusterIP
+  selector:
+    app: tileserver-gl
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
