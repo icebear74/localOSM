@@ -126,6 +126,7 @@ class KubeClient:
             headers["Content-Type"] = content_type
         if self._token:
             headers["Authorization"] = "Bearer " + self._token
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
             with urllib.request.urlopen(req, context=self._ssl, timeout=self.timeout) as resp:
                 return json.loads(resp.read())
@@ -164,6 +165,7 @@ class KubeClient:
         headers = {}
         if self._token:
             headers["Authorization"] = "Bearer " + self._token
+        req = urllib.request.Request(url, headers=headers)
         try:
             with urllib.request.urlopen(req, context=self._ssl, timeout=self.timeout) as resp:
                 return resp.read().decode(errors="replace")
