@@ -1222,14 +1222,16 @@ spec:
       serviceAccountName: status-manager
       containers:
         - name: status
-          image: python:3.12-alpine
+          image: python:3.12-slim
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
           args:
             - |
               set -e
-              apk add --no-cache osmium-tool >/dev/null
-              command -v osmium >/dev/null || { echo "ERROR: osmium command not found after apk install. Check whether the osmium-tool package is available in the Alpine repository."; exit 1; }
+              apt-get update >/dev/null
+              apt-get install -y --no-install-recommends osmium-tool >/dev/null
+              rm -rf /var/lib/apt/lists/*
+              command -v osmium >/dev/null || { echo "ERROR: osmium command not found after apt install. Check whether osmium-tool is available in the Debian repository."; exit 1; }
               cp /config/app.py /tmp/app.py
               python /tmp/app.py
           env:
