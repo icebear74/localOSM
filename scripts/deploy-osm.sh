@@ -51,6 +51,23 @@ if [ "$(id -u)" -ne 0 ]; then
   SUDO="sudo"
 fi
 
+namespace_exists() {
+  kubectl get namespace "${NAMESPACE}" >/dev/null 2>&1
+}
+
+wait_for_namespace_deletion() {
+  local timeout_secs="$1"
+  local waited=0
+  while namespace_exists; do
+    if [ "$waited" -ge "$timeout_secs" ]; then
+      return 1
+    fi
+    sleep 2
+    waited=$((waited + 2))
+  done
+  return 0
+}
+
 # ---------------------------------------------------------------------------
 # Clean start (optional)
 # ---------------------------------------------------------------------------
@@ -70,10 +87,34 @@ if [ "$CLEAN" = true ]; then
     exit 0
   fi
 
-  echo ""
+  if namespace_exists; then
+    echo ""
+    echo ">>> Cleaning resources in namespace '${NAMESPACE}' before namespace delete …"
+    kubectl -n "${NAMESPACE}" delete all --all --ignore-not-found --grace-period=0 --force --timeout=90s >/dev/null 2>&1 || true
+    kubectl -n "${NAMESPACE}" delete pvc --all --ignore-not-found --grace-period=0 --force --timeout=90s >/dev/null 2>&1 || true
+    kubectl -n "${NAMESPACE}" delete configmap --all --ignore-not-found --timeout=90s >/dev/null 2>&1 || true
+    kubectl -n "${NAMESPACE}" delete secret --all --ignore-not-found --timeout=90s >/dev/null 2>&1 || true
+  fi
+
   echo ">>> Deleting Kubernetes namespace '${NAMESPACE}' …"
-  kubectl delete namespace "${NAMESPACE}" --ignore-not-found --wait=true
-  echo "    Namespace deleted."
+  kubectl delete namespace "${NAMESPACE}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+
+  if wait_for_namespace_deletion 120; then
+    echo "    Namespace deleted."
+  else
+    echo "    Namespace deletion is stuck (likely finalizers). Forcing finalizer cleanup …"
+    kubectl patch namespace "${NAMESPACE}" --type=merge -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
+    kubectl get namespace "${NAMESPACE}" -o json 2>/dev/null \
+      | python3 -c 'import json,sys; o=json.load(sys.stdin); o.setdefault("spec",{}); o["spec"]["finalizers"]=[]; print(json.dumps(o))' \
+      | kubectl replace --raw "/api/v1/namespaces/${NAMESPACE}/finalize" -f - >/dev/null 2>&1 || true
+    if wait_for_namespace_deletion 60; then
+      echo "    Namespace force-deleted."
+    else
+      echo "ERROR: Namespace '${NAMESPACE}' is still terminating after finalizer cleanup." >&2
+      echo "Run: kubectl get namespace ${NAMESPACE} -o yaml" >&2
+      exit 1
+    fi
+  fi
 
   echo ">>> Deleting data directory ${BASE_DIR} …"
   ${SUDO} rm -rf "${BASE_DIR}"
