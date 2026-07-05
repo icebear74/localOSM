@@ -18,6 +18,7 @@ A self-hosted OSM stack running on Kubernetes (K3s) with routing, geocoding, map
 | `scripts/deploy-osm.sh` | Create host directories and install or update all manifests |
 | `scripts/run-import.sh` | Download an OSM PBF file and start the Valhalla import job |
 | `scripts/remove-rancher.sh` | Helper to remove Rancher/Fleet leftovers from a cluster |
+| `scripts/reset-k3s.sh` | Fully uninstall and reinstall K3s on the host |
 | `status/app.py` | Source for the status container |
 
 ## Host directories
@@ -119,6 +120,21 @@ bash scripts/remove-rancher.sh --yes
 ```
 
 The script removes Rancher/Fleet namespaces, CRDs, APIService entries, webhooks, and related cluster roles, then forces namespace finalizer cleanup if needed.
+
+## Optional: reset K3s completely
+
+If you want a full clean restart of K3s (and therefore remove Rancher leftovers with it):
+
+```bash
+bash scripts/reset-k3s.sh --dry-run
+bash scripts/reset-k3s.sh --yes
+```
+
+Optional flags:
+
+- `--channel stable` (default)
+- `--version v1.31.1+k3s1` (installs exact version)
+- `--keep-data` (skip local data directory cleanup)
 
 ## Notes
 
