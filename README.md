@@ -70,7 +70,7 @@ kubectl -n osm logs -f job/valhalla-import
 |---|---|---|
 | **Routing UI** (Leaflet map + routing) | `http://<node-ip>:30084/` | 30084 |
 | **Status dashboard** (auto-refresh) | `http://<node-ip>:30083/` | 30083 |
-| TileServer GL | `http://<node-ip>:30080/` | 30080 |
+| TileServer GL | `http://<node-ip>:30085/` | 30085 |
 | Nominatim | `http://<node-ip>:30081/` | 30081 |
 | Valhalla API | `http://<node-ip>:30082/` | 30082 |
 
@@ -161,7 +161,7 @@ kubectl -n osm get svc
 
 Once deployed, the services are exposed as NodePorts:
 
-- TileServer GL: `http://<node-ip>:30080`
+- TileServer GL: `http://<node-ip>:30085`
 - Nominatim: `http://<node-ip>:30081`
 - Valhalla: `http://<node-ip>:30082`
 - Status UI: `http://<node-ip>:30083/`

@@ -58,7 +58,7 @@ kubectl -n "${NAMESPACE}" rollout status deployment/web --timeout=180s >/dev/nul
 
 echo "Deployment finished."
 echo "Services:"
-echo "  - TileServer GL: http://<node-ip>:30080"
+echo "  - TileServer GL: http://<node-ip>:30085"
 echo "  - Nominatim: http://<node-ip>:30081"
 echo "  - Valhalla: http://<node-ip>:30082"
 echo "  - Status UI: http://<node-ip>:30083"

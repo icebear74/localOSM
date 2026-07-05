@@ -130,7 +130,7 @@ data:
         <a href="http://NODEIP:30084/" id="web-link">&#128205; Routing-UI</a>
         <a href="http://NODEIP:30082/" id="valhalla-link">Valhalla API</a>
         <a href="http://NODEIP:30081/" id="nominatim-link">Nominatim</a>
-        <a href="http://NODEIP:30080/" id="tileserver-link">TileServer GL</a>
+        <a href="http://NODEIP:30085/" id="tileserver-link">TileServer GL</a>
       </div>
 
       <div class="grid">
