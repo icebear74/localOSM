@@ -25,7 +25,7 @@ for dir in \
   "${BASE_DIR}/postgres/data" \
   "${BASE_DIR}/tileserver" \
   "${BASE_DIR}/nominatim" \
-  "${BASE_DIR}/valhalla" \
+  "${BASE_DIR}/valhalla/tiles" \
   "${BASE_DIR}/import" \
   "${BASE_DIR}/cache" \
   "${BASE_DIR}/status"; do
@@ -44,14 +44,17 @@ kubectl apply -f "${REPO_ROOT}/k8s/namespace.yaml"
 kubectl apply -f "${REPO_ROOT}/k8s/postgres.yaml"
 kubectl apply -f "${REPO_ROOT}/k8s/tileserver.yaml"
 kubectl apply -f "${REPO_ROOT}/k8s/nominatim.yaml"
+kubectl apply -f "${REPO_ROOT}/k8s/valhalla-config.yaml"
 kubectl apply -f "${REPO_ROOT}/k8s/valhalla.yaml"
 kubectl apply -f "${REPO_ROOT}/k8s/status.yaml"
+kubectl apply -f "${REPO_ROOT}/k8s/web.yaml"
 
 kubectl -n "${NAMESPACE}" rollout status deployment/postgres --timeout=180s >/dev/null 2>&1 || true
 kubectl -n "${NAMESPACE}" rollout status deployment/tileserver-gl --timeout=180s >/dev/null 2>&1 || true
 kubectl -n "${NAMESPACE}" rollout status deployment/nominatim --timeout=180s >/dev/null 2>&1 || true
 kubectl -n "${NAMESPACE}" rollout status deployment/valhalla --timeout=180s >/dev/null 2>&1 || true
 kubectl -n "${NAMESPACE}" rollout status deployment/status --timeout=180s >/dev/null 2>&1 || true
+kubectl -n "${NAMESPACE}" rollout status deployment/web --timeout=180s >/dev/null 2>&1 || true
 
 echo "Deployment finished."
 echo "Services:"
@@ -59,6 +62,7 @@ echo "  - TileServer GL: http://<node-ip>:30080"
 echo "  - Nominatim: http://<node-ip>:30081"
 echo "  - Valhalla: http://<node-ip>:30082"
 echo "  - Status UI: http://<node-ip>:30083"
+echo "  - OSM Web UI: http://<node-ip>:30084"
 echo ""
 echo "Download OSM data with:"
 echo "  bash ${REPO_ROOT}/scripts/run-import.sh --url https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf"

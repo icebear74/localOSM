@@ -19,6 +19,11 @@ spec:
         - name: valhalla
           image: ghcr.io/gis-ops/valhalla:latest
           imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              mkdir -p /data/tiles
+              valhalla_service /config/valhalla.json
           env:
             - name: PORT
               value: "8002"
@@ -27,11 +32,16 @@ spec:
           volumeMounts:
             - name: valhalla-data
               mountPath: /data
+            - name: valhalla-config
+              mountPath: /config
       volumes:
         - name: valhalla-data
           hostPath:
             path: /mnt/data/OSM/valhalla
             type: DirectoryOrCreate
+        - name: valhalla-config
+          configMap:
+            name: osm-valhalla-config
 ---
 apiVersion: v1
 kind: Service

@@ -1,0 +1,46 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: valhalla-import
+  namespace: osm
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: valhalla-import
+          image: ghcr.io/gis-ops/valhalla:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              echo "Looking for OSM PBF data"
+              if [ ! -f /data/import/planet.osm.pbf ]; then
+                echo "No OSM PBF file found at /data/import/planet.osm.pbf"
+                exit 1
+              fi
+              mkdir -p /data/tiles
+              cp /config/valhalla.json /tmp/valhalla.json
+              valhalla_build_tiles --config /tmp/valhalla.json /data/import/planet.osm.pbf
+              echo "Import complete"
+          volumeMounts:
+            - name: import-data
+              mountPath: /data/import
+            - name: valhalla-data
+              mountPath: /data/valhalla
+            - name: valhalla-config
+              mountPath: /config
+      volumes:
+        - name: import-data
+          hostPath:
+            path: /mnt/data/OSM/import
+            type: DirectoryOrCreate
+        - name: valhalla-data
+          hostPath:
+            path: /mnt/data/OSM/valhalla
+            type: DirectoryOrCreate
+        - name: valhalla-config
+          configMap:
+            name: osm-valhalla-config

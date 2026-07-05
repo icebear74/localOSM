@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_DIR="/mnt/data/OSM"
 DEST="${BASE_DIR}/import/planet.osm.pbf"
 URL=""
@@ -62,3 +63,14 @@ with open(dest + ".meta", "w", encoding="utf-8") as handle:
 
 print(f"Saved to {dest}")
 PY
+
+echo "Downloaded data."
+if command -v kubectl >/dev/null 2>&1 && kubectl cluster-info >/dev/null 2>&1; then
+  echo "Starting Valhalla import job..."
+  kubectl -n osm delete job valhalla-import --ignore-not-found >/dev/null 2>&1 || true
+  kubectl -n osm apply -f "${REPO_ROOT}/k8s/valhalla-import-job.yaml" >/dev/null
+  echo "The import job has been started. Check logs with: kubectl -n osm logs job/valhalla-import"
+else
+  echo "kubectl is not available or the cluster is not reachable."
+  echo "You can run the import manually later with: kubectl -n osm apply -f ${REPO_ROOT}/k8s/valhalla-import-job.yaml"
+fi

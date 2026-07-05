@@ -1,6 +1,6 @@
 # localOSM
 
-This repository contains a Kubernetes deployment scaffold for a local OSM stack on K3s with a built-in status service.
+This repository contains a complete Kubernetes workflow for a local OSM stack on K3s with a built-in status service and a simple routing web UI.
 
 ## What is included
 
@@ -10,9 +10,12 @@ The deployment now covers the main OSM building blocks:
 - `k8s/tileserver.yaml` – TileServer GL for raster tiles
 - `k8s/nominatim.yaml` – Nominatim for address lookup / reverse geocoding
 - `k8s/valhalla.yaml` – Valhalla for routing / distance API
-- `k8s/status.yaml` – a small Python-based status container with test endpoints
+- `k8s/valhalla-config.yaml` – a basic Valhalla config file for the routing service
+- `k8s/valhalla-import-job.yaml` – a batch job that builds a Valhalla routing graph from a local `.osm.pbf` file
+- `k8s/status.yaml` – a Python-based status container with basic test endpoints
+- `k8s/web.yaml` – a Python-based web UI that allows distance and routing requests via the local Valhalla service
 - `scripts/deploy-osm.sh` – creates the required host directories under `/mnt/data/OSM` and applies the manifests
-- `scripts/run-import.sh` – downloads an OSM `.pbf` file into the local import directory
+- `scripts/run-import.sh` – downloads an OSM `.pbf` file into the local import directory and starts the Valhalla import job
 
 ## Host paths used
 
@@ -46,20 +49,19 @@ kubectl -n osm get all
 kubectl -n osm get svc
 ```
 
-## Status container and tests
+## Access the services
 
-The status container is available as a NodePort on port `30083`:
+Once deployed, the services are exposed as NodePorts:
 
-- `http://<node-ip>:30083/`
-- `http://<node-ip>:30083/api/status`
-- `http://<node-ip>:30083/test/postgres`
-- `http://<node-ip>:30083/test/tileserver`
-- `http://<node-ip>:30083/test/nominatim`
-- `http://<node-ip>:30083/test/valhalla`
+- TileServer GL: `http://<node-ip>:30080`
+- Nominatim: `http://<node-ip>:30081`
+- Valhalla: `http://<node-ip>:30082`
+- Status UI: `http://<node-ip>:30083/`
+- Web UI / routing UI: `http://<node-ip>:30084/`
 
-## Import a local OSM extract
+## Import OSM data
 
-Download a `.pbf` file into the local import directory:
+Download an OSM extract and import it into Valhalla:
 
 ```bash
 bash scripts/run-import.sh --url https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf
@@ -69,6 +71,16 @@ The file will be stored under:
 
 - `/mnt/data/OSM/import/planet.osm.pbf`
 
+The import job will start automatically and build the Valhalla graph. You can inspect logs with:
+
+```bash
+kubectl -n osm logs job/valhalla-import
+```
+
+## Using the web UI
+
+Open the routing UI at `http://<node-ip>:30084/` and enter coordinates. The web UI uses the local Valhalla service to compute routes and distances.
+
 ## Notes
 
-This is a complete deployment and test workflow scaffold for a local OSM stack. The base services are deployed, the host directories are created, and the status container gives you simple test endpoints. The actual import into Nominatim / Valhalla still needs a region-specific import step if you want a fully populated geocoder and routing graph.
+This is a full deployment and test workflow scaffold for a local OSM stack. It provides the runtime services, persistent storage, a Python-based status page, and a routing web UI. The actual OSM import into Nominatim / PostGIS still requires a more detailed import workflow if you want a fully populated geocoder and huge-area routing graph, but the stack is now usable for local testing and route calculation once a suitable `.osm.pbf` file is available.
