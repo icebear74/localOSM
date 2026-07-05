@@ -15,6 +15,24 @@ spec:
       labels:
         app: tileserver-gl
     spec:
+      initContainers:
+        # Create a minimal config.json so tileserver-gl does not exit immediately
+        # when no MBTiles files have been downloaded yet.
+        - name: init-config
+          image: busybox:1.36
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              if [ ! -f /data/config.json ]; then
+                printf '{"options":{"paths":{"root":"","fonts":"/usr/share/fonts","sprites":"","icons":""},"serveAllFonts":true},"styles":{},"data":{}}\n' \
+                  > /data/config.json
+                echo "Created minimal tileserver-gl config.json"
+              else
+                echo "config.json already present — keeping existing file"
+              fi
+          volumeMounts:
+            - name: tileserver-data
+              mountPath: /data
       containers:
         - name: tileserver-gl
           image: maptiler/tileserver-gl:latest
