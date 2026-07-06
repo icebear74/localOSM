@@ -953,7 +953,7 @@ data:
     
     def save_json(path, payload):
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp_path = f"{path}.tmp"
+        tmp_path = f"{path}.{threading.get_ident()}.tmp"
         with open(tmp_path, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2, sort_keys=True)
         os.replace(tmp_path, path)
