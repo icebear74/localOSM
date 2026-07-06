@@ -1625,6 +1625,9 @@ def rebuild_tileserver(country):
             continue
         status = job_data.get("status", {})
         if status.get("succeeded", 0) >= 1:
+            mbtiles_path = os.path.join(TILESERVER_DIR, "map.mbtiles")
+            if not os.path.exists(mbtiles_path) or os.path.getsize(mbtiles_path) == 0:
+                raise RuntimeError("Tile generation job succeeded but map.mbtiles was not created or is empty.")
             KUBE.rollout_restart("tileserver-gl")
             write_workflow_state(
                 running=True,
