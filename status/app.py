@@ -1474,6 +1474,7 @@ def build_tileserver_job_manifest():
                                 "  exit 1\n"
                                 "fi\n"
                                 "mkdir -p /data/tileserver\n"
+                            "mkdir -p /data/sources\n"
                             ],
                             "volumeMounts": [
                                 {"name": "osm-data", "mountPath": "/data"},
@@ -1491,6 +1492,14 @@ def build_tileserver_job_manifest():
                                 "--osm-path=/data/import/planet.osm.pbf",
                                 "--output=/data/tileserver/map.mbtiles",
                                 "--force",
+                                # Download ancillary source files (lake_centerlines,
+                                # water_polygons, natural_earth) on first run and store them
+                                # under /data/sources/ so they persist on the hostPath volume
+                                # and are reused offline on every subsequent build.
+                                "--download",
+                                "--lake_centerlines_path=/data/sources/lake_centerline.shp.zip",
+                                "--water_polygons_path=/data/sources/water-polygons-split-3857.zip",
+                                "--natural_earth_path=/data/sources/natural_earth_vector.sqlite.zip",
                                 # Skip zoom 0-5 world-overview (NaturalEarth) tiles; the map is
                                 # centered on the local extract so low-zoom world tiles are not
                                 # needed and would cause MapLibre to overzoom them outside the
