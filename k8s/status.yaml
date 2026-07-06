@@ -1489,6 +1489,11 @@ data:
                                 ],
                                 "volumeMounts": [
                                     {"name": "import-data", "mountPath": "/data/import"},
+                                    # /data is the staging dir; rebuild_valhalla() atomically renames
+                                    # valhalla-staging → valhalla after this job succeeds, so
+                                    # /data/valhalla_tiles.tar ends up at the production path
+                                    # /mnt/data/OSM/valhalla/valhalla_tiles.tar expected by the
+                                    # valhalla deployment init container and the service itself.
                                     {"name": "valhalla-data", "mountPath": "/data"},
                                     {"name": "valhalla-config", "mountPath": "/config"},
                                 ],
