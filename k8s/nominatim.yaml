@@ -49,9 +49,9 @@ spec:
           ports:
             - containerPort: 8080
           volumeMounts:
-            # mediagis/nominatim:4.5 bundles PostgreSQL 15
+            # mediagis/nominatim:4.5 bundles PostgreSQL 16
             - name: nominatim-data
-              mountPath: /var/lib/postgresql/15/main
+              mountPath: /var/lib/postgresql/16/main
             - name: import-data
               mountPath: /nominatim/data/import
               readOnly: true
