@@ -1551,6 +1551,7 @@ data:
                                 "args": [
                                     "--osm-path=/data/import/planet.osm.pbf",
                                     "--output=/data/tileserver/map.mbtiles",
+                                    "--download",
                                     "--force",
                                 ],
                                 "volumeMounts": [

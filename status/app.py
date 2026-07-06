@@ -1483,6 +1483,7 @@ def build_tileserver_job_manifest():
                             "args": [
                                 "--osm-path=/data/import/planet.osm.pbf",
                                 "--output=/data/tileserver/map.mbtiles",
+                                "--download",
                                 "--force",
                             ],
                             "volumeMounts": [
