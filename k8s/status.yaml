@@ -1523,6 +1523,24 @@ data:
                 "template": {
                     "spec": {
                         "restartPolicy": "Never",
+                        "initContainers": [
+                            {
+                                "name": "preflight",
+                                "image": "busybox:1.36",
+                                "command": ["/bin/sh", "-c"],
+                                "args": [
+                                    "echo '=== Planetiler Tile Generation ==='\n"
+                                    "if [ ! -f /data/import/planet.osm.pbf ]; then\n"
+                                    "  echo 'ERROR: /data/import/planet.osm.pbf not found'\n"
+                                    "  exit 1\n"
+                                    "fi\n"
+                                    "mkdir -p /data/tileserver\n"
+                                ],
+                                "volumeMounts": [
+                                    {"name": "osm-data", "mountPath": "/data"},
+                                ],
+                            }
+                        ],
                         "containers": [
                             {
                                 "name": "tilemaker-import",
@@ -1530,20 +1548,10 @@ data:
                                 "imagePullPolicy": "Always",
                                 "resources": {"requests": {"memory": "2Gi"}, "limits": {"memory": "6Gi"}},
                                 "securityContext": {"runAsUser": 0, "runAsGroup": 0},
-                                "command": ["/bin/sh", "-c"],
                                 "args": [
-                                    "set -e\n"
-                                    "echo '=== Planetiler Tile Generation ==='\n"
-                                    "if [ ! -f /data/import/planet.osm.pbf ]; then\n"
-                                    "  echo 'ERROR: /data/import/planet.osm.pbf not found'\n"
-                                    "  exit 1\n"
-                                    "fi\n"
-                                    "mkdir -p /data/tileserver\n"
-                                    "java -jar /app/planetiler.jar \\\n"
-                                    "  --osm-path=/data/import/planet.osm.pbf \\\n"
-                                    "  --output=/data/tileserver/map.mbtiles \\\n"
-                                    "  --force\n"
-                                    "echo '=== Tile generation complete ==='\n"
+                                    "--osm-path=/data/import/planet.osm.pbf",
+                                    "--output=/data/tileserver/map.mbtiles",
+                                    "--force",
                                 ],
                                 "volumeMounts": [
                                     {"name": "osm-data", "mountPath": "/data"},
