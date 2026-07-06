@@ -1,4 +1,5 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import concurrent.futures
 import json
 import os
 import re
@@ -956,7 +957,7 @@ def load_config():
     config["node_url"] = str(config.get("node_url") or "").strip()
     config["auto_update_enabled"] = bool(config.get("auto_update_enabled"))
     config["auto_update_time"] = str(config.get("auto_update_time") or "03:00")
-    config["detected_node_url"] = detect_node_url()
+    config["detected_node_url"] = detect_node_url() if not config["node_url"] else ""
     return config
 
 
@@ -1164,13 +1165,17 @@ def resolve_country_request(payload):
 
 def collect_status():
     ensure_dirs()
-    services = []
-    for name, host, port, kind, path in SERVICES:
+
+    def _check_service(svc):
+        name, host, port, kind, path = svc
         if kind == "tcp":
             ok, detail = check_tcp(host, port)
         else:
             ok, detail = check_http(f"http://{host}:{port}{path or '/'}")
-        services.append({"name": name, "ok": ok, "detail": detail})
+        return {"name": name, "ok": ok, "detail": detail}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(SERVICES)) as executor:
+        services = list(executor.map(_check_service, SERVICES))
 
     import_files = []
     if os.path.isdir(IMPORT_DIR):
