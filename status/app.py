@@ -465,6 +465,8 @@ INDEX_HTML = """<!doctype html>
     button { border: none; background: #2c7ab5; color: #fff; font-weight: 700; cursor: pointer; }
     button:disabled { opacity: .6; cursor: not-allowed; }
     .subtle { background: #eef4f8; color: #31516d; }
+    .danger { background: #e74c3c; color: #fff; }
+    .danger:hover { background: #c0392b; }
     .progress-wrap { background: #e8edf2; border-radius: 999px; overflow: hidden; height: 12px; margin: 0.65rem 0; }
     .progress-bar { background: linear-gradient(90deg, #2c7ab5, #3aa0ff); height: 100%; width: 0%; transition: width .3s ease; }
     .status-pill { display: inline-block; border-radius: 999px; padding: 0.18rem 0.55rem; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
@@ -568,6 +570,7 @@ INDEX_HTML = """<!doctype html>
   var NODE_URL = "{{NODE_URL}}";
   var ALL_COUNTRIES = [];
   var refreshTimer = null;
+  var WORKFLOW_RUNNING = false;
 
   function updateLinks() {
     var baseUrl = (NODE_URL || (location.protocol + '//' + location.hostname)).replace(/\/+$/, '');
@@ -630,6 +633,7 @@ INDEX_HTML = """<!doctype html>
   function renderWorkflow(workflow) {
     var body = document.getElementById('workflow-body');
     var running = !!(workflow && workflow.running);
+    WORKFLOW_RUNNING = running;
     var phase = workflow && workflow.phase ? workflow.phase : 'idle';
     var pct = workflow && typeof workflow.progress === 'number' ? workflow.progress : 0;
     var statusClass = 'status-ready';
@@ -657,6 +661,9 @@ INDEX_HTML = """<!doctype html>
       '</div>';
     document.getElementById('add-country-btn').disabled = running;
     document.getElementById('build-btn').disabled = running;
+    document.querySelectorAll('.remove-country-btn').forEach(function(btn) {
+      btn.disabled = running;
+    });
   }
 
   function renderCountries(countries) {
@@ -677,9 +684,13 @@ INDEX_HTML = """<!doctype html>
       if (country.imported_at) detail.push('fertig ' + country.imported_at);
       else if (country.added_at) detail.push('hinzugefügt ' + country.added_at);
       if (country.last_error) detail.push('Fehler vorhanden');
+      var slugAttr = esc(country.slug);
       html += '<div class="country-row">' +
         '<div><div class="country-name">' + esc(country.name) + '</div><div class="country-meta">' + esc(detail.join(' · ') || country.url) + '</div></div>' +
-        '<div style="text-align:right"><span class="status-pill ' + badgeClass + '">' + esc(status) + '</span></div>' +
+        '<div style="text-align:right;display:flex;align-items:center;gap:0.4rem;justify-content:flex-end">' +
+        '<span class="status-pill ' + badgeClass + '">' + esc(status) + '</span>' +
+        '<button class="remove-country-btn danger" data-slug="' + slugAttr + '" onclick="removeCountry(\'' + slugAttr + '\')" style="width:auto;padding:0.18rem 0.5rem;font-size:0.72rem;font-weight:700" ' + (WORKFLOW_RUNNING ? 'disabled' : '') + ' title="Land entfernen">×</button>' +
+        '</div>' +
         '</div>';
     });
     html += '</div>';
@@ -750,6 +761,25 @@ INDEX_HTML = """<!doctype html>
       await refresh();
     } catch (err) {
       workflowBody.innerHTML = '<span class="status-pill status-error">fehler</span><pre>' + esc(err) + '</pre>';
+    }
+  }
+
+  async function removeCountry(slug) {
+    if (!confirm('Land wirklich aus der Library entfernen?\\nAlle verbleibenden Länder werden anschließend für einen Rebuild markiert.')) return;
+    try {
+      var resp = await fetch('/api/library/remove', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({slug: slug})
+      });
+      var data = await resp.json();
+      if (!resp.ok) {
+        alert('Fehler: ' + (data.error || 'Unbekannter Fehler'));
+        return;
+      }
+      await refresh();
+    } catch (err) {
+      alert('Fehler: ' + err);
     }
   }
 
@@ -1043,6 +1073,21 @@ def upsert_country_record(country, **updates):
         }
         record.update(updates)
         records.append(record)
+    save_library_records(records)
+
+
+def delete_country_record(slug):
+    records = list_library_records()
+    to_delete = next((r for r in records if r.get("slug") == slug), None)
+    if to_delete is None:
+        raise ValueError(f"Country '{slug}' not found in library.")
+    pbf_path = to_delete.get("pbf_path")
+    if pbf_path and os.path.exists(pbf_path):
+        os.remove(pbf_path)
+    records = [r for r in records if r.get("slug") != slug]
+    for record in records:
+        if record.get("status") == "ready":
+            record["status"] = "queued"
     save_library_records(records)
 
 
@@ -1944,6 +1989,22 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(exc)}, 409)
                 return
             self._send_json({"status": "queued", "country": country})
+            return
+
+        if self.path == "/api/library/remove":
+            slug = payload.get("slug", "").strip()
+            if not slug:
+                self._send_json({"error": "slug is required"}, 400)
+                return
+            if WORKFLOW_LOCK.locked():
+                self._send_json({"error": "A workflow is currently running."}, 409)
+                return
+            try:
+                delete_country_record(slug)
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 404)
+                return
+            self._send_json({"status": "removed", "slug": slug})
             return
 
         if self.path == "/api/library/build":
