@@ -57,6 +57,7 @@ spec:
         - name: tileserver-gl
           image: maptiler/tileserver-gl:latest
           imagePullPolicy: Always
+          args: ["/data/config.json"]
           env:
             - name: PORT
               value: "80"
