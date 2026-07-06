@@ -1558,8 +1558,12 @@ data:
                                 "args": [
                                     "--osm-path=/data/import/planet.osm.pbf",
                                     "--output=/data/tileserver/map.mbtiles",
-                                    "--download",
                                     "--force",
+                                    # Skip zoom 0-5 world-overview (NaturalEarth) tiles; the map is
+                                    # centered on the local extract so low-zoom world tiles are not
+                                    # needed and would cause MapLibre to overzoom them outside the
+                                    # extract area, producing a distorted world-map appearance.
+                                    "--minzoom=6",
                                 ],
                                 "volumeMounts": [
                                     {"name": "osm-data", "mountPath": "/data"},

@@ -68,8 +68,8 @@ data:
           </div>
         </div>
         <div class="row2">
-          <div><label>Breitengrad</label><input id="startLat" value="52.5163" step="any"></div>
-          <div><label>Längengrad</label><input id="startLon" value="13.3777" step="any"></div>
+          <div><label>Breitengrad</label><input id="startLat" value="35.1732" step="any"></div>
+          <div><label>Längengrad</label><input id="startLon" value="33.3736" step="any"></div>
         </div>
 
         <div class="section-title">Ziel</div>
@@ -81,8 +81,8 @@ data:
           </div>
         </div>
         <div class="row2">
-          <div><label>Breitengrad</label><input id="endLat" value="52.5219" step="any"></div>
-          <div><label>Längengrad</label><input id="endLon" value="13.4132" step="any"></div>
+          <div><label>Breitengrad</label><input id="endLat" value="34.6857" step="any"></div>
+          <div><label>Längengrad</label><input id="endLon" value="33.0372" step="any"></div>
         </div>
 
         <div class="section-title">Optionen</div>
@@ -140,8 +140,8 @@ data:
           {id:'waterway',type:'line',source:'openmaptiles','source-layer':'waterway',paint:{'line-color':'#9cc0d4','line-width':1}},
           {id:'boundary-country',type:'line',source:'openmaptiles','source-layer':'boundary',filter:['==','admin_level',2],paint:{'line-color':'#9e9cab','line-width':['interpolate',['linear'],['zoom'],2,0.5,6,1.5,10,2]}},
           {id:'boundary-state',type:'line',source:'openmaptiles','source-layer':'boundary',filter:['==','admin_level',4],minzoom:4,paint:{'line-color':'#b0adb8','line-width':0.8,'line-dasharray':[3,2]}},
-          {id:'road',type:'line',source:'openmaptiles','source-layer':'transportation',filter:['in','class','minor','service','track','path'],minzoom:12,paint:{'line-color':'#fff','line-width':['interpolate',['linear'],['zoom'],12,0.5,14,1,16,3]}},
-          {id:'road-secondary',type:'line',source:'openmaptiles','source-layer':'transportation',filter:['in','class','secondary','tertiary'],minzoom:9,paint:{'line-color':'#fff','line-width':['interpolate',['linear'],['zoom'],9,0.5,12,1.5,14,3,16,5]}},
+          {id:'road',type:'line',source:'openmaptiles','source-layer':'transportation',filter:['in','class','minor','service','track','path'],minzoom:12,paint:{'line-color':'#d4cfc8','line-width':['interpolate',['linear'],['zoom'],12,0.5,14,1,16,3]}},
+          {id:'road-secondary',type:'line',source:'openmaptiles','source-layer':'transportation',filter:['in','class','secondary','tertiary'],minzoom:9,paint:{'line-color':'#c8c3ba','line-width':['interpolate',['linear'],['zoom'],9,0.5,12,1.5,14,3,16,5]}},
           {id:'road-primary',type:'line',source:'openmaptiles','source-layer':'transportation',filter:['==','class','primary'],minzoom:7,paint:{'line-color':'#fcd354','line-width':['interpolate',['linear'],['zoom'],7,0.5,10,2,14,5,16,8]}},
           {id:'road-major',type:'line',source:'openmaptiles','source-layer':'transportation',filter:['in','class','motorway','trunk'],paint:{'line-color':'#f9a825','line-width':['interpolate',['linear'],['zoom'],6,1,10,3,14,7,16,12]}},
           {id:'building',type:'fill',source:'openmaptiles','source-layer':'building',minzoom:14,paint:{'fill-color':'#d9d0c9','fill-opacity':0.9}},
@@ -158,8 +158,8 @@ data:
           {id:'place-hamlet',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['in','class','hamlet','isolated_dwelling'],minzoom:13,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['Noto Sans Regular'],'text-size':10},paint:{'text-color':'#666','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}}
         ]
       },
-      center: [13.405, 52.52],
-      zoom: 13,
+      center: [33.3736, 35.1732],
+      zoom: 9,
       attributionControl: true
     });
 
