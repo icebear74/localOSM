@@ -57,6 +57,44 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Safety check: BASE_DIR must be a deep, non-system path
+# ---------------------------------------------------------------------------
+is_safe_basedir() {
+  local dir
+  dir="$(realpath -m "$1" 2>/dev/null || echo "$1")"
+
+  # Must be absolute
+  [[ "${dir}" == /* ]] || return 1
+
+  # Must not be a known dangerous system prefix
+  local unsafe_prefixes=(
+    "/"
+    "/bin" "/boot" "/dev" "/etc" "/home" "/lib" "/lib64"
+    "/media" "/opt" "/proc" "/root" "/run" "/sbin"
+    "/srv" "/sys" "/tmp" "/usr" "/var"
+  )
+  for prefix in "${unsafe_prefixes[@]}"; do
+    if [ "${dir}" = "${prefix}" ]; then
+      return 1
+    fi
+  done
+
+  # Must be at least 3 levels deep (e.g. /mnt/data/OSM)
+  local depth
+  depth="$(echo "${dir}" | tr -cd '/' | wc -c)"
+  [ "${depth}" -ge 3 ] || return 1
+
+  return 0
+}
+
+if ! is_safe_basedir "${BASE_DIR}"; then
+  echo "ERROR: BASE_DIR='${BASE_DIR}' does not look like a safe data directory." >&2
+  echo "       It must be an absolute path at least 3 levels deep and must not" >&2
+  echo "       point to a system directory (/, /var, /home, …)." >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
 # Auto-detect node URL if not provided
 # ---------------------------------------------------------------------------
 if [ -z "${NODE_URL}" ]; then
@@ -136,7 +174,7 @@ if [ "$CLEAN" = true ]; then
   fi
 
   echo ">>> Deleting contents of data directory ${BASE_DIR} …"
-  ${SUDO} rm -Rf "${BASE_DIR:?}/"*
+  ${SUDO} find "${BASE_DIR:?}" -mindepth 1 -delete
   echo "    Data directory contents deleted."
   echo ""
 fi
