@@ -129,7 +129,7 @@ data:
             url: tileHost + '/data/v3.json'
           }
         },
-        glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
+        glyphs: 'http://' + location.hostname + ':30085/fonts/{fontstack}/{range}.pbf',
         layers: [
           {id:'background',type:'background',paint:{'background-color':'#f2efe9'}},
           {id:'landcover-wood',type:'fill',source:'openmaptiles','source-layer':'landcover',filter:['in','class','wood','forest'],paint:{'fill-color':'#d0e8c0','fill-opacity':0.6}},
