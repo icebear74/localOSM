@@ -413,18 +413,26 @@ class KubeClient:
 
 KUBE = KubeClient(NAMESPACE)
 
+_detected_node_url_cache: "str | None" = None
+
 
 def detect_node_url():
     """Return a node URL for service links, or empty string if unavailable.
 
     Priority: OSM_NODE_URL env var → first InternalIP from the K8s node list.
+    Result is cached after the first successful K8s API call to avoid repeated
+    network round-trips on every page load.
     """
+    global _detected_node_url_cache
     if OSM_NODE_URL:
         return OSM_NODE_URL
+    if _detected_node_url_cache is not None:
+        return _detected_node_url_cache
     ips = KUBE.get_node_ips()
-    if ips:
-        return f"http://{ips[0]}"
-    return ""
+    result = f"http://{ips[0]}" if ips else ""
+    if result:
+        _detected_node_url_cache = result
+    return result
 
 
 INDEX_HTML = """<!doctype html>
