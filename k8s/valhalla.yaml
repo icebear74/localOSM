@@ -36,7 +36,7 @@ spec:
           image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
           imagePullPolicy: Always
           command: ["/bin/bash", "-c"]
-          args: ["ulimit -n 65536 && exec /valhalla/scripts/run.sh"]
+          args: ["ulimit -n 65536 && exec /valhalla/scripts/run.sh build_tiles"]
           env:
             # Use the pre-built tile archive; skip rebuilding from any PBF in the folder
             - name: use_tiles_ignore_pbf
