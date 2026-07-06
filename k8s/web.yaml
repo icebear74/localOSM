@@ -24,7 +24,7 @@ data:
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <title>localOSM – Routing &amp; Karte</title>
-      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+      <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css"/>
       <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: Arial, sans-serif; display: flex; flex-direction: column; height: 100vh; }
@@ -112,44 +112,83 @@ data:
       <div id="map"></div>
     </div>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
     <script>
     // Fix status link hostname
     document.getElementById('status-link').href =
       document.getElementById('status-link').href.replace('NODEIP', location.hostname);
 
-    var map = L.map('map').setView([52.52, 13.405], 13);
-    var tileUrl = 'http://' + location.hostname + ':30085/styles/osm/{z}/{x}/{y}.png';
-    var tileAttrib = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
-    var tileLayer = L.tileLayer(tileUrl, {
-      attribution: tileAttrib,
-      maxZoom: 19,
-      errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
-    }).addTo(map);
+    var tileHost = 'http://' + location.hostname + ':30085';
+    var map = new maplibregl.Map({
+      container: 'map',
+      style: {
+        version: 8,
+        sources: {
+          openmaptiles: {
+            type: 'vector',
+            url: tileHost + '/data/v3.json'
+          }
+        },
+        glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
+        layers: [
+          {id:'background',type:'background',paint:{'background-color':'#f2efe9'}},
+          {id:'landcover-wood',type:'fill',source:'openmaptiles','source-layer':'landcover',filter:['in','class','wood','forest'],paint:{'fill-color':'#d0e8c0','fill-opacity':0.6}},
+          {id:'landcover-grass',type:'fill',source:'openmaptiles','source-layer':'landcover',filter:['in','class','grass','farmland','agriculture'],paint:{'fill-color':'#e8f0d0','fill-opacity':0.5}},
+          {id:'landuse-residential',type:'fill',source:'openmaptiles','source-layer':'landuse',filter:['in','class','residential','commercial','industrial'],paint:{'fill-color':'#e8e0d8','fill-opacity':0.5}},
+          {id:'landuse-green',type:'fill',source:'openmaptiles','source-layer':'landuse',filter:['in','class','grass','park','meadow','forest','wood','cemetery'],paint:{'fill-color':'#d0e8c0'}},
+          {id:'water',type:'fill',source:'openmaptiles','source-layer':'water',paint:{'fill-color':'#9cc0d4'}},
+          {id:'waterway',type:'line',source:'openmaptiles','source-layer':'waterway',paint:{'line-color':'#9cc0d4','line-width':1}},
+          {id:'boundary-country',type:'line',source:'openmaptiles','source-layer':'boundary',filter:['==','admin_level',2],paint:{'line-color':'#9e9cab','line-width':['interpolate',['linear'],['zoom'],2,0.5,6,1.5,10,2]}},
+          {id:'boundary-state',type:'line',source:'openmaptiles','source-layer':'boundary',filter:['==','admin_level',4],minzoom:4,paint:{'line-color':'#b0adb8','line-width':0.8,'line-dasharray':[3,2]}},
+          {id:'road',type:'line',source:'openmaptiles','source-layer':'transportation',filter:['in','class','minor','service','track','path'],minzoom:12,paint:{'line-color':'#fff','line-width':['interpolate',['linear'],['zoom'],12,0.5,14,1,16,3]}},
+          {id:'road-secondary',type:'line',source:'openmaptiles','source-layer':'transportation',filter:['in','class','secondary','tertiary'],minzoom:9,paint:{'line-color':'#fff','line-width':['interpolate',['linear'],['zoom'],9,0.5,12,1.5,14,3,16,5]}},
+          {id:'road-primary',type:'line',source:'openmaptiles','source-layer':'transportation',filter:['==','class','primary'],minzoom:7,paint:{'line-color':'#fcd354','line-width':['interpolate',['linear'],['zoom'],7,0.5,10,2,14,5,16,8]}},
+          {id:'road-major',type:'line',source:'openmaptiles','source-layer':'transportation',filter:['in','class','motorway','trunk'],paint:{'line-color':'#f9a825','line-width':['interpolate',['linear'],['zoom'],6,1,10,3,14,7,16,12]}},
+          {id:'building',type:'fill',source:'openmaptiles','source-layer':'building',minzoom:14,paint:{'fill-color':'#d9d0c9','fill-opacity':0.9}},
+          {id:'water-name',type:'symbol',source:'openmaptiles','source-layer':'water_name',layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['Noto Sans Regular'],'text-size':['interpolate',['linear'],['zoom'],4,10,10,14],'symbol-placement':'point'},paint:{'text-color':'#5b8db8','text-halo-color':'#fff','text-halo-width':1}},
+          {id:'road-label-minor',type:'symbol',source:'openmaptiles','source-layer':'transportation_name',filter:['in','class','minor','service','track'],minzoom:15,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['Noto Sans Regular'],'symbol-placement':'line','text-size':10,'text-max-angle':30,'text-padding':5},paint:{'text-color':'#555','text-halo-color':'#fff','text-halo-width':1.5}},
+          {id:'road-label-secondary',type:'symbol',source:'openmaptiles','source-layer':'transportation_name',filter:['in','class','secondary','tertiary'],minzoom:13,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['Noto Sans Regular'],'symbol-placement':'line','text-size':11,'text-max-angle':30},paint:{'text-color':'#555','text-halo-color':'#fff','text-halo-width':1.5}},
+          {id:'road-label-primary',type:'symbol',source:'openmaptiles','source-layer':'transportation_name',filter:['in','class','primary','trunk','motorway'],minzoom:10,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['Noto Sans Regular'],'symbol-placement':'line','text-size':12,'text-max-angle':30},paint:{'text-color':'#333','text-halo-color':'#fff','text-halo-width':1.5}},
+          {id:'place-country',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['==','class','country'],layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['Noto Sans Regular'],'text-size':['interpolate',['linear'],['zoom'],2,10,6,16,8,18]},paint:{'text-color':'#333','text-halo-color':'rgba(255,255,255,0.8)','text-halo-width':2}},
+          {id:'place-state',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['==','class','state'],minzoom:5,maxzoom:12,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['Noto Sans Regular'],'text-size':['interpolate',['linear'],['zoom'],5,10,10,14]},paint:{'text-color':'#555','text-halo-color':'rgba(255,255,255,0.8)','text-halo-width':1.5}},
+          {id:'place-city',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['in','class','city'],layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['Noto Sans Regular'],'text-size':['interpolate',['linear'],['zoom'],6,11,10,15,14,18]},paint:{'text-color':'#222','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':2}},
+          {id:'place-town',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['==','class','town'],minzoom:8,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['Noto Sans Regular'],'text-size':['interpolate',['linear'],['zoom'],8,10,12,14,16,17]},paint:{'text-color':'#333','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}},
+          {id:'place-village',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['==','class','village'],minzoom:10,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['Noto Sans Regular'],'text-size':['interpolate',['linear'],['zoom'],10,10,14,13]},paint:{'text-color':'#444','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}},
+          {id:'place-suburb',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['in','class','suburb','quarter','neighbourhood'],minzoom:12,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['Noto Sans Regular'],'text-size':11},paint:{'text-color':'#555','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}},
+          {id:'place-hamlet',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['in','class','hamlet','isolated_dwelling'],minzoom:13,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['Noto Sans Regular'],'text-size':10},paint:{'text-color':'#666','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}}
+        ]
+      },
+      center: [13.405, 52.52],
+      zoom: 13,
+      attributionControl: true
+    });
 
     var markers = { start: null, end: null };
-    var routeLayer = null;
     var clickState = 0; // 0=start, 1=end
 
-    var iconStart = L.divIcon({html:'<div style="background:#2c7ab5;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:bold;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)">S</div>', iconSize:[28,28], iconAnchor:[14,14], className:''});
-    var iconEnd   = L.divIcon({html:'<div style="background:#c0392b;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:bold;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)">Z</div>', iconSize:[28,28], iconAnchor:[14,14], className:''});
-
     function setMarker(which, lat, lon) {
-      var icon = which === 'start' ? iconStart : iconEnd;
-      if (markers[which]) map.removeLayer(markers[which]);
-      markers[which] = L.marker([lat, lon], {icon: icon}).addTo(map);
+      var bg = which === 'start' ? '#2c7ab5' : '#c0392b';
+      var label = which === 'start' ? 'S' : 'Z';
+      var el = document.createElement('div');
+      el.style.cssText = 'background:' + bg + ';color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:bold;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)';
+      el.textContent = label;
+      if (markers[which]) markers[which].remove();
+      markers[which] = new maplibregl.Marker({element: el, anchor: 'center'})
+        .setLngLat([lon, lat])
+        .addTo(map);
       document.getElementById(which + 'Lat').value = lat.toFixed(6);
       document.getElementById(which + 'Lon').value = lon.toFixed(6);
     }
 
     map.on('click', function(e) {
+      var lat = e.lngLat.lat, lon = e.lngLat.lng;
       if (clickState === 0) {
-        setMarker('start', e.latlng.lat, e.latlng.lng);
-        reverseGeocode('start', e.latlng.lat, e.latlng.lng);
+        setMarker('start', lat, lon);
+        reverseGeocode('start', lat, lon);
         clickState = 1;
       } else {
-        setMarker('end', e.latlng.lat, e.latlng.lng);
-        reverseGeocode('end', e.latlng.lat, e.latlng.lng);
+        setMarker('end', lat, lon);
+        reverseGeocode('end', lat, lon);
         clickState = 0;
         doRoute();
       }
@@ -182,15 +221,24 @@ data:
     }
 
     function drawRoute(trip) {
-      if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
       var allCoords = [];
       (trip.legs || []).forEach(function(leg) {
-        allCoords = allCoords.concat(decodePolyline(leg.shape || ''));
+        decodePolyline(leg.shape || '').forEach(function(c) {
+          allCoords.push([c[1], c[0]]); // MapLibre GL uses [lng, lat]
+        });
       });
-      if (allCoords.length > 0) {
-        routeLayer = L.polyline(allCoords, {color: '#2c7ab5', weight: 5, opacity: 0.8}).addTo(map);
-        map.fitBounds(routeLayer.getBounds(), {padding: [30, 30]});
+      if (allCoords.length === 0) return;
+      var geojson = {type:'Feature',geometry:{type:'LineString',coordinates:allCoords}};
+      if (map.getSource('route')) {
+        map.getSource('route').setData(geojson);
+      } else {
+        map.addSource('route', {type:'geojson', data: geojson});
+        map.addLayer({id:'route-line',type:'line',source:'route',
+          paint:{'line-color':'#2c7ab5','line-width':5,'line-opacity':0.8}});
       }
+      var bounds = allCoords.reduce(function(b, c) { return b.extend(c); },
+        new maplibregl.LngLatBounds(allCoords[0], allCoords[0]));
+      map.fitBounds(bounds, {padding: 30});
     }
 
     function fmtDuration(secs) {
@@ -275,7 +323,7 @@ data:
         if (results.length === 0) { box.innerHTML = '<span class="err">Keine Treffer fuer: ' + addrInput + '</span>'; return; }
         var r = results[0];
         setMarker(which, parseFloat(r.lat), parseFloat(r.lon));
-        map.setView([parseFloat(r.lat), parseFloat(r.lon)], 15);
+        map.flyTo({center: [parseFloat(r.lon), parseFloat(r.lat)], zoom: 15});
         box.innerHTML = '<span class="ok">&#10003; ' + (which === 'start' ? 'Start' : 'Ziel') + ' gesetzt</span><br>' + (r.display_name || '');
       } catch(err) {
         box.innerHTML = '<span class="err">Geocoding-Fehler: ' + err + '</span>';

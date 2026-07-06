@@ -35,6 +35,9 @@ spec:
         - name: valhalla
           image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
           imagePullPolicy: Always
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
           command: ["/bin/bash", "-c"]
           args: ["ulimit -n 65536 && exec /valhalla/scripts/run.sh build_tiles"]
           env:
