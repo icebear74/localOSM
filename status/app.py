@@ -414,20 +414,25 @@ class KubeClient:
 KUBE = KubeClient(NAMESPACE)
 
 _detected_node_url_cache: "str | None" = None
+_detected_node_url_cache_time: float = 0.0
+_NODE_URL_EMPTY_CACHE_TTL = 30.0  # seconds to suppress retries after a failed lookup
 
 
 def detect_node_url():
     """Return a node URL for service links, or empty string if unavailable.
 
     Priority: OSM_NODE_URL env var → first InternalIP from the K8s node list.
-    Result is cached after the first successful K8s API call to avoid repeated
-    network round-trips on every page load.
+    Successful results are cached permanently; failed lookups are suppressed for
+    _NODE_URL_EMPTY_CACHE_TTL seconds to avoid a K8s API round-trip on every page load.
     """
-    global _detected_node_url_cache
+    global _detected_node_url_cache, _detected_node_url_cache_time
     if OSM_NODE_URL:
         return OSM_NODE_URL
     if _detected_node_url_cache is not None:
         return _detected_node_url_cache
+    if time.monotonic() - _detected_node_url_cache_time < _NODE_URL_EMPTY_CACHE_TTL:
+        return ""
+    _detected_node_url_cache_time = time.monotonic()
     ips = KUBE.get_node_ips()
     result = f"http://{ips[0]}" if ips else ""
     if result:
@@ -582,7 +587,7 @@ INDEX_HTML = """<!doctype html>
   var WORKFLOW_RUNNING = false;
 
   function updateLinks() {
-    var baseUrl = (NODE_URL || (location.protocol + '//' + location.hostname)).replace(/\/+$/, '');
+    var baseUrl = (NODE_URL || (location.protocol + '//' + location.hostname)).replace(/\\/+$/, '');
     ['web-link','valhalla-link','nominatim-link','tileserver-link'].forEach(function(id) {
       var a = document.getElementById(id);
       if (a && a.dataset.port) a.href = baseUrl + ':' + a.dataset.port + '/';
@@ -1172,7 +1177,10 @@ def resolve_country_request(payload):
 
 
 def collect_status():
-    ensure_dirs()
+    try:
+        ensure_dirs()
+    except OSError:
+        pass
 
     def _check_service(svc):
         name, host, port, kind, path = svc
@@ -1182,8 +1190,26 @@ def collect_status():
             ok, detail = check_http(f"http://{host}:{port}{path or '/'}")
         return {"name": name, "ok": ok, "detail": detail}
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(SERVICES)) as executor:
-        services = list(executor.map(_check_service, SERVICES))
+    # Use wait() with an explicit timeout so a hung DNS lookup cannot block the
+    # entire /api/status response indefinitely.  The executor is shut down
+    # without waiting so that the few threads that are still resolving DNS can
+    # finish in the background rather than blocking the response.
+    svc_pool = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(SERVICES)))
+    try:
+        fs = {svc_pool.submit(_check_service, svc): svc for svc in SERVICES}
+        done, pending = concurrent.futures.wait(fs, timeout=8)
+        services = []
+        for f in done:
+            try:
+                services.append(f.result())
+            except Exception:  # noqa: BLE001
+                services.append({"name": fs[f][0], "ok": False, "detail": "check error"})
+        for f in pending:
+            services.append({"name": fs[f][0], "ok": False, "detail": "timed out"})
+    except Exception:  # noqa: BLE001
+        services = [{"name": svc[0], "ok": False, "detail": "unavailable"} for svc in SERVICES]
+    finally:
+        svc_pool.shutdown(wait=False)
 
     import_files = []
     if os.path.isdir(IMPORT_DIR):
