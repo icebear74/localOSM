@@ -1483,7 +1483,9 @@ data:
                                     "mkdir -p /data/tiles\n"
                                     "cp /config/valhalla.json /tmp/valhalla.json\n"
                                     "valhalla_build_tiles -c /tmp/valhalla.json /data/import/planet.osm.pbf\n"
-                                    "echo '=== Import complete. Routing graph stored at /data/tiles ==='\n"
+                                    "echo '=== Tile build complete. Creating tile extract archive ...'\n"
+                                    "valhalla_build_extract -c /tmp/valhalla.json -O /data/valhalla_tiles.tar\n"
+                                    "echo '=== Import complete. Routing graph and tile extract stored at /data ==='\n"
                                 ],
                                 "volumeMounts": [
                                     {"name": "import-data", "mountPath": "/data/import"},
