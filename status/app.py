@@ -17,6 +17,7 @@ HOST = os.environ.get("STATUS_HOST", "0.0.0.0")
 PORT = int(os.environ.get("STATUS_PORT", "8080"))
 DATA_DIR = os.environ.get("OSM_DATA_DIR", "/mnt/data/OSM")
 NAMESPACE = os.environ.get("OSM_NAMESPACE", "osm")
+OSM_NODE_URL = os.environ.get("OSM_NODE_URL", "").strip()
 
 STATUS_DIR = os.path.join(DATA_DIR, "status")
 LIBRARY_DIR = os.path.join(DATA_DIR, "library")
@@ -395,8 +396,34 @@ class KubeClient:
             params={"labelSelector": label_selector},
         )
 
+    def get_node_ips(self):
+        """Return a list of InternalIP addresses for all cluster nodes."""
+        try:
+            nodes = self._request("GET", "/api/v1/nodes")
+            ips = []
+            for node in nodes.get("items", []):
+                for addr in node.get("status", {}).get("addresses", []):
+                    if addr.get("type") == "InternalIP":
+                        ips.append(addr["address"])
+            return ips
+        except Exception:  # noqa: BLE001
+            return []
+
 
 KUBE = KubeClient(NAMESPACE)
+
+
+def detect_node_url():
+    """Return a node URL for service links, or empty string if unavailable.
+
+    Priority: OSM_NODE_URL env var → first InternalIP from the K8s node list.
+    """
+    if OSM_NODE_URL:
+        return OSM_NODE_URL
+    ips = KUBE.get_node_ips()
+    if ips:
+        return f"http://{ips[0]}"
+    return ""
 
 
 INDEX_HTML = """<!doctype html>
@@ -473,7 +500,7 @@ INDEX_HTML = """<!doctype html>
           <input id="node-url-input" placeholder="http://192.168.1.100" value="{{NODE_URL}}">
         </div>
         <button onclick="saveConfig()">Speichern</button>
-        <div class="hint">Optional: explizite Node-URL für alle Service-Links.</div>
+        <div id="node-url-hint" class="hint">Optional: explizite Node-URL für alle Service-Links.</div>
       </div>
     </div>
 
@@ -730,10 +757,22 @@ INDEX_HTML = """<!doctype html>
     try {
       var resp = await fetch('/api/config');
       var cfg = await resp.json();
-      document.getElementById('node-url-input').value = cfg.node_url || '';
+      var hintEl = document.getElementById('node-url-hint');
+      if (cfg.node_url) {
+        document.getElementById('node-url-input').value = cfg.node_url;
+        NODE_URL = cfg.node_url;
+        if (hintEl) hintEl.textContent = 'Explizite Node-URL für alle Service-Links.';
+      } else if (cfg.detected_node_url) {
+        document.getElementById('node-url-input').value = cfg.detected_node_url;
+        NODE_URL = cfg.detected_node_url;
+        if (hintEl) hintEl.textContent = 'Automatisch erkannte Node-URL. Zum Überschreiben speichern.';
+      } else {
+        document.getElementById('node-url-input').value = '';
+        NODE_URL = '';
+        if (hintEl) hintEl.textContent = 'Node-URL konnte nicht ermittelt werden. Bitte manuell eintragen.';
+      }
       document.getElementById('auto-update-enabled').checked = !!cfg.auto_update_enabled;
       document.getElementById('auto-update-time').value = cfg.auto_update_time || '03:00';
-      NODE_URL = cfg.node_url || '';
       updateLinks();
       updateNextRunDisplay(cfg);
     } catch(e) {}
@@ -882,6 +921,7 @@ def load_config():
     config["node_url"] = str(config.get("node_url") or "").strip()
     config["auto_update_enabled"] = bool(config.get("auto_update_enabled"))
     config["auto_update_time"] = str(config.get("auto_update_time") or "03:00")
+    config["detected_node_url"] = detect_node_url()
     return config
 
 
@@ -1831,7 +1871,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path in {"/", "/index.html"}:
-            body = INDEX_HTML.replace("{{NODE_URL}}", load_config().get("node_url", "")).encode("utf-8")
+            cfg = load_config()
+            effective_url = cfg.get("node_url") or cfg.get("detected_node_url", "")
+            body = INDEX_HTML.replace("{{NODE_URL}}", effective_url).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))

@@ -6,19 +6,23 @@ NAMESPACE="osm"
 BASE_DIR="/mnt/data/OSM"
 DEPLOYMENTS=(postgres tileserver-gl nominatim valhalla status web)
 CLEAN=false
+NODE_URL=""
 
 # ---------------------------------------------------------------------------
 # Usage
 # ---------------------------------------------------------------------------
 usage() {
   cat <<EOF
-Usage: $0 [--clean]
+Usage: $0 [--clean] [--node-url <url>]
 
 Options:
-  --clean   Remove the existing Kubernetes namespace, all OSM data on disk, and
-            perform a clean install from scratch. You will be prompted before any
-            data is deleted.
-  -h        Show this help text.
+  --clean             Remove the existing Kubernetes namespace, all OSM data on
+                      disk, and perform a clean install from scratch. You will
+                      be prompted before any data is deleted.
+  --node-url <url>    Set the node base URL used for service links in the
+                      status dashboard (e.g. http://192.168.1.100). If omitted,
+                      the IP is auto-detected from the first cluster node.
+  -h                  Show this help text.
 EOF
 }
 
@@ -28,6 +32,7 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --clean) CLEAN=true ; shift ;;
+    --node-url) NODE_URL="$2" ; shift 2 ;;
     -h|--help) usage ; exit 0 ;;
     *) echo "Unknown option: $1" >&2 ; usage >&2 ; exit 1 ;;
   esac
@@ -49,6 +54,20 @@ fi
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
   SUDO="sudo"
+fi
+
+# ---------------------------------------------------------------------------
+# Auto-detect node URL if not provided
+# ---------------------------------------------------------------------------
+if [ -z "${NODE_URL}" ]; then
+  DETECTED_IP="$(kubectl get nodes \
+    -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || true)"
+  if [ -n "${DETECTED_IP}" ]; then
+    NODE_URL="http://${DETECTED_IP}"
+    echo ">>> Auto-detected node IP: ${DETECTED_IP} → using ${NODE_URL}"
+  else
+    echo "    WARN: Could not auto-detect node IP. Set node URL manually in the status dashboard."
+  fi
 fi
 
 namespace_exists() {
@@ -148,6 +167,27 @@ ${SUDO} chown -R 1000:1000 "${BASE_DIR}/status"     2>/dev/null || true
 echo "    Directories ready."
 
 # ---------------------------------------------------------------------------
+# Write node URL to status config (preserves existing config keys)
+# ---------------------------------------------------------------------------
+CONFIG_PATH="${BASE_DIR}/status/config.json"
+if [ -n "${NODE_URL}" ]; then
+  echo ">>> Writing node URL to ${CONFIG_PATH} …"
+  EXISTING_CONFIG="{}"
+  if [ -f "${CONFIG_PATH}" ]; then
+    EXISTING_CONFIG="$(cat "${CONFIG_PATH}")"
+  fi
+  UPDATED_CONFIG="$(echo "${EXISTING_CONFIG}" | python3 -c "
+import json, sys
+cfg = json.load(sys.stdin)
+import os
+cfg['node_url'] = os.environ['NODE_URL']
+print(json.dumps(cfg, indent=2, sort_keys=True))
+" NODE_URL="${NODE_URL}" 2>/dev/null || echo "{\"node_url\": \"${NODE_URL}\"}")"
+  echo "${UPDATED_CONFIG}" | ${SUDO} tee "${CONFIG_PATH}" >/dev/null
+  echo "    Node URL set to: ${NODE_URL}"
+fi
+
+# ---------------------------------------------------------------------------
 # Apply Kubernetes manifests
 # ---------------------------------------------------------------------------
 echo ""
@@ -187,6 +227,7 @@ done
 # ---------------------------------------------------------------------------
 # Done
 # ---------------------------------------------------------------------------
+NODE_DISPLAY="${NODE_URL:-<node-ip>}"
 cat <<EOF
 
 ========================================
@@ -194,11 +235,11 @@ cat <<EOF
 ========================================
 
 Services:
-  Status dashboard : http://<node-ip>:30083
-  Web / Routing UI : http://<node-ip>:30084
-  Nominatim        : http://<node-ip>:30081  (starts after OSM data import)
-  Valhalla         : http://<node-ip>:30082  (starts after OSM data import)
-  TileServer GL    : http://<node-ip>:30085
+  Status dashboard : ${NODE_DISPLAY}:30083
+  Web / Routing UI : ${NODE_DISPLAY}:30084
+  Nominatim        : ${NODE_DISPLAY}:30081  (starts after OSM data import)
+  Valhalla         : ${NODE_DISPLAY}:30082  (starts after OSM data import)
+  TileServer GL    : ${NODE_DISPLAY}:30085
 
 NOTE: Nominatim and Valhalla will stay in "Init" state until OSM data has
 been downloaded and imported. Use the Status dashboard or run:
