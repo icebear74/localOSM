@@ -136,7 +136,7 @@ if [ "$CLEAN" = true ]; then
   fi
 
   echo ">>> Deleting contents of data directory ${BASE_DIR} …"
-  ${SUDO} find "${BASE_DIR:?}" -mindepth 1 -delete
+  ${SUDO} rm -Rf "${BASE_DIR:?}/"*
   echo "    Data directory contents deleted."
   echo ""
 fi
