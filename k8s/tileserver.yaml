@@ -23,12 +23,14 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
+              # Ensure the fonts directory always exists so TileServer-GL does not
+              # crash with ENOENT when apk/git is unavailable and the download is skipped.
+              mkdir -p /data/fonts
               # Download Noto Sans Regular PBF glyph fonts once; cached in /data/fonts on the host.
               # After the first run this is fully offline — no CDN needed at runtime.
               if [ ! -d "/data/fonts/Noto Sans Regular" ]; then
                 echo "Downloading OpenMapTiles Noto Sans fonts (one-time setup)..."
                 apk add --no-cache --quiet git && \
-                  mkdir -p /data/fonts && \
                   git -c advice.detachedHead=false clone \
                     --depth=1 --filter=blob:none --sparse \
                     https://github.com/openmaptiles/fonts.git /tmp/omtfonts && \
