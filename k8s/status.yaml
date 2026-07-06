@@ -1484,7 +1484,7 @@ data:
                                     "cp /config/valhalla.json /tmp/valhalla.json\n"
                                     "valhalla_build_tiles -c /tmp/valhalla.json /data/import/planet.osm.pbf\n"
                                     "echo '=== Tile build complete. Creating tile extract archive ...'\n"
-                                    "valhalla_build_extract -c /tmp/valhalla.json -O /data/valhalla_tiles.tar\n"
+                                    "valhalla_build_extract -c /tmp/valhalla.json -e /data/valhalla_tiles.tar -O\n"
                                     "echo '=== Import complete. Routing graph and tile extract stored at /data ==='\n"
                                 ],
                                 "volumeMounts": [
