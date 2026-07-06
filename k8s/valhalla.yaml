@@ -44,6 +44,8 @@ spec:
               value: "True"
             - name: force_rebuild
               value: "False"
+            - name: server_threads
+              value: "8"
           ports:
             - containerPort: 8002
           volumeMounts:
