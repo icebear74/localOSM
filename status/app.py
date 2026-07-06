@@ -1471,7 +1471,7 @@ def build_tileserver_job_manifest():
                                 "  exit 1\n"
                                 "fi\n"
                                 "mkdir -p /data/tileserver\n"
-                                "java -jar /planetiler.jar \\\n"
+                                "java -jar /app/planetiler.jar \\\n"
                                 "  --osm-path=/data/import/planet.osm.pbf \\\n"
                                 "  --output=/data/tileserver/map.mbtiles \\\n"
                                 "  --force\n"
