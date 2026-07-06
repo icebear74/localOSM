@@ -177,9 +177,8 @@ if [ -n "${NODE_URL}" ]; then
     EXISTING_CONFIG="$(cat "${CONFIG_PATH}")"
   fi
   UPDATED_CONFIG="$(echo "${EXISTING_CONFIG}" | python3 -c "
-import json, sys
+import json, os, sys
 cfg = json.load(sys.stdin)
-import os
 cfg['node_url'] = os.environ['NODE_URL']
 print(json.dumps(cfg, indent=2, sort_keys=True))
 " NODE_URL="${NODE_URL}" 2>/dev/null || echo "{\"node_url\": \"${NODE_URL}\"}")"
