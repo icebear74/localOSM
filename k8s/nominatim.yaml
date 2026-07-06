@@ -54,7 +54,6 @@ spec:
               mountPath: /var/lib/postgresql/16/main
             - name: import-data
               mountPath: /nominatim/data/import
-              readOnly: true
       volumes:
         - name: nominatim-data
           hostPath:
