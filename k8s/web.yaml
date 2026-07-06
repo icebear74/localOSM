@@ -16,6 +16,7 @@ data:
     PORT = int(os.environ.get("WEB_PORT", "8080"))
     VALHALLA_URL = os.environ.get("VALHALLA_URL", "http://valhalla.osm.svc.cluster.local:8002")
     NOMINATIM_URL = os.environ.get("NOMINATIM_URL", "http://nominatim.osm.svc.cluster.local:8080")
+    STATUS_URL = os.environ.get("STATUS_URL", "")
 
     INDEX_HTML = """<!doctype html>
     <html lang="de">
@@ -144,13 +145,26 @@ data:
     map.on('click', function(e) {
       if (clickState === 0) {
         setMarker('start', e.latlng.lat, e.latlng.lng);
+        reverseGeocode('start', e.latlng.lat, e.latlng.lng);
         clickState = 1;
       } else {
         setMarker('end', e.latlng.lat, e.latlng.lng);
+        reverseGeocode('end', e.latlng.lat, e.latlng.lng);
         clickState = 0;
         doRoute();
       }
     });
+
+    // Reverse geocode a coordinate and populate the address input
+    async function reverseGeocode(which, lat, lon) {
+      try {
+        var resp = await fetch('/api/reverse?lat=' + lat + '&lon=' + lon);
+        var data = await resp.json();
+        if (!data.error && data.display_name) {
+          document.getElementById(which + 'Addr').value = data.display_name;
+        }
+      } catch(e) { /* silently ignore */ }
+    }
 
     // Valhalla uses 1e-6 precision polyline encoding
     function decodePolyline(encoded) {
@@ -299,7 +313,10 @@ data:
 
         def do_GET(self):
             if self.path in {"/", "/index.html"}:
-                body = INDEX_HTML.encode("utf-8")
+                html = INDEX_HTML
+                if STATUS_URL:
+                    html = html.replace("http://NODEIP:30083/", STATUS_URL.rstrip("/") + "/")
+                body = html.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
@@ -332,6 +349,26 @@ data:
                     self._send_json({"results": data})
                 except Exception as exc:  # noqa: BLE001
                     self._send_json({"error": self._friendly_error(exc, "Nominatim (Geocoding)")}, 502)
+                return
+
+            if self.path.startswith("/api/reverse"):
+                query = self.path.split("?", 1)[1] if "?" in self.path else ""
+                params = urllib.parse.parse_qs(query)
+                lat = params.get("lat", [""])[0]
+                lon = params.get("lon", [""])[0]
+                if not lat or not lon:
+                    self._send_json({"error": "missing lat/lon parameters"}, 400)
+                    return
+                try:
+                    req = urllib.request.Request(
+                        f"{NOMINATIM_URL}/reverse?lat={urllib.parse.quote(lat)}&lon={urllib.parse.quote(lon)}&format=jsonv2",
+                        headers={"User-Agent": "localosm-web/1.0"}
+                    )
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        data = json.loads(response.read().decode("utf-8"))
+                    self._send_json({"display_name": data.get("display_name", "")})
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": self._friendly_error(exc, "Nominatim (Reverse Geocoding)")}, 502)
                 return
 
             self._send_json({"error": "not found"}, 404)
@@ -453,6 +490,8 @@ spec:
               value: "http://valhalla.osm.svc.cluster.local:8002"
             - name: NOMINATIM_URL
               value: "http://nominatim.osm.svc.cluster.local:8080"
+            - name: STATUS_URL
+              value: ""
           ports:
             - containerPort: 8080
           volumeMounts:
