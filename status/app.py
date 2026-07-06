@@ -276,6 +276,264 @@ COUNTRY_LIBRARY = [
     for slug, name in countries
 ]
 
+# Approximate bounding boxes (min_lon, min_lat, max_lon, max_lat) for each Geofabrik slug.
+# Used to compute the geographic center of all downloaded regions for the map initial view.
+COUNTRY_BBOX = {
+    # Africa
+    "algeria": (-8.67, 19.06, 12.00, 37.09),
+    "angola": (11.64, -18.04, 24.08, -4.39),
+    "benin": (0.77, 6.22, 3.85, 12.41),
+    "botswana": (19.97, -26.91, 29.36, -17.77),
+    "burkina-faso": (-5.52, 9.40, 2.41, 15.08),
+    "burundi": (29.02, -4.47, 30.85, -2.31),
+    "cameroon": (8.50, 1.65, 16.19, 12.36),
+    "canary-islands": (-18.16, 27.64, -13.42, 29.42),
+    "cape-verde": (-25.36, 14.81, -22.67, 17.20),
+    "central-african-republic": (14.42, 2.22, 27.46, 11.00),
+    "chad": (13.47, 7.44, 24.00, 23.45),
+    "comores": (43.22, -12.39, 44.54, -11.36),
+    "congo-brazzaville": (11.21, -5.02, 18.65, 3.71),
+    "congo-dem-rep": (12.18, -13.46, 31.31, 5.39),
+    "djibouti": (41.77, 10.94, 43.42, 12.71),
+    "egypt": (24.70, 21.72, 37.26, 31.67),
+    "equatorial-guinea": (5.62, 1.01, 11.33, 3.78),
+    "eritrea": (36.44, 12.36, 43.13, 18.00),
+    "ethiopia": (32.99, 3.42, 47.99, 14.89),
+    "gabon": (8.70, -3.98, 14.52, 2.34),
+    "ghana": (-3.26, 4.74, 1.19, 11.17),
+    "guinea": (-15.08, 7.19, -7.64, 12.67),
+    "guinea-bissau": (-16.71, 11.04, -13.64, 12.68),
+    "ivory-coast": (-8.60, 4.35, -2.50, 10.73),
+    "kenya": (33.91, -4.69, 41.90, 5.02),
+    "lesotho": (27.01, -30.65, 29.46, -28.57),
+    "liberia": (-11.49, 4.35, -7.37, 8.55),
+    "libya": (9.31, 19.50, 25.16, 33.17),
+    "madagascar": (43.23, -25.60, 50.48, -11.95),
+    "malawi": (32.67, -17.13, 35.92, -9.37),
+    "mali": (-5.51, 10.14, 4.26, 25.00),
+    "mauritania": (-17.07, 14.72, -4.83, 27.31),
+    "mauritius": (56.51, -20.52, 63.50, -10.32),
+    "morocco": (-17.02, 20.77, -1.12, 35.92),
+    "mozambique": (30.22, -26.87, 40.84, -10.48),
+    "namibia": (11.72, -28.97, 25.26, -16.95),
+    "niger": (0.16, 11.70, 15.91, 23.52),
+    "nigeria": (2.69, 4.27, 14.68, 13.90),
+    "rwanda": (28.86, -2.84, 30.90, -1.05),
+    "senegal-and-gambia": (-17.53, 12.31, -11.37, 15.00),
+    "sierra-leone": (-13.31, 6.92, -10.27, 9.99),
+    "somalia": (40.99, -1.67, 51.41, 11.97),
+    "south-africa": (16.48, -34.83, 32.89, -22.13),
+    "south-sudan": (23.44, 3.49, 35.30, 12.24),
+    "sudan": (21.82, 8.68, 38.58, 22.23),
+    "swaziland": (30.80, -27.32, 32.14, -25.72),
+    "tanzania": (29.34, -11.74, 40.44, -0.99),
+    "togo": (-0.15, 6.10, 1.81, 11.14),
+    "tunisia": (7.52, 30.23, 11.56, 37.54),
+    "uganda": (29.57, -1.48, 35.03, 4.23),
+    "zambia": (21.99, -18.08, 33.71, -8.22),
+    "zimbabwe": (25.24, -22.42, 33.06, -15.63),
+    # Asia
+    "afghanistan": (60.52, 29.38, 74.89, 38.49),
+    "armenia": (43.45, 38.84, 46.64, 41.30),
+    "azerbaijan": (44.77, 38.41, 50.37, 41.91),
+    "bangladesh": (88.01, 20.74, 92.67, 26.63),
+    "bhutan": (88.75, 26.72, 92.12, 28.33),
+    "cambodia": (102.35, 10.41, 107.63, 14.70),
+    "china": (73.50, 18.16, 134.77, 53.56),
+    "gcc-states": (50.55, 22.15, 60.64, 26.08),
+    "india": (68.11, 8.06, 97.41, 35.51),
+    "indonesia": (95.01, -11.01, 141.02, 5.91),
+    "iran": (44.03, 25.06, 63.33, 39.78),
+    "iraq": (38.79, 29.06, 48.58, 37.39),
+    "israel-and-palestine": (34.27, 29.48, 35.89, 33.34),
+    "japan": (122.93, 24.05, 145.82, 45.52),
+    "jordan": (34.96, 29.18, 39.30, 33.37),
+    "kazakhstan": (50.27, 40.57, 87.36, 55.45),
+    "kyrgyzstan": (69.26, 39.19, 80.29, 43.24),
+    "laos": (100.09, 13.91, 107.68, 22.50),
+    "lebanon": (35.10, 33.06, 36.62, 34.69),
+    "malaysia-singapore-brunei": (99.64, 0.85, 119.27, 7.36),
+    "maldives": (72.68, -0.69, 73.75, 7.10),
+    "mongolia": (87.73, 41.57, 119.93, 52.15),
+    "myanmar": (92.17, 9.78, 101.18, 28.55),
+    "nepal": (80.06, 26.36, 88.20, 30.45),
+    "north-korea": (124.33, 37.67, 130.67, 42.99),
+    "pakistan": (60.87, 23.69, 77.20, 37.09),
+    "philippines": (116.88, 4.59, 126.60, 21.12),
+    "saudi-arabia": (34.56, 16.37, 55.67, 32.15),
+    "south-korea": (124.55, 33.10, 130.92, 38.63),
+    "sri-lanka": (79.65, 5.92, 81.88, 9.84),
+    "syria": (35.73, 32.31, 42.37, 37.33),
+    "taiwan": (119.54, 21.90, 122.01, 25.30),
+    "tajikistan": (67.34, 36.67, 75.15, 41.04),
+    "thailand": (97.34, 5.61, 105.65, 20.46),
+    "timor-leste": (124.04, -9.46, 127.34, -8.13),
+    "turkey": (26.04, 35.82, 44.82, 42.11),
+    "turkmenistan": (52.44, 35.13, 66.68, 42.80),
+    "united-arab-emirates": (51.58, 22.63, 56.38, 26.08),
+    "uzbekistan": (56.00, 37.17, 73.14, 45.59),
+    "vietnam": (102.15, 8.56, 109.46, 23.39),
+    "yemen": (42.54, 12.11, 54.53, 19.00),
+    # Australia & Oceania
+    "australia": (112.91, -43.64, 153.64, -10.69),
+    "fiji": (177.14, -20.68, 180.00, -12.48),
+    "new-caledonia": (163.96, -22.71, 167.84, -19.55),
+    "new-zealand": (165.87, -47.29, 178.53, -34.43),
+    "papua-new-guinea": (140.84, -11.66, 155.65, -1.31),
+    # Central America
+    "belize": (-89.22, 15.89, -87.78, 18.49),
+    "costa-rica": (-85.94, 8.03, -82.56, 11.22),
+    "el-salvador": (-90.10, 13.15, -87.69, 14.42),
+    "guatemala": (-92.23, 13.74, -88.22, 17.82),
+    "haiti-and-domrep": (-74.48, 17.47, -68.32, 19.93),
+    "honduras": (-89.35, 13.00, -83.15, 16.52),
+    "nicaragua": (-87.66, 10.71, -82.73, 15.02),
+    "panama": (-83.05, 7.20, -77.21, 9.65),
+    # Europe
+    "albania": (19.27, 39.64, 21.06, 42.66),
+    "andorra": (1.41, 42.43, 1.79, 42.66),
+    "austria": (9.53, 46.37, 17.16, 49.02),
+    "azores": (-31.27, 36.96, -24.78, 39.75),
+    "belarus": (23.18, 51.26, 32.75, 56.17),
+    "belgium": (2.55, 49.50, 6.41, 51.50),
+    "bosnia-herzegovina": (15.74, 42.56, 19.62, 45.28),
+    "bulgaria": (22.36, 41.24, 28.61, 44.23),
+    "croatia": (13.49, 42.39, 19.44, 46.55),
+    "cyprus": (32.27, 34.57, 34.00, 35.71),
+    "czech-republic": (12.09, 48.55, 18.86, 51.06),
+    "denmark": (8.09, 54.56, 15.19, 57.75),
+    "estonia": (21.76, 57.51, 28.21, 59.68),
+    "faroe-islands": (-7.44, 61.39, -6.25, 62.40),
+    "finland": (20.65, 59.81, 31.59, 70.09),
+    "france": (-5.14, 41.33, 9.56, 51.09),
+    "georgia": (39.99, 41.05, 46.74, 43.59),
+    "germany": (5.87, 47.27, 15.04, 55.06),
+    "great-britain": (-7.57, 49.96, 1.68, 58.64),
+    "greece": (19.37, 34.80, 29.64, 41.75),
+    "hungary": (16.11, 45.74, 22.90, 48.58),
+    "iceland": (-24.54, 63.29, -13.50, 66.57),
+    "ireland-and-northern-ireland": (-10.48, 51.37, -5.34, 55.43),
+    "isle-of-man": (-4.83, 54.06, -4.31, 54.42),
+    "italy": (6.63, 36.49, 18.52, 47.09),
+    "kosovo": (20.01, 41.86, 21.79, 43.27),
+    "latvia": (20.97, 55.67, 28.24, 57.97),
+    "liechtenstein": (9.48, 47.05, 9.64, 47.27),
+    "lithuania": (20.95, 53.90, 26.84, 56.45),
+    "luxembourg": (5.73, 49.44, 6.53, 50.18),
+    "macedonia": (20.45, 40.85, 23.03, 42.37),
+    "malta": (14.18, 35.82, 14.58, 36.08),
+    "moldova": (26.62, 45.47, 30.13, 48.49),
+    "monaco": (7.38, 43.73, 7.44, 43.77),
+    "montenegro": (18.43, 41.85, 20.36, 43.56),
+    "netherlands": (3.36, 50.75, 7.23, 53.59),
+    "norway": (4.99, 57.98, 31.29, 71.19),
+    "poland": (14.12, 49.00, 24.15, 54.83),
+    "portugal": (-9.53, 36.96, -6.19, 42.15),
+    "romania": (20.26, 43.62, 29.68, 48.27),
+    "russia": (27.28, 41.19, 180.00, 77.72),
+    "serbia": (18.82, 42.23, 23.01, 46.19),
+    "slovakia": (16.84, 47.73, 22.56, 49.61),
+    "slovenia": (13.38, 45.42, 16.61, 46.88),
+    "spain": (-9.30, 35.95, 4.33, 43.79),
+    "sweden": (11.12, 55.34, 24.16, 69.06),
+    "switzerland": (5.96, 45.82, 10.49, 47.81),
+    "ukraine": (22.14, 44.39, 40.23, 52.38),
+    # North America
+    "canada": (-141.00, 41.68, -52.60, 83.11),
+    "greenland": (-73.30, 59.75, -12.21, 83.63),
+    "mexico": (-117.12, 14.53, -86.74, 32.72),
+    "us-northeast": (-82.00, 38.80, -66.94, 47.46),
+    "us-midwest": (-104.05, 36.00, -80.52, 49.38),
+    "us-south": (-106.65, 24.39, -75.96, 37.00),
+    "us-west": (-124.83, 30.00, -95.00, 49.38),
+    # South America
+    "argentina": (-73.58, -55.06, -53.60, -21.78),
+    "bolivia": (-69.64, -22.90, -57.46, -9.67),
+    "brazil": (-73.98, -33.75, -34.80, 5.27),
+    "chile": (-75.64, -55.61, -66.96, -17.49),
+    "colombia": (-81.73, -4.23, -66.87, 12.44),
+    "ecuador": (-80.98, -5.01, -75.19, 1.44),
+    "guyana": (-61.39, 1.18, -56.48, 8.56),
+    "paraguay": (-62.64, -27.59, -54.26, -19.29),
+    "peru": (-81.33, -18.35, -68.65, -0.06),
+    "suriname": (-58.07, 1.83, -53.98, 5.97),
+    "uruguay": (-58.44, -34.95, -53.09, -30.09),
+    "venezuela": (-73.35, 0.64, -59.76, 12.20),
+}
+
+# MapLibre GL base style – kept in sync with k8s/tileserver.yaml init container.
+# The status service writes this to /mnt/data/OSM/tileserver/style.json after every
+# successful tile build, injecting the geographic center of all imported regions so
+# that the map opens centred on the downloaded area.
+_STYLE_JSON = (
+    '{"version":8,"name":"LocalOSM","sources":{"openmaptiles":{"type":"vector","url":"mbtiles://{v3}"}},'
+    '"glyphs":"http://localhost/fonts/{fontstack}/{range}.pbf","layers":['
+    '{"id":"background","type":"background","paint":{"background-color":"#f2efe9"}},'
+    '{"id":"landcover-wood","type":"fill","source":"openmaptiles","source-layer":"landcover","filter":["in","class","wood","forest"],"paint":{"fill-color":"#d0e8c0","fill-opacity":0.6}},'
+    '{"id":"landcover-grass","type":"fill","source":"openmaptiles","source-layer":"landcover","filter":["in","class","grass","farmland","agriculture"],"paint":{"fill-color":"#e8f0d0","fill-opacity":0.5}},'
+    '{"id":"landuse-residential","type":"fill","source":"openmaptiles","source-layer":"landuse","filter":["in","class","residential","commercial","industrial"],"paint":{"fill-color":"#e8e0d8","fill-opacity":0.5}},'
+    '{"id":"landuse-green","type":"fill","source":"openmaptiles","source-layer":"landuse","filter":["in","class","grass","park","meadow","forest","wood","cemetery"],"paint":{"fill-color":"#d0e8c0"}},'
+    '{"id":"water","type":"fill","source":"openmaptiles","source-layer":"water","paint":{"fill-color":"#9cc0d4"}},'
+    '{"id":"waterway","type":"line","source":"openmaptiles","source-layer":"waterway","paint":{"line-color":"#9cc0d4","line-width":1}},'
+    '{"id":"boundary-country","type":"line","source":"openmaptiles","source-layer":"boundary","filter":["==","admin_level",2],"paint":{"line-color":"#9e9cab","line-width":{"stops":[[2,0.5],[6,1.5],[10,2]]}}},'
+    '{"id":"boundary-state","type":"line","source":"openmaptiles","source-layer":"boundary","filter":["==","admin_level",4],"minzoom":4,"paint":{"line-color":"#b0adb8","line-width":0.8,"line-dasharray":[3,2]}},'
+    '{"id":"road","type":"line","source":"openmaptiles","source-layer":"transportation","filter":["in","class","minor","service","track","path"],"minzoom":12,"paint":{"line-color":"#d4cfc8","line-width":{"stops":[[12,0.5],[14,1],[16,3]]}}},'
+    '{"id":"road-secondary","type":"line","source":"openmaptiles","source-layer":"transportation","filter":["in","class","secondary","tertiary"],"minzoom":9,"paint":{"line-color":"#c8c3ba","line-width":{"stops":[[9,0.5],[12,1.5],[14,3],[16,5]]}}},'
+    '{"id":"road-primary","type":"line","source":"openmaptiles","source-layer":"transportation","filter":["==","class","primary"],"minzoom":7,"paint":{"line-color":"#fcd354","line-width":{"stops":[[7,0.5],[10,2],[14,5],[16,8]]}}},'
+    '{"id":"road-major","type":"line","source":"openmaptiles","source-layer":"transportation","filter":["in","class","motorway","trunk"],"paint":{"line-color":"#f9a825","line-width":{"stops":[[6,1],[10,3],[14,7],[16,12]]}}},'
+    '{"id":"building","type":"fill","source":"openmaptiles","source-layer":"building","minzoom":14,"paint":{"fill-color":"#d9d0c9","fill-opacity":0.9}},'
+    '{"id":"water-name","type":"symbol","source":"openmaptiles","source-layer":"water_name","layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["Noto Sans Regular"],"text-size":{"stops":[[4,10],[10,14]]},"symbol-placement":"point"},"paint":{"text-color":"#5b8db8","text-halo-color":"#fff","text-halo-width":1}},'
+    '{"id":"road-label-minor","type":"symbol","source":"openmaptiles","source-layer":"transportation_name","filter":["in","class","minor","service","track"],"minzoom":15,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["Noto Sans Regular"],"symbol-placement":"line","text-size":10,"text-max-angle":30,"text-padding":5},"paint":{"text-color":"#555","text-halo-color":"#fff","text-halo-width":1.5}},'
+    '{"id":"road-label-secondary","type":"symbol","source":"openmaptiles","source-layer":"transportation_name","filter":["in","class","secondary","tertiary"],"minzoom":13,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["Noto Sans Regular"],"symbol-placement":"line","text-size":11,"text-max-angle":30},"paint":{"text-color":"#555","text-halo-color":"#fff","text-halo-width":1.5}},'
+    '{"id":"road-label-primary","type":"symbol","source":"openmaptiles","source-layer":"transportation_name","filter":["in","class","primary","trunk","motorway"],"minzoom":10,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["Noto Sans Regular"],"symbol-placement":"line","text-size":12,"text-max-angle":30},"paint":{"text-color":"#333","text-halo-color":"#fff","text-halo-width":1.5}},'
+    '{"id":"place-country","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["==","class","country"],"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["Noto Sans Regular"],"text-size":{"stops":[[2,10],[6,16],[8,18]]}},"paint":{"text-color":"#333","text-halo-color":"rgba(255,255,255,0.8)","text-halo-width":2}},'
+    '{"id":"place-state","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["==","class","state"],"minzoom":5,"maxzoom":12,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["Noto Sans Regular"],"text-size":{"stops":[[5,10],[10,14]]}},"paint":{"text-color":"#555","text-halo-color":"rgba(255,255,255,0.8)","text-halo-width":1.5}},'
+    '{"id":"place-city","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["in","class","city"],"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["Noto Sans Regular"],"text-size":{"stops":[[6,11],[10,15],[14,18]]}},"paint":{"text-color":"#222","text-halo-color":"rgba(255,255,255,0.9)","text-halo-width":2}},'
+    '{"id":"place-town","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["==","class","town"],"minzoom":8,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["Noto Sans Regular"],"text-size":{"stops":[[8,10],[12,14],[16,17]]}},"paint":{"text-color":"#333","text-halo-color":"rgba(255,255,255,0.9)","text-halo-width":1.5}},'
+    '{"id":"place-village","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["==","class","village"],"minzoom":10,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["Noto Sans Regular"],"text-size":{"stops":[[10,10],[14,13]]}},"paint":{"text-color":"#444","text-halo-color":"rgba(255,255,255,0.9)","text-halo-width":1.5}},'
+    '{"id":"place-suburb","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["in","class","suburb","quarter","neighbourhood"],"minzoom":12,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["Noto Sans Regular"],"text-size":11},"paint":{"text-color":"#555","text-halo-color":"rgba(255,255,255,0.9)","text-halo-width":1.5}},'
+    '{"id":"place-hamlet","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["in","class","hamlet","isolated_dwelling"],"minzoom":13,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["Noto Sans Regular"],"text-size":10},"paint":{"text-color":"#666","text-halo-color":"rgba(255,255,255,0.9)","text-halo-width":1.5}}'
+    "]}"
+)
+
+
+def compute_map_center(records):
+    """Return (center_lon, center_lat, zoom) from the bounding union of all non-error country records."""
+    slugs = [r.get("slug", "") for r in records if r.get("status") != "error"]
+    bboxes = [COUNTRY_BBOX[s] for s in slugs if s in COUNTRY_BBOX]
+    if not bboxes:
+        return None, None, 6
+    min_lon = min(b[0] for b in bboxes)
+    min_lat = min(b[1] for b in bboxes)
+    max_lon = max(b[2] for b in bboxes)
+    max_lat = max(b[3] for b in bboxes)
+    center_lon = (min_lon + max_lon) / 2
+    center_lat = (min_lat + max_lat) / 2
+    span = max(max_lon - min_lon, (max_lat - min_lat) * 1.5)
+    if span > 90:
+        zoom = 3
+    elif span > 60:
+        zoom = 4
+    elif span > 20:
+        zoom = 5
+    elif span > 10:
+        zoom = 6
+    elif span > 5:
+        zoom = 7
+    else:
+        zoom = 8
+    return round(center_lon, 4), round(center_lat, 4), zoom
+
+
+def build_style_json(center_lon=None, center_lat=None, zoom=6):
+    """Return the MapLibre GL style dict, optionally with initial center and zoom."""
+    style = json.loads(_STYLE_JSON)
+    if center_lon is not None and center_lat is not None:
+        style["center"] = [center_lon, center_lat]
+        style["zoom"] = zoom
+    return style
+
+
 WORKFLOW_LOCK = threading.Lock()
 ACTIVE_WORKFLOW = {"thread": None}
 SCHEDULER_LOCK = threading.Lock()
@@ -1648,6 +1906,12 @@ def rebuild_tileserver(country):
             mbtiles_path = os.path.join(TILESERVER_DIR, "map.mbtiles")
             if not os.path.exists(mbtiles_path) or os.path.getsize(mbtiles_path) == 0:
                 raise RuntimeError("Tile generation job succeeded but map.mbtiles was not created or is empty.")
+            # Write style.json centred on the union of all imported regions so that
+            # the map opens at the right location on every pod restart.
+            records = list_library_records()
+            center_lon, center_lat, zoom = compute_map_center(records)
+            style = build_style_json(center_lon, center_lat, zoom)
+            save_json(os.path.join(TILESERVER_DIR, "style.json"), style)
             KUBE.rollout_restart("tileserver-gl")
             write_workflow_state(
                 running=True,
