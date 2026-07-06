@@ -771,7 +771,7 @@ data:
             '<div><div class="country-name">' + esc(country.name) + '</div><div class="country-meta">' + esc(detail.join(' · ') || country.url) + '</div></div>' +
             '<div style="text-align:right;display:flex;align-items:center;gap:0.4rem;justify-content:flex-end">' +
             '<span class="status-pill ' + badgeClass + '">' + esc(status) + '</span>' +
-            '<button class="remove-country-btn danger" data-slug="' + slugAttr + '" onclick="removeCountry(\'' + slugAttr + '\')" style="width:auto;padding:0.18rem 0.5rem;font-size:0.72rem;font-weight:700" ' + (WORKFLOW_RUNNING ? 'disabled' : '') + ' title="Land entfernen">×</button>' +
+            '<button class="remove-country-btn danger" data-slug="' + slugAttr + '" onclick="removeCountry(this.dataset.slug)" style="width:auto;padding:0.18rem 0.5rem;font-size:0.72rem;font-weight:700" ' + (WORKFLOW_RUNNING ? 'disabled' : '') + ' title="Land entfernen">×</button>' +
             '</div>' +
             '</div>';
         });
