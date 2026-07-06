@@ -282,6 +282,21 @@ data:
             self.end_headers()
             self.wfile.write(body)
 
+        @staticmethod
+        def _friendly_error(exc, service_name):
+            msg = str(exc)
+            if "111" in msg or "Connection refused" in msg or "ConnectionRefused" in msg:
+                return (
+                    f"{service_name} ist noch nicht erreichbar (startet noch oder importiert Daten). "
+                    "Bitte warten und den Status im Dashboard prüfen."
+                )
+            if "timed out" in msg.lower() or "timeout" in msg.lower():
+                return (
+                    f"{service_name} antwortet nicht (Timeout). "
+                    "Möglicherweise läuft noch ein Daten-Import."
+                )
+            return msg
+
         def do_GET(self):
             if self.path in {"/", "/index.html"}:
                 body = INDEX_HTML.encode("utf-8")
@@ -316,7 +331,7 @@ data:
                         data = json.loads(response.read().decode("utf-8"))
                     self._send_json({"results": data})
                 except Exception as exc:  # noqa: BLE001
-                    self._send_json({"error": str(exc)}, 502)
+                    self._send_json({"error": self._friendly_error(exc, "Nominatim (Geocoding)")}, 502)
                 return
 
             self._send_json({"error": "not found"}, 404)
@@ -375,7 +390,7 @@ data:
                     "trip": data.get("trip"),
                 })
             except Exception as exc:  # noqa: BLE001
-                self._send_json({"error": str(exc)}, 502)
+                self._send_json({"error": self._friendly_error(exc, "Valhalla (Routing)")}, 502)
 
         def _forward_distance(self, payload):
             try:
@@ -388,7 +403,7 @@ data:
                     "units": payload.get("units", "km"),
                 })
             except Exception as exc:  # noqa: BLE001
-                self._send_json({"error": str(exc)}, 502)
+                self._send_json({"error": self._friendly_error(exc, "Valhalla (Routing)")}, 502)
 
         def log_message(self, format, *args):
             return
