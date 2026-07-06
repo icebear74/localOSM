@@ -1,6 +1,7 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import re
 import shutil
 import socket
 import ssl
@@ -10,7 +11,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 
 HOST = os.environ.get("STATUS_HOST", "0.0.0.0")
 PORT = int(os.environ.get("STATUS_PORT", "8080"))
@@ -21,11 +22,20 @@ STATUS_DIR = os.path.join(DATA_DIR, "status")
 LIBRARY_DIR = os.path.join(DATA_DIR, "library")
 IMPORT_DIR = os.path.join(DATA_DIR, "import")
 VALHALLA_DIR = os.path.join(DATA_DIR, "valhalla")
+VALHALLA_STAGING_DIR = os.path.join(DATA_DIR, "valhalla-staging")
 VALHALLA_TILE_DIR = os.path.join(VALHALLA_DIR, "tiles")
 NOMINATIM_DIR = os.path.join(DATA_DIR, "nominatim")
+TILESERVER_DIR = os.path.join(DATA_DIR, "tileserver")
 MERGED_PBF = os.path.join(IMPORT_DIR, "planet.osm.pbf")
 COUNTRIES_FILE = os.path.join(STATUS_DIR, "countries.json")
 STATE_FILE = os.path.join(STATUS_DIR, "library-state.json")
+CONFIG_FILE = os.path.join(STATUS_DIR, "config.json")
+
+CONFIG_DEFAULTS = {
+    "node_url": "",
+    "auto_update_enabled": False,
+    "auto_update_time": "03:00",
+}
 
 SERVICES = [
     ("postgres", "postgres.osm.svc.cluster.local", 5432, "tcp", None),
@@ -35,61 +45,239 @@ SERVICES = [
     ("web", "web.osm.svc.cluster.local", 8080, "http", "/healthz"),
 ]
 
+COUNTRY_LIBRARY_GROUPS = [
+    (
+        "Africa",
+        "africa",
+        [
+            ("algeria", "Algeria"),
+            ("angola", "Angola"),
+            ("benin", "Benin"),
+            ("botswana", "Botswana"),
+            ("burkina-faso", "Burkina Faso"),
+            ("burundi", "Burundi"),
+            ("cameroon", "Cameroon"),
+            ("canary-islands", "Canary Islands"),
+            ("cape-verde", "Cape Verde"),
+            ("central-african-republic", "Central African Republic"),
+            ("chad", "Chad"),
+            ("comores", "Comoros"),
+            ("congo-brazzaville", "Congo (Brazzaville)"),
+            ("congo-dem-rep", "Congo (Democratic Republic)"),
+            ("djibouti", "Djibouti"),
+            ("egypt", "Egypt"),
+            ("equatorial-guinea", "Equatorial Guinea"),
+            ("eritrea", "Eritrea"),
+            ("ethiopia", "Ethiopia"),
+            ("gabon", "Gabon"),
+            ("ghana", "Ghana"),
+            ("guinea", "Guinea"),
+            ("guinea-bissau", "Guinea-Bissau"),
+            ("ivory-coast", "Ivory Coast"),
+            ("kenya", "Kenya"),
+            ("lesotho", "Lesotho"),
+            ("liberia", "Liberia"),
+            ("libya", "Libya"),
+            ("madagascar", "Madagascar"),
+            ("malawi", "Malawi"),
+            ("mali", "Mali"),
+            ("mauritania", "Mauritania"),
+            ("mauritius", "Mauritius"),
+            ("morocco", "Morocco"),
+            ("mozambique", "Mozambique"),
+            ("namibia", "Namibia"),
+            ("niger", "Niger"),
+            ("nigeria", "Nigeria"),
+            ("rwanda", "Rwanda"),
+            ("senegal-and-gambia", "Senegal and Gambia"),
+            ("sierra-leone", "Sierra Leone"),
+            ("somalia", "Somalia"),
+            ("south-africa", "South Africa"),
+            ("south-sudan", "South Sudan"),
+            ("sudan", "Sudan"),
+            ("swaziland", "Eswatini"),
+            ("tanzania", "Tanzania"),
+            ("togo", "Togo"),
+            ("tunisia", "Tunisia"),
+            ("uganda", "Uganda"),
+            ("zambia", "Zambia"),
+            ("zimbabwe", "Zimbabwe"),
+        ],
+    ),
+    (
+        "Asia",
+        "asia",
+        [
+            ("afghanistan", "Afghanistan"),
+            ("armenia", "Armenia"),
+            ("azerbaijan", "Azerbaijan"),
+            ("bangladesh", "Bangladesh"),
+            ("bhutan", "Bhutan"),
+            ("cambodia", "Cambodia"),
+            ("china", "China"),
+            ("gcc-states", "GCC States"),
+            ("india", "India"),
+            ("indonesia", "Indonesia"),
+            ("iran", "Iran"),
+            ("iraq", "Iraq"),
+            ("israel-and-palestine", "Israel and Palestine"),
+            ("japan", "Japan"),
+            ("jordan", "Jordan"),
+            ("kazakhstan", "Kazakhstan"),
+            ("kyrgyzstan", "Kyrgyzstan"),
+            ("laos", "Laos"),
+            ("lebanon", "Lebanon"),
+            ("malaysia-singapore-brunei", "Malaysia / Singapore / Brunei"),
+            ("maldives", "Maldives"),
+            ("mongolia", "Mongolia"),
+            ("myanmar", "Myanmar"),
+            ("nepal", "Nepal"),
+            ("north-korea", "North Korea"),
+            ("pakistan", "Pakistan"),
+            ("philippines", "Philippines"),
+            ("saudi-arabia", "Saudi Arabia"),
+            ("south-korea", "South Korea"),
+            ("sri-lanka", "Sri Lanka"),
+            ("syria", "Syria"),
+            ("taiwan", "Taiwan"),
+            ("tajikistan", "Tajikistan"),
+            ("thailand", "Thailand"),
+            ("timor-leste", "Timor-Leste"),
+            ("turkey", "Turkey"),
+            ("turkmenistan", "Turkmenistan"),
+            ("united-arab-emirates", "United Arab Emirates"),
+            ("uzbekistan", "Uzbekistan"),
+            ("vietnam", "Vietnam"),
+            ("yemen", "Yemen"),
+        ],
+    ),
+    (
+        "Australia & Oceania",
+        "australia-oceania",
+        [
+            ("australia", "Australia"),
+            ("fiji", "Fiji"),
+            ("new-caledonia", "New Caledonia"),
+            ("new-zealand", "New Zealand"),
+            ("papua-new-guinea", "Papua New Guinea"),
+        ],
+    ),
+    (
+        "Central America",
+        "central-america",
+        [
+            ("belize", "Belize"),
+            ("costa-rica", "Costa Rica"),
+            ("el-salvador", "El Salvador"),
+            ("guatemala", "Guatemala"),
+            ("haiti-and-domrep", "Haiti and Dominican Republic"),
+            ("honduras", "Honduras"),
+            ("nicaragua", "Nicaragua"),
+            ("panama", "Panama"),
+        ],
+    ),
+    (
+        "Europe",
+        "europe",
+        [
+            ("albania", "Albania"),
+            ("andorra", "Andorra"),
+            ("austria", "Austria"),
+            ("azores", "Azores"),
+            ("belarus", "Belarus"),
+            ("belgium", "Belgium"),
+            ("bosnia-herzegovina", "Bosnia and Herzegovina"),
+            ("bulgaria", "Bulgaria"),
+            ("croatia", "Croatia"),
+            ("cyprus", "Cyprus"),
+            ("czech-republic", "Czech Republic"),
+            ("denmark", "Denmark"),
+            ("estonia", "Estonia"),
+            ("faroe-islands", "Faroe Islands"),
+            ("finland", "Finland"),
+            ("france", "France"),
+            ("georgia", "Georgia"),
+            ("germany", "Germany"),
+            ("great-britain", "Great Britain"),
+            ("greece", "Greece"),
+            ("hungary", "Hungary"),
+            ("iceland", "Iceland"),
+            ("ireland-and-northern-ireland", "Ireland and Northern Ireland"),
+            ("isle-of-man", "Isle of Man"),
+            ("italy", "Italy"),
+            ("kosovo", "Kosovo"),
+            ("latvia", "Latvia"),
+            ("liechtenstein", "Liechtenstein"),
+            ("lithuania", "Lithuania"),
+            ("luxembourg", "Luxembourg"),
+            ("macedonia", "North Macedonia"),
+            ("malta", "Malta"),
+            ("moldova", "Moldova"),
+            ("monaco", "Monaco"),
+            ("montenegro", "Montenegro"),
+            ("netherlands", "Netherlands"),
+            ("norway", "Norway"),
+            ("poland", "Poland"),
+            ("portugal", "Portugal"),
+            ("romania", "Romania"),
+            ("russia", "Russia"),
+            ("serbia", "Serbia"),
+            ("slovakia", "Slovakia"),
+            ("slovenia", "Slovenia"),
+            ("spain", "Spain"),
+            ("sweden", "Sweden"),
+            ("switzerland", "Switzerland"),
+            ("ukraine", "Ukraine"),
+        ],
+    ),
+    (
+        "North America",
+        "north-america",
+        [
+            ("canada", "Canada"),
+            ("greenland", "Greenland"),
+            ("mexico", "Mexico"),
+            ("us-northeast", "US Northeast"),
+            ("us-midwest", "US Midwest"),
+            ("us-south", "US South"),
+            ("us-west", "US West"),
+        ],
+    ),
+    (
+        "South America",
+        "south-america",
+        [
+            ("argentina", "Argentina"),
+            ("bolivia", "Bolivia"),
+            ("brazil", "Brazil"),
+            ("chile", "Chile"),
+            ("colombia", "Colombia"),
+            ("ecuador", "Ecuador"),
+            ("guyana", "Guyana"),
+            ("paraguay", "Paraguay"),
+            ("peru", "Peru"),
+            ("suriname", "Suriname"),
+            ("uruguay", "Uruguay"),
+            ("venezuela", "Venezuela"),
+        ],
+    ),
+]
+
 COUNTRY_LIBRARY = [
     {
-        "slug": "netherlands",
-        "name": "Netherlands",
-        "url": "https://download.geofabrik.de/europe/netherlands-latest.osm.pbf",
-    },
-    {
-        "slug": "germany",
-        "name": "Germany",
-        "url": "https://download.geofabrik.de/europe/germany-latest.osm.pbf",
-    },
-    {
-        "slug": "belgium",
-        "name": "Belgium",
-        "url": "https://download.geofabrik.de/europe/belgium-latest.osm.pbf",
-    },
-    {
-        "slug": "luxembourg",
-        "name": "Luxembourg",
-        "url": "https://download.geofabrik.de/europe/luxembourg-latest.osm.pbf",
-    },
-    {
-        "slug": "france",
-        "name": "France",
-        "url": "https://download.geofabrik.de/europe/france-latest.osm.pbf",
-    },
-    {
-        "slug": "switzerland",
-        "name": "Switzerland",
-        "url": "https://download.geofabrik.de/europe/switzerland-latest.osm.pbf",
-    },
-    {
-        "slug": "austria",
-        "name": "Austria",
-        "url": "https://download.geofabrik.de/europe/austria-latest.osm.pbf",
-    },
-    {
-        "slug": "denmark",
-        "name": "Denmark",
-        "url": "https://download.geofabrik.de/europe/denmark-latest.osm.pbf",
-    },
-    {
-        "slug": "poland",
-        "name": "Poland",
-        "url": "https://download.geofabrik.de/europe/poland-latest.osm.pbf",
-    },
-    {
-        "slug": "czech-republic",
-        "name": "Czech Republic",
-        "url": "https://download.geofabrik.de/europe/czech-republic-latest.osm.pbf",
-    },
+        "slug": slug,
+        "name": name,
+        "continent": continent,
+        "url": f"https://download.geofabrik.de/{continent_path}/{slug}-latest.osm.pbf",
+    }
+    for continent, continent_path, countries in COUNTRY_LIBRARY_GROUPS
+    for slug, name in countries
 ]
 
 WORKFLOW_LOCK = threading.Lock()
 ACTIVE_WORKFLOW = {"thread": None}
+SCHEDULER_LOCK = threading.Lock()
+LAST_AUTO_RUN = {"date": ""}
 
 
 _SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount"
@@ -183,6 +371,23 @@ class KubeClient:
             content_type="application/merge-patch+json",
         )
 
+    def rollout_restart(self, name):
+        ts = datetime.now(timezone.utc).isoformat()
+        self._request(
+            "PATCH",
+            f"/apis/apps/v1/namespaces/{self.namespace}/deployments/{name}",
+            body={
+                "spec": {
+                    "template": {
+                        "metadata": {
+                            "annotations": {"kubectl.kubernetes.io/restartedAt": ts}
+                        }
+                    }
+                }
+            },
+            content_type="application/merge-patch+json",
+        )
+
     def list_pods(self, label_selector):
         return self._request(
             "GET",
@@ -240,6 +445,7 @@ INDEX_HTML = """<!doctype html>
     .status-pending { background: #fff2cc; color: #9a6700; }
     .status-error { background: #fdecea; color: #b42318; }
     .status-running { background: #e7f0fb; color: #1d5fa7; }
+    .status-queued { background: #f3ecff; color: #6b46c1; }
     .muted { color: #7c8a97; }
     .stack { display: grid; gap: 0.5rem; }
     .row2 { display: grid; gap: 0.5rem; grid-template-columns: 1fr 1fr; }
@@ -260,15 +466,48 @@ INDEX_HTML = """<!doctype html>
 
   <div class="grid">
     <div class="card">
+      <h2>Node-Konfiguration</h2>
+      <div class="controls">
+        <div>
+          <label>Node URL</label>
+          <input id="node-url-input" placeholder="http://192.168.1.100" value="{{NODE_URL}}">
+        </div>
+        <button onclick="saveConfig()">Speichern</button>
+        <div class="hint">Optional: explizite Node-URL für alle Service-Links.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Auto-Update</h2>
+      <div class="controls">
+        <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+          <input type="checkbox" id="auto-update-enabled" style="width:auto">
+          Auto-Update aktivieren
+        </label>
+        <div>
+          <label>Uhrzeit (UTC)</label>
+          <input type="time" id="auto-update-time" value="03:00">
+        </div>
+        <button onclick="saveAutoUpdate()">Speichern</button>
+        <div id="auto-update-status" class="hint"></div>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Country Library</h2>
       <div class="controls">
+        <select id="continent-select" onchange="filterCountriesByContinent()"></select>
         <select id="country-select"></select>
         <div class="row2">
           <input id="custom-name" placeholder="Custom country name (optional)">
           <input id="custom-url" placeholder="Custom .osm.pbf URL (optional)">
         </div>
-        <button id="add-country-btn" onclick="startLibraryAdd()">Country hinzufügen</button>
-        <div class="hint">Wählt ein Land aus, lädt den Geofabrik-Extrakt herunter, merged alle bereits gewählten Länder erneut und baut Routing + Adress-/POI-Suche neu auf.</div>
+        <div class="row2">
+          <button id="add-country-btn" onclick="startLibraryQueue()">Land zur Queue hinzufügen</button>
+          <button id="build-btn" class="subtle" onclick="startBuild()">Build starten</button>
+        </div>
+        <div id="queue-count" class="hint">Keine Länder in der Queue.</div>
+        <div class="hint">Wählt ein Land aus, lädt den Geofabrik-Extrakt herunter und stellt es in die Queue. Der Build merged alle gewählten Länder und baut Routing, Tiles sowie Adress-/POI-Suche neu auf.</div>
       </div>
     </div>
 
@@ -299,11 +538,18 @@ INDEX_HTML = """<!doctype html>
   </div>
 
   <script>
-  var h = location.hostname;
-  ['web-link','valhalla-link','nominatim-link','tileserver-link'].forEach(function(id) {
-    var a = document.getElementById(id);
-    if (a) a.href = a.href.replace('NODEIP', h);
-  });
+  var NODE_URL = "{{NODE_URL}}";
+  var ALL_COUNTRIES = [];
+  var refreshTimer = null;
+
+  function updateLinks() {
+    var baseUrl = (NODE_URL || (location.protocol + '//' + location.hostname)).replace(/\/+$/, '');
+    ['web-link','valhalla-link','nominatim-link','tileserver-link'].forEach(function(id) {
+      var a = document.getElementById(id);
+      if (a) a.href = a.href.replace('http://NODEIP', baseUrl);
+    });
+  }
+  updateLinks();
 
   function esc(value) {
     return String(value == null ? '' : value)
@@ -314,11 +560,35 @@ INDEX_HTML = """<!doctype html>
       .replace(/'/g, '&#39;');
   }
 
+  function renderContinentOptions(countries) {
+    var select = document.getElementById('continent-select');
+    var current = select.value;
+    var seen = {};
+    var values = [];
+    (countries || []).forEach(function(country) {
+      var continent = country.continent || '';
+      if (continent && !seen[continent]) {
+        seen[continent] = true;
+        values.push(continent);
+      }
+    });
+    values.sort();
+    var html = '<option value="">Alle Kontinente</option>';
+    values.forEach(function(continent) {
+      html += '<option value="' + esc(continent) + '">' + esc(continent) + '</option>';
+    });
+    select.innerHTML = html;
+    if (current && seen[current]) select.value = current;
+  }
+
   function renderCountryOptions(countries) {
     var select = document.getElementById('country-select');
     var current = select.value;
+    var continent = document.getElementById('continent-select').value;
     var html = '<option value="">Land wählen ...</option>';
-    (countries || []).forEach(function(country) {
+    (countries || []).filter(function(country) {
+      return !continent || country.continent === continent;
+    }).forEach(function(country) {
       var suffix = country.selected ? ' (bereits hinzugefügt)' : '';
       html += '<option value="' + esc(country.slug) + '">' + esc(country.name) + suffix + '</option>';
     });
@@ -326,13 +596,27 @@ INDEX_HTML = """<!doctype html>
     if (current) select.value = current;
   }
 
+  function filterCountriesByContinent() {
+    renderCountryOptions(ALL_COUNTRIES);
+  }
+
   function renderWorkflow(workflow) {
     var body = document.getElementById('workflow-body');
     var running = !!(workflow && workflow.running);
     var phase = workflow && workflow.phase ? workflow.phase : 'idle';
     var pct = workflow && typeof workflow.progress === 'number' ? workflow.progress : 0;
-    var statusClass = running ? 'status-running' : (phase === 'error' ? 'status-error' : 'status-ready');
-    var statusText = running ? 'läuft' : (phase === 'error' ? 'fehler' : 'bereit');
+    var statusClass = 'status-ready';
+    var statusText = 'bereit';
+    if (running) {
+      statusClass = 'status-running';
+      statusText = phase === 'building' ? 'build' : 'läuft';
+    } else if (phase === 'queued') {
+      statusClass = 'status-queued';
+      statusText = 'queue';
+    } else if (phase === 'error') {
+      statusClass = 'status-error';
+      statusText = 'fehler';
+    }
     var extra = workflow && workflow.error ? '<pre>' + esc(workflow.error) + '</pre>' : '';
     body.innerHTML = '' +
       '<span class="status-pill ' + statusClass + '">' + statusText + '</span>' +
@@ -345,6 +629,7 @@ INDEX_HTML = """<!doctype html>
       extra +
       '</div>';
     document.getElementById('add-country-btn').disabled = running;
+    document.getElementById('build-btn').disabled = running;
   }
 
   function renderCountries(countries) {
@@ -355,45 +640,132 @@ INDEX_HTML = """<!doctype html>
     }
     var html = '<div class="country-list">';
     countries.forEach(function(country) {
-      var badgeClass = country.status === 'ready' ? 'status-ready' : (country.status === 'error' ? 'status-error' : 'status-pending');
+      var status = country.status || 'pending';
+      var badgeClass = status === 'ready'
+        ? 'status-ready'
+        : (status === 'error' ? 'status-error' : (status === 'queued' ? 'status-queued' : 'status-pending'));
       var detail = [];
+      if (country.continent) detail.push(country.continent);
       if (country.pbf_size_mb != null) detail.push(country.pbf_size_mb + ' MB');
       if (country.imported_at) detail.push('fertig ' + country.imported_at);
       else if (country.added_at) detail.push('hinzugefügt ' + country.added_at);
       if (country.last_error) detail.push('Fehler vorhanden');
       html += '<div class="country-row">' +
         '<div><div class="country-name">' + esc(country.name) + '</div><div class="country-meta">' + esc(detail.join(' · ') || country.url) + '</div></div>' +
-        '<div style="text-align:right"><span class="status-pill ' + badgeClass + '">' + esc(country.status || 'pending') + '</span></div>' +
+        '<div style="text-align:right"><span class="status-pill ' + badgeClass + '">' + esc(status) + '</span></div>' +
         '</div>';
     });
     html += '</div>';
     el.innerHTML = html;
   }
 
-  async function startLibraryAdd() {
-    var payload = {
+  function renderQueuedCount(countries) {
+    var count = (countries || []).filter(function(country) { return country.status === 'queued'; }).length;
+    var el = document.getElementById('queue-count');
+    if (!el) return;
+    el.textContent = count > 0
+      ? count + ' Land/Länder warten aktuell auf den Build.'
+      : 'Keine Länder in der Queue.';
+  }
+
+  function buildCountryPayload() {
+    return {
       country: document.getElementById('country-select').value,
       name: document.getElementById('custom-name').value.trim(),
       url: document.getElementById('custom-url').value.trim()
     };
+  }
+
+  function clearCountryInputs() {
+    document.getElementById('custom-name').value = '';
+    document.getElementById('custom-url').value = '';
+  }
+
+  async function startLibraryQueue() {
     var workflowBody = document.getElementById('workflow-body');
-    workflowBody.innerHTML = 'Starte Workflow ...';
+    workflowBody.innerHTML = 'Starte Queue-Workflow ...';
     try {
-      var resp = await fetch('/api/library/add', {
+      var resp = await fetch('/api/library/queue', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
+        body: JSON.stringify(buildCountryPayload())
       });
       var data = await resp.json();
       if (!resp.ok) {
         workflowBody.innerHTML = '<span class="status-pill status-error">fehler</span><pre>' + esc(data.error || 'Unbekannter Fehler') + '</pre>';
         return;
       }
-      document.getElementById('custom-name').value = '';
-      document.getElementById('custom-url').value = '';
+      clearCountryInputs();
       await refresh();
     } catch (err) {
       workflowBody.innerHTML = '<span class="status-pill status-error">fehler</span><pre>' + esc(err) + '</pre>';
+    }
+  }
+
+  async function startLibraryAdd() {
+    return startLibraryQueue();
+  }
+
+  async function startBuild() {
+    var workflowBody = document.getElementById('workflow-body');
+    workflowBody.innerHTML = 'Starte Build-Workflow ...';
+    try {
+      var resp = await fetch('/api/library/build', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: '{}'
+      });
+      var data = await resp.json();
+      if (!resp.ok) {
+        workflowBody.innerHTML = '<span class="status-pill status-error">fehler</span><pre>' + esc(data.error || 'Unbekannter Fehler') + '</pre>';
+        return;
+      }
+      await refresh();
+    } catch (err) {
+      workflowBody.innerHTML = '<span class="status-pill status-error">fehler</span><pre>' + esc(err) + '</pre>';
+    }
+  }
+
+  async function loadConfig() {
+    try {
+      var resp = await fetch('/api/config');
+      var cfg = await resp.json();
+      document.getElementById('node-url-input').value = cfg.node_url || '';
+      document.getElementById('auto-update-enabled').checked = !!cfg.auto_update_enabled;
+      document.getElementById('auto-update-time').value = cfg.auto_update_time || '03:00';
+      NODE_URL = cfg.node_url || '';
+      updateLinks();
+      updateNextRunDisplay(cfg);
+    } catch(e) {}
+  }
+
+  function updateNextRunDisplay(cfg) {
+    var el = document.getElementById('auto-update-status');
+    if (!el) return;
+    if (cfg.auto_update_enabled) {
+      el.textContent = 'Nächstes Update: täglich um ' + (cfg.auto_update_time || '03:00') + ' UTC';
+    } else {
+      el.textContent = 'Auto-Update deaktiviert.';
+    }
+  }
+
+  async function saveNodeUrl() {
+    var nodeUrl = document.getElementById('node-url-input').value.trim();
+    var resp = await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({node_url: nodeUrl})});
+    if (resp.ok) { NODE_URL = nodeUrl; updateLinks(); location.reload(); }
+  }
+
+  async function saveConfig() {
+    return saveNodeUrl();
+  }
+
+  async function saveAutoUpdate() {
+    var enabled = document.getElementById('auto-update-enabled').checked;
+    var t = document.getElementById('auto-update-time').value;
+    var resp = await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({auto_update_enabled: enabled, auto_update_time: t})});
+    if (resp.ok) {
+      var cfg = await resp.json();
+      updateNextRunDisplay(cfg);
     }
   }
 
@@ -402,9 +774,12 @@ INDEX_HTML = """<!doctype html>
       var resp = await fetch('/api/status');
       var d = await resp.json();
       document.getElementById('ts').textContent = 'Stand: ' + (d.timestamp || '');
-      renderCountryOptions(d.available_countries || []);
+      ALL_COUNTRIES = d.available_countries || [];
+      renderContinentOptions(ALL_COUNTRIES);
+      filterCountriesByContinent();
       renderWorkflow(d.workflow || {});
       renderCountries(d.selected_countries || []);
+      renderQueuedCount(d.selected_countries || []);
 
       var svcs = d.services || [];
       var okCount = svcs.filter(function(s){ return s.ok; }).length;
@@ -449,8 +824,11 @@ INDEX_HTML = """<!doctype html>
     } catch(e) {
       console.warn('Status-Abruf fehlgeschlagen:', e);
     }
-    setTimeout(refresh, 5000);
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(refresh, 5000);
   }
+
+  loadConfig();
   refresh();
   </script>
 </body>
@@ -459,7 +837,7 @@ INDEX_HTML = """<!doctype html>
 
 
 def now_iso():
-    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def clone_default(value):
@@ -467,7 +845,16 @@ def clone_default(value):
 
 
 def ensure_dirs():
-    for path in (STATUS_DIR, LIBRARY_DIR, IMPORT_DIR, VALHALLA_DIR, VALHALLA_TILE_DIR, NOMINATIM_DIR):
+    for path in (
+        STATUS_DIR,
+        LIBRARY_DIR,
+        IMPORT_DIR,
+        VALHALLA_DIR,
+        VALHALLA_STAGING_DIR,
+        VALHALLA_TILE_DIR,
+        NOMINATIM_DIR,
+        TILESERVER_DIR,
+    ):
         os.makedirs(path, exist_ok=True)
 
 
@@ -485,6 +872,42 @@ def save_json(path, payload):
     with open(tmp_path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2, sort_keys=True)
     os.replace(tmp_path, path)
+
+
+def load_config():
+    data = load_json(CONFIG_FILE, CONFIG_DEFAULTS)
+    config = clone_default(CONFIG_DEFAULTS)
+    if isinstance(data, dict):
+        config.update({key: data.get(key, value) for key, value in CONFIG_DEFAULTS.items()})
+    config["node_url"] = str(config.get("node_url") or "").strip()
+    config["auto_update_enabled"] = bool(config.get("auto_update_enabled"))
+    config["auto_update_time"] = str(config.get("auto_update_time") or "03:00")
+    return config
+
+
+def save_config(data):
+    config = clone_default(CONFIG_DEFAULTS)
+    config.update({key: data.get(key, value) for key, value in CONFIG_DEFAULTS.items()})
+    save_json(CONFIG_FILE, config)
+    return config
+
+
+def valid_time_value(value):
+    return bool(re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", value or ""))
+
+
+def apply_config_update(payload):
+    config = load_config()
+    if "node_url" in payload:
+        config["node_url"] = str(payload.get("node_url") or "").strip()
+    if "auto_update_enabled" in payload:
+        config["auto_update_enabled"] = bool(payload.get("auto_update_enabled"))
+    if "auto_update_time" in payload:
+        time_value = str(payload.get("auto_update_time") or "").strip()
+        if not valid_time_value(time_value):
+            raise ValueError("auto_update_time must use HH:MM format.")
+        config["auto_update_time"] = time_value
+    return save_config(config)
 
 
 def slugify(value):
@@ -566,12 +989,15 @@ def upsert_country_record(country, **updates):
             record.update(updates)
             record["name"] = country["name"]
             record["url"] = country["url"]
+            if country.get("continent"):
+                record["continent"] = country["continent"]
             break
     else:
         record = {
             "slug": country["slug"],
             "name": country["name"],
             "url": country["url"],
+            "continent": country.get("continent", ""),
             "status": "pending",
             "added_at": now_iso(),
         }
@@ -584,13 +1010,14 @@ def mark_library_ready():
     records = list_library_records()
     timestamp = now_iso()
     for record in records:
+        if not record.get("pbf_path"):
+            continue
         record["status"] = "ready"
         record["imported_at"] = timestamp
         record["last_error"] = ""
-        if record.get("pbf_path"):
-            size_mb = file_size_mb(record["pbf_path"])
-            if size_mb is not None:
-                record["pbf_size_mb"] = size_mb
+        size_mb = file_size_mb(record["pbf_path"])
+        if size_mb is not None:
+            record["pbf_size_mb"] = size_mb
     save_library_records(records)
 
 
@@ -620,7 +1047,7 @@ def write_workflow_state(**updates):
 def country_catalog_with_flags(records):
     selected = {record.get("slug") for record in records}
     catalog = []
-    for country in sorted(COUNTRY_LIBRARY, key=lambda item: item["name"]):
+    for country in sorted(COUNTRY_LIBRARY, key=lambda item: (item["continent"], item["name"])):
         item = dict(country)
         item["selected"] = item["slug"] in selected
         catalog.append(item)
@@ -637,7 +1064,7 @@ def resolve_country_request(payload):
             raise ValueError("Custom imports require both a name and a URL.")
         if not custom_url.startswith(("http://", "https://")):
             raise ValueError("Custom URL must start with http:// or https://.")
-        return {"slug": slugify(custom_name), "name": custom_name, "url": custom_url}
+        return {"slug": slugify(custom_name), "name": custom_name, "url": custom_url, "continent": "Custom"}
 
     for country in COUNTRY_LIBRARY:
         if country["slug"] == slug:
@@ -661,7 +1088,7 @@ def collect_status():
             full_path = os.path.join(IMPORT_DIR, entry)
             try:
                 size_mb = round(os.path.getsize(full_path) / (1024 * 1024), 1)
-                mtime = datetime.utcfromtimestamp(os.path.getmtime(full_path)).strftime("%Y-%m-%d %H:%M UTC")
+                mtime = datetime.fromtimestamp(os.path.getmtime(full_path), timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
             except OSError:
                 size_mb, mtime = 0, "?"
             import_files.append({"name": entry, "size_mb": size_mb, "mtime": mtime})
@@ -675,6 +1102,7 @@ def collect_status():
         "valhalla_tiles_mb": dir_size_mb(VALHALLA_TILE_DIR),
         "available_countries": country_catalog_with_flags(records),
         "selected_countries": records,
+        "queued_count": len([record for record in records if record.get("status") == "queued"]),
         "workflow": read_workflow_state(),
     }
 
@@ -717,6 +1145,18 @@ def clear_directory(path):
             os.unlink(full_path)
 
 
+def wait_for_job_deletion(name, timeout_seconds=60):
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        try:
+            KUBE.get_job(name)
+        except RuntimeError as exc:
+            if "404" in str(exc):
+                return
+        time.sleep(2)
+    raise RuntimeError(f"Timed out waiting for job deletion: {name}")
+
+
 def download_country_file(country):
     destination = os.path.join(LIBRARY_DIR, f"{country['slug']}.osm.pbf")
     temp_path = f"{destination}.part"
@@ -741,7 +1181,6 @@ def download_country_file(country):
     request = urllib.request.Request(country["url"], headers={"User-Agent": "localosm-status/1.0"})
     os.makedirs(os.path.dirname(destination), exist_ok=True)
     downloaded = 0
-    total_size = 0
     with urllib.request.urlopen(request, timeout=30) as response, open(temp_path, "wb") as handle:
         total_size = int(response.headers.get("Content-Length", "0") or 0)
         last_update = 0.0
@@ -782,9 +1221,11 @@ def download_country_file(country):
     return destination
 
 
-def merge_library_files(country):
-    records = list_library_records()
-    input_paths = [record.get("pbf_path") for record in records if record.get("pbf_path")]
+def merge_library_files(country, records=None):
+    merge_records = records or [
+        record for record in list_library_records() if record.get("pbf_path") and record.get("status") != "error"
+    ]
+    input_paths = [record.get("pbf_path") for record in merge_records if record.get("pbf_path")]
     if not input_paths:
         raise RuntimeError("No downloaded country extracts available to merge.")
 
@@ -810,8 +1251,8 @@ def merge_library_files(country):
     with open(meta_path, "w", encoding="utf-8") as handle:
         handle.write(f"downloaded_at={now_iso()}\n")
         handle.write(f"path={MERGED_PBF}\n")
-        handle.write(f"countries={','.join(record['slug'] for record in records)}\n")
-        for record in records:
+        handle.write(f"countries={','.join(record['slug'] for record in merge_records)}\n")
+        for record in merge_records:
             handle.write(f"source[{record['slug']}]={record['url']}\n")
 
 
@@ -861,7 +1302,7 @@ def build_valhalla_job_manifest():
                         },
                         {
                             "name": "valhalla-data",
-                            "hostPath": {"path": "/mnt/data/OSM/valhalla", "type": "DirectoryOrCreate"},
+                            "hostPath": {"path": "/mnt/data/OSM/valhalla-staging", "type": "DirectoryOrCreate"},
                         },
                         {
                             "name": "valhalla-config",
@@ -874,24 +1315,78 @@ def build_valhalla_job_manifest():
     }
 
 
+def build_tileserver_job_manifest():
+    return {
+        "apiVersion": "batch/v1",
+        "kind": "Job",
+        "metadata": {"name": "tilemaker-import", "namespace": NAMESPACE},
+        "spec": {
+            "backoffLimit": 1,
+            "ttlSecondsAfterFinished": 3600,
+            "template": {
+                "spec": {
+                    "restartPolicy": "Never",
+                    "containers": [
+                        {
+                            "name": "tilemaker-import",
+                            "image": "ghcr.io/onthegomap/planetiler:latest",
+                            "imagePullPolicy": "Always",
+                            "resources": {"requests": {"memory": "2Gi"}, "limits": {"memory": "6Gi"}},
+                            "securityContext": {"runAsUser": 0, "runAsGroup": 0},
+                            "command": ["/bin/sh", "-c"],
+                            "args": [
+                                "set -e\n"
+                                "echo '=== Planetiler Tile Generation ==='\n"
+                                "if [ ! -f /data/import/planet.osm.pbf ]; then\n"
+                                "  echo 'ERROR: /data/import/planet.osm.pbf not found'\n"
+                                "  exit 1\n"
+                                "fi\n"
+                                "mkdir -p /data/tileserver\n"
+                                "java -jar /planetiler.jar \\\n"
+                                "  --osm-path=/data/import/planet.osm.pbf \\\n"
+                                "  --output=/data/tileserver/map.mbtiles \\\n"
+                                "  --force\n"
+                                "echo '=== Tile generation complete ==='\n"
+                            ],
+                            "volumeMounts": [
+                                {"name": "osm-data", "mountPath": "/data"},
+                            ],
+                        }
+                    ],
+                    "volumes": [
+                        {
+                            "name": "osm-data",
+                            "hostPath": {"path": "/mnt/data/OSM", "type": "DirectoryOrCreate"},
+                        }
+                    ],
+                }
+            },
+        },
+    }
+
+
 def _routing_progress(elapsed_seconds):
-    """Return an estimated progress % (60-77) based on elapsed build time."""
-    # Heuristic: typical valhalla_build_tiles run is 5-30 min for small/medium extracts.
-    # Ramp from 60 % to 77 % over 30 minutes, then hold at 77 %.
-    ramp_seconds = 1800  # 30 min
+    ramp_seconds = 1800
     pct = 60 + 17 * min(elapsed_seconds, ramp_seconds) / ramp_seconds
     return int(pct)
 
 
+def _tiles_progress(elapsed_seconds):
+    ramp_seconds = 2400
+    pct = 50 + 8 * min(elapsed_seconds, ramp_seconds) / ramp_seconds
+    return int(pct)
+
+
 def rebuild_valhalla(country):
-    clear_directory(VALHALLA_TILE_DIR)
+    clear_directory(VALHALLA_STAGING_DIR)
     KUBE.delete_job("valhalla-import")
+    wait_for_job_deletion("valhalla-import")
     write_workflow_state(
         running=True,
         phase="routing",
         progress=60,
         message="Starting Valhalla rebuild ...",
-        detail="Submitting valhalla-import job.",
+        detail="Submitting valhalla-import job to the staging directory.",
         country=country["name"],
         error="",
     )
@@ -911,8 +1406,26 @@ def rebuild_valhalla(country):
                 running=True,
                 phase="routing",
                 progress=78,
+                message="Swapping staged Valhalla graph into production ...",
+                detail="Routing graph built successfully. Performing atomic swap and rolling restart.",
+                country=country["name"],
+                error="",
+            )
+            valhalla_old = os.path.join(DATA_DIR, "valhalla-old")
+            if os.path.exists(valhalla_old):
+                shutil.rmtree(valhalla_old, ignore_errors=True)
+            if os.path.exists(VALHALLA_DIR):
+                os.rename(VALHALLA_DIR, valhalla_old)
+            os.rename(VALHALLA_STAGING_DIR, VALHALLA_DIR)
+            if os.path.exists(valhalla_old):
+                shutil.rmtree(valhalla_old, ignore_errors=True)
+            KUBE.rollout_restart("valhalla")
+            write_workflow_state(
+                running=True,
+                phase="routing",
+                progress=78,
                 message="Valhalla routing graph rebuilt.",
-                detail="Routing tiles are ready.",
+                detail="Staged graph swapped in and rollout restart triggered.",
                 country=country["name"],
                 error="",
             )
@@ -924,12 +1437,10 @@ def rebuild_valhalla(country):
         elapsed = time.time() - job_start
         elapsed_min = int(elapsed // 60)
         elapsed_sec = int(elapsed % 60)
-
-        # Grab the last meaningful log line from the running pod for live feedback.
         last_log = ""
         try:
             raw_logs = KUBE.get_job_logs("valhalla-import", tail_lines=10)
-            lines = [l.strip() for l in raw_logs.splitlines() if l.strip()]
+            lines = [line.strip() for line in raw_logs.splitlines() if line.strip()]
             if lines:
                 last_log = lines[-1]
         except Exception:  # noqa: BLE001
@@ -950,6 +1461,73 @@ def rebuild_valhalla(country):
         )
         time.sleep(5)
     raise RuntimeError("Timed out waiting for the Valhalla import job to finish.")
+
+
+def rebuild_tileserver(country):
+    KUBE.delete_job("tilemaker-import")
+    wait_for_job_deletion("tilemaker-import")
+    write_workflow_state(
+        running=True,
+        phase="tiles",
+        progress=50,
+        message="Starting TileServer rebuild ...",
+        detail="Submitting tilemaker-import job.",
+        country=country["name"],
+        error="",
+    )
+    KUBE.create_job(build_tileserver_job_manifest())
+
+    job_start = time.time()
+    deadline = job_start + 7200
+    while time.time() < deadline:
+        try:
+            job_data = KUBE.get_job("tilemaker-import")
+        except RuntimeError:
+            time.sleep(3)
+            continue
+        status = job_data.get("status", {})
+        if status.get("succeeded", 0) >= 1:
+            write_workflow_state(
+                running=True,
+                phase="tiles",
+                progress=58,
+                message="TileServer MBTiles rebuilt.",
+                detail="Local vector tiles are ready.",
+                country=country["name"],
+                error="",
+            )
+            return
+        if status.get("failed", 0) > 0:
+            logs = KUBE.get_job_logs("tilemaker-import")
+            raise RuntimeError(logs or "Tile generation job failed.")
+
+        elapsed = time.time() - job_start
+        elapsed_min = int(elapsed // 60)
+        elapsed_sec = int(elapsed % 60)
+        last_log = ""
+        try:
+            raw_logs = KUBE.get_job_logs("tilemaker-import", tail_lines=10)
+            lines = [line.strip() for line in raw_logs.splitlines() if line.strip()]
+            if lines:
+                last_log = lines[-1]
+        except Exception:  # noqa: BLE001
+            pass
+
+        detail_parts = [f"Läuft seit {elapsed_min:02d}:{elapsed_sec:02d} min."]
+        if last_log:
+            detail_parts.append(f"Log: {last_log}")
+
+        write_workflow_state(
+            running=True,
+            phase="tiles",
+            progress=_tiles_progress(elapsed),
+            message="Planetiler erzeugt lokale Karten-Tiles ...",
+            detail=" | ".join(detail_parts),
+            country=country["name"],
+            error="",
+        )
+        time.sleep(10)
+    raise RuntimeError("Timed out waiting for the TileServer import job to finish.")
 
 
 def scale_nominatim(replicas):
@@ -1022,6 +1600,127 @@ def rebuild_nominatim(country):
     wait_for_nominatim_ready(country)
 
 
+def run_parallel_build_steps(country, records=None):
+    merge_library_files(country, records=records)
+    valhalla_err = [None]
+    tileserver_err = [None]
+
+    def _valhalla_thread():
+        try:
+            rebuild_valhalla(country)
+        except Exception as exc:  # noqa: BLE001
+            valhalla_err[0] = exc
+
+    def _tileserver_thread():
+        try:
+            rebuild_tileserver(country)
+        except Exception as exc:  # noqa: BLE001
+            tileserver_err[0] = exc
+
+    t_v = threading.Thread(target=_valhalla_thread, daemon=True)
+    t_t = threading.Thread(target=_tileserver_thread, daemon=True)
+    t_v.start()
+    t_t.start()
+    t_v.join()
+    t_t.join()
+    if valhalla_err[0]:
+        raise valhalla_err[0]
+    if tileserver_err[0]:
+        raise tileserver_err[0]
+    rebuild_nominatim(country)
+    mark_library_ready()
+
+
+def finish_workflow_thread():
+    ACTIVE_WORKFLOW["thread"] = None
+    if WORKFLOW_LOCK.locked():
+        WORKFLOW_LOCK.release()
+
+
+def run_queue_workflow(country):
+    try:
+        ensure_dirs()
+        upsert_country_record(country, status="pending", added_at=now_iso(), last_error="")
+        write_workflow_state(
+            running=True,
+            phase="queued",
+            progress=2,
+            message=f"Preparing queue download for {country['name']}.",
+            detail="Preparing directories and state files.",
+            country=country["name"],
+            error="",
+        )
+        download_country_file(country)
+        upsert_country_record(country, status="queued", last_error="")
+        queued_count = len([record for record in list_library_records() if record.get("status") == "queued"])
+        write_workflow_state(
+            running=False,
+            phase="queued",
+            progress=45,
+            message=f"{country['name']} downloaded and queued.",
+            detail=f"{queued_count} country/countries waiting for the next build.",
+            country=country["name"],
+            error="",
+        )
+    except Exception as exc:  # noqa: BLE001
+        upsert_country_record(country, status="error", last_error=str(exc))
+        write_workflow_state(
+            running=False,
+            phase="error",
+            progress=100,
+            message=f"Queue workflow failed for {country['name']}.",
+            detail="See the captured error below.",
+            country=country["name"],
+            error=str(exc),
+        )
+    finally:
+        finish_workflow_thread()
+
+
+def run_build_workflow(country=None):
+    country = country or {"name": "Library", "slug": "library", "url": ""}
+    try:
+        ensure_dirs()
+        records = [
+            record
+            for record in list_library_records()
+            if record.get("pbf_path") and record.get("status") in {"queued", "ready"}
+        ]
+        if not records:
+            raise RuntimeError("No queued or ready countries available for a build.")
+        write_workflow_state(
+            running=True,
+            phase="building",
+            progress=40,
+            message="Starting library build ...",
+            detail=f"Preparing {len(records)} queued/ready country extract(s) for the shared build pipeline.",
+            country=country["name"],
+            error="",
+        )
+        run_parallel_build_steps(country, records=records)
+        write_workflow_state(
+            running=False,
+            phase="done",
+            progress=100,
+            message="Library build completed.",
+            detail="Merged extract, local tiles, routing and search data are ready.",
+            country=country["name"],
+            error="",
+        )
+    except Exception as exc:  # noqa: BLE001
+        write_workflow_state(
+            running=False,
+            phase="error",
+            progress=100,
+            message="Library build failed.",
+            detail="See the captured error below.",
+            country=country["name"],
+            error=str(exc),
+        )
+    finally:
+        finish_workflow_thread()
+
+
 def run_country_workflow(country):
     try:
         ensure_dirs()
@@ -1036,16 +1735,13 @@ def run_country_workflow(country):
             error="",
         )
         download_country_file(country)
-        merge_library_files(country)
-        rebuild_valhalla(country)
-        rebuild_nominatim(country)
-        mark_library_ready()
+        run_parallel_build_steps(country)
         write_workflow_state(
             running=False,
             phase="done",
             progress=100,
             message=f"{country['name']} added to the library.",
-            detail="Merged extract, routing tiles, address search and POI search are ready.",
+            detail="Merged extract, local tiles, routing and address search are ready.",
             country=country["name"],
             error="",
         )
@@ -1061,8 +1757,7 @@ def run_country_workflow(country):
             error=str(exc),
         )
     finally:
-        ACTIVE_WORKFLOW["thread"] = None
-        WORKFLOW_LOCK.release()
+        finish_workflow_thread()
 
 
 def start_country_workflow(payload):
@@ -1073,6 +1768,56 @@ def start_country_workflow(payload):
     ACTIVE_WORKFLOW["thread"] = thread
     thread.start()
     return country
+
+
+def start_queue_workflow(payload):
+    country = resolve_country_request(payload)
+    if not WORKFLOW_LOCK.acquire(blocking=False):
+        raise RuntimeError("Another country library workflow is already running.")
+    thread = threading.Thread(target=run_queue_workflow, args=(country,), daemon=True)
+    ACTIVE_WORKFLOW["thread"] = thread
+    thread.start()
+    return country
+
+
+def start_build_workflow():
+    if not WORKFLOW_LOCK.acquire(blocking=False):
+        raise RuntimeError("Another country library workflow is already running.")
+    thread = threading.Thread(target=run_build_workflow, daemon=True)
+    ACTIVE_WORKFLOW["thread"] = thread
+    thread.start()
+    return {
+        "count": len(
+            [record for record in list_library_records() if record.get("pbf_path") and record.get("status") in {"queued", "ready"}]
+        )
+    }
+
+
+def run_scheduler_loop():
+    while True:
+        time.sleep(60)
+        if not SCHEDULER_LOCK.acquire(blocking=False):
+            continue
+        try:
+            cfg = load_config()
+            if not cfg.get("auto_update_enabled"):
+                continue
+            schedule_time = cfg.get("auto_update_time", "03:00")
+            now_utc = datetime.now(timezone.utc)
+            now_hm = now_utc.strftime("%H:%M")
+            today = now_utc.strftime("%Y-%m-%d")
+            if now_hm == schedule_time and LAST_AUTO_RUN["date"] != today:
+                LAST_AUTO_RUN["date"] = today
+                records = list_library_records()
+                if records and not WORKFLOW_LOCK.locked():
+                    if WORKFLOW_LOCK.acquire(blocking=False):
+                        thread = threading.Thread(target=run_build_workflow, daemon=True)
+                        ACTIVE_WORKFLOW["thread"] = thread
+                        thread.start()
+        except Exception:
+            pass
+        finally:
+            SCHEDULER_LOCK.release()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1086,7 +1831,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path in {"/", "/index.html"}:
-            body = INDEX_HTML.encode("utf-8")
+            body = INDEX_HTML.replace("{{NODE_URL}}", load_config().get("node_url", "")).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -1100,6 +1845,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path == "/api/status":
             self._send_json(collect_status())
+            return
+
+        if self.path == "/api/config":
+            self._send_json(load_config())
             return
 
         if self.path.startswith("/test/"):
@@ -1143,6 +1892,36 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"status": "started", "country": country})
             return
 
+        if self.path == "/api/library/queue":
+            try:
+                country = start_queue_workflow(payload)
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 400)
+                return
+            except RuntimeError as exc:
+                self._send_json({"error": str(exc)}, 409)
+                return
+            self._send_json({"status": "queued", "country": country})
+            return
+
+        if self.path == "/api/library/build":
+            try:
+                build = start_build_workflow()
+            except RuntimeError as exc:
+                self._send_json({"error": str(exc)}, 409)
+                return
+            self._send_json({"status": "started", "build": build})
+            return
+
+        if self.path == "/api/config":
+            try:
+                config = apply_config_update(payload)
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 400)
+                return
+            self._send_json(config)
+            return
+
         self._send_json({"error": "not found"}, 404)
 
     def log_message(self, format, *args):
@@ -1151,8 +1930,6 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     ensure_dirs()
-    # If the process was restarted while a workflow was running, clear the
-    # stale "running" flag so the UI doesn't stay stuck in a phantom state.
     _startup_state = read_workflow_state()
     if _startup_state.get("running"):
         write_workflow_state(
@@ -1163,6 +1940,8 @@ if __name__ == "__main__":
             detail="Start a new workflow to continue.",
             error="",
         )
+    sched = threading.Thread(target=run_scheduler_loop, daemon=True)
+    sched.start()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"OSM status server listening on {HOST}:{PORT}")
     try:

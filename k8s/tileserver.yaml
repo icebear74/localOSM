@@ -23,12 +23,20 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              if [ ! -f /data/config.json ]; then
-                printf '{"options":{"paths":{"root":"","fonts":"/usr/share/fonts","sprites":"","icons":""},"serveAllFonts":true},"styles":{},"data":{}}\n' \
-                  > /data/config.json
-                echo "Created minimal tileserver-gl config.json"
+              if [ -f /data/map.mbtiles ]; then
+                # Write full config with data
+                cat > /data/config.json << 'EOF'
+                {"options":{"paths":{"root":"/","fonts":"/usr/share/fonts","sprites":"","icons":""},"serveAllFonts":true},"styles":{"osm":{"style":"/data/style.json"}},"data":{"v3":{"mbtiles":"/data/map.mbtiles"}}}
+                EOF
+                # Write minimal MapLibre GL style
+                cat > /data/style.json << 'EOF'
+                {"version":8,"name":"LocalOSM","sources":{"openmaptiles":{"type":"vector","url":"mbtiles://{v3}"}},"glyphs":"http://localhost/fonts/{fontstack}/{range}.pbf","layers":[{"id":"background","type":"background","paint":{"background-color":"#f2efe9"}},{"id":"water","type":"fill","source":"openmaptiles","source-layer":"water","paint":{"fill-color":"#9cc0d4"}},{"id":"waterway","type":"line","source":"openmaptiles","source-layer":"waterway","paint":{"line-color":"#9cc0d4","line-width":1}},{"id":"landuse-green","type":"fill","source":"openmaptiles","source-layer":"landuse","filter":["in","class","grass","park","meadow","forest","wood"],"paint":{"fill-color":"#d0e8c0"}},{"id":"road","type":"line","source":"openmaptiles","source-layer":"transportation","paint":{"line-color":"#ccc","line-width":{"stops":[[8,0.5],[12,1.5],[16,3]]}}},{"id":"road-major","type":"line","source":"openmaptiles","source-layer":"transportation","filter":["in","class","motorway","trunk","primary"],"paint":{"line-color":"#f9a825","line-width":{"stops":[[6,1],[10,2],[14,5]]}}},{"id":"road-secondary","type":"line","source":"openmaptiles","source-layer":"transportation","filter":["in","class","secondary","tertiary"],"paint":{"line-color":"#fff","line-width":{"stops":[[10,1],[14,3]]}}},{"id":"building","type":"fill","source":"openmaptiles","source-layer":"building","minzoom":14,"paint":{"fill-color":"#d9d0c9","fill-opacity":0.9}},{"id":"place-city","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["in","class","city","town"],"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["Noto Sans Regular"],"text-size":{"stops":[[8,11],[14,16]]}},"paint":{"text-color":"#333","text-halo-color":"#fff","text-halo-width":1.5}},{"id":"place-village","type":"symbol","source":"openmaptiles","source-layer":"place","minzoom":11,"filter":["==","class","village"],"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["Noto Sans Regular"],"text-size":12},"paint":{"text-color":"#555","text-halo-color":"#fff","text-halo-width":1}}]}
+                EOF
+                echo "TileServer configured with local map.mbtiles"
               else
-                echo "config.json already present — keeping existing file"
+                # Write minimal empty config (no data yet)
+                printf '{"options":{"paths":{"root":"","fonts":"/usr/share/fonts","sprites":"","icons":""},"serveAllFonts":true},"styles":{},"data":{}}\n' > /data/config.json
+                echo "TileServer started without tiles (no map.mbtiles found)"
               fi
           volumeMounts:
             - name: tileserver-data

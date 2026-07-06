@@ -115,12 +115,15 @@ data:
     <script>
     // Fix status link hostname
     document.getElementById('status-link').href =
-      location.protocol + '//' + location.hostname + ':30083/';
+      document.getElementById('status-link').href.replace('NODEIP', location.hostname);
 
     var map = L.map('map').setView([52.52, 13.405], 13);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-      maxZoom: 19
+    var tileUrl = 'http://' + location.hostname + ':30085/styles/osm/{z}/{x}/{y}.png';
+    var tileAttrib = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+    var tileLayer = L.tileLayer(tileUrl, {
+      attribution: tileAttrib,
+      maxZoom: 19,
+      errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
     }).addTo(map);
 
     var markers = { start: null, end: null };
