@@ -1625,12 +1625,13 @@ def rebuild_tileserver(country):
             continue
         status = job_data.get("status", {})
         if status.get("succeeded", 0) >= 1:
+            KUBE.rollout_restart("tileserver-gl")
             write_workflow_state(
                 running=True,
                 phase="tiles",
                 progress=58,
                 message="TileServer MBTiles rebuilt.",
-                detail="Local vector tiles are ready.",
+                detail="Local vector tiles are ready. Rollout restart triggered.",
                 country=country["name"],
                 error="",
             )
