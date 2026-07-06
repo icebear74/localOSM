@@ -533,10 +533,10 @@ data:
       <p class="refresh">Automatische Aktualisierung alle 5 Sekunden. <span id="ts"></span></p>
     
       <div class="links" id="links">
-        <a href="http://NODEIP:30084/" id="web-link">&#128205; Routing-UI</a>
-        <a href="http://NODEIP:30082/" id="valhalla-link">Valhalla API</a>
-        <a href="http://NODEIP:30081/" id="nominatim-link">Nominatim</a>
-        <a href="http://NODEIP:30085/" id="tileserver-link">TileServer GL</a>
+        <a href="#" id="web-link" data-port="30084">&#128205; Routing-UI</a>
+        <a href="#" id="valhalla-link" data-port="30082">Valhalla API</a>
+        <a href="#" id="nominatim-link" data-port="30081">Nominatim</a>
+        <a href="#" id="tileserver-link" data-port="30085">TileServer GL</a>
       </div>
     
       <div class="grid">
@@ -622,7 +622,7 @@ data:
         var baseUrl = (NODE_URL || (location.protocol + '//' + location.hostname)).replace(/\/+$/, '');
         ['web-link','valhalla-link','nominatim-link','tileserver-link'].forEach(function(id) {
           var a = document.getElementById(id);
-          if (a) a.href = a.href.replace('http://NODEIP', baseUrl);
+          if (a && a.dataset.port) a.href = baseUrl + ':' + a.dataset.port + '/';
         });
       }
       updateLinks();
@@ -938,6 +938,11 @@ data:
               : '<p style="color:#e74c3c;font-size:.82rem;margin-top:.5rem">&#9888; Noch keine Tiles.</p>');
         } catch(e) {
           console.warn('Status-Abruf fehlgeschlagen:', e);
+          var errMsg = '<span class="hint" style="color:#e74c3c">&#9888; Fehler beim Laden (' + esc(String(e)) + ')</span>';
+          ['workflow-body','country-list','svc-list','import-list','tiles-info'].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el && el.textContent === 'Lade ...') el.innerHTML = errMsg;
+          });
         }
         if (refreshTimer) clearTimeout(refreshTimer);
         refreshTimer = setTimeout(refresh, 5000);
@@ -1977,7 +1982,10 @@ data:
                 return
     
             if self.path == "/api/status":
-                self._send_json(collect_status())
+                try:
+                    self._send_json(collect_status())
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": str(exc)}, 500)
                 return
     
             if self.path == "/api/config":
