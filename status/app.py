@@ -1814,8 +1814,8 @@ def run_scheduler_loop():
                         thread = threading.Thread(target=run_build_workflow, daemon=True)
                         ACTIVE_WORKFLOW["thread"] = thread
                         thread.start()
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            print(f"Auto-update scheduler error: {exc}", flush=True)
         finally:
             SCHEDULER_LOCK.release()
 
