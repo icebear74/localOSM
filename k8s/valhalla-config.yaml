@@ -13,7 +13,7 @@ data:
         "timezone": "/data/timezone.sqlite",
         "admin": "/data/admin.sqlite",
         "default_speeds_config": "/usr/local/share/valhalla/mjolnir/default_speeds.lua",
-        "max_speed": 200,
+        "max_speed": 120,
         "num_threads": 6,
         "logging": {
           "type": "std_out",
