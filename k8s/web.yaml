@@ -431,7 +431,8 @@ data:
                 z_x_y = self.path[len("/tiles"):]  # e.g. /14/8845/6436.pbf
                 tile_url = TILESERVER_URL + "/data/v3" + z_x_y
                 try:
-                    # Request gzip encoding to reduce network transfer; we will decompress here
+                    # Request gzip encoding to reduce network transfer; will conditionally decompress here
+                    # based on Content-Encoding header and gzip magic bytes detection.
                     req = urllib.request.Request(tile_url, headers={
                         "User-Agent": "localosm-web/1.0",
                         "Accept-Encoding": "gzip"
@@ -453,8 +454,10 @@ data:
                                 print(f"debug: Detected gzip by magic bytes (no Content-Encoding header) for {tile_url}", flush=True)
                         except (gzip.BadGzipFile, OSError) as e:
                             print(f"error: Gzip decompression failed (body size {len(body)}, header={is_gzip_header}, magic={is_gzip_magic}): {e}", flush=True)
-                            # If decompression fails despite magic bytes, try to use body as-is
-                            if not is_gzip_header:
+                            # Log additional context when header indicated gzip but decompression failed
+                            if is_gzip_header:
+                                print(f"error: Content-Encoding header claimed gzip but decompression failed for {tile_url}", flush=True)
+                            else:
                                 print(f"warning: Malformed gzip data detected for {tile_url}, forwarding as-is", flush=True)
                     
                     if len(body) == 0:
