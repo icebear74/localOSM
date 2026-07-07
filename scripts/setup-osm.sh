@@ -354,7 +354,7 @@ generate_glyph_pbf_files() {
         
         log_debug "  Generating glyph range $range..."
         
-        if fontnik "$ttf_file" "$start" "$end" > "$output_file" 2>/dev/null; then
+        if fontnik "$ttf_file" "$output_file" "$start" "$end" 2>/dev/null; then
             local file_size=$(get_file_size "$output_file")
             if [ "$file_size" -gt "$MIN_VALID_PBF_SIZE" ]; then
                 generated_count=$((generated_count + 1))
