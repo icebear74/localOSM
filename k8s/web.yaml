@@ -139,7 +139,7 @@ data:
             type: 'vector',
             tiles: [location.protocol + '//' + location.host + '/tiles/{z}/{x}/{y}.pbf'],
             minzoom: 0,
-            maxzoom: 28
+            maxzoom: 16
           }
         },
         glyphs: location.protocol + '//' + location.host + '/fonts/{fontstack}/{range}.pbf',
