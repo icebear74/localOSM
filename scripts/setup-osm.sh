@@ -251,8 +251,11 @@ generate_glyph_pbf_files() {
             # Validate that PBF files are substantial (not empty stubs)
             local valid_pbf_count=0
             while IFS= read -r pbf_file; do
-                if [ -f "$pbf_file" ] && [ $(stat -f%z "$pbf_file" 2>/dev/null || stat -c%s "$pbf_file" 2>/dev/null) -gt 10 ]; then
-                    valid_pbf_count=$((valid_pbf_count + 1))
+                if [ -f "$pbf_file" ]; then
+                    local file_size=$(stat -f%z "$pbf_file" 2>/dev/null || stat -c%s "$pbf_file" 2>/dev/null)
+                    if [ "$file_size" -gt 10 ]; then
+                        valid_pbf_count=$((valid_pbf_count + 1))
+                    fi
                 fi
             done < <(find "$pbf_dir" -name "*.pbf" -type f)
             
@@ -298,17 +301,22 @@ generate_glyph_pbf_files() {
         return 1
     }
     
-    # Get the first TTF file
+    # Get the first TTF or OTF file
     local ttf_file=$(find "$FONTS_PATH" -name "*.ttf" | head -1)
     if [ -z "$ttf_file" ]; then
-        log_error "No TTF file found for glyph generation"
+        # Try OTF as fallback
+        ttf_file=$(find "$FONTS_PATH" -name "*.otf" | head -1)
+    fi
+    if [ -z "$ttf_file" ]; then
+        log_error "No TTF or OTF file found for glyph generation"
         return 1
     fi
     
     log_debug "Using font file: $ttf_file"
     
     # Generate glyph ranges covering common Unicode blocks
-    # This includes Latin, Latin Extended, CJK, Arabic, Devanagari, and other scripts
+    # This includes Latin, Extended Latin, Greek, Cyrillic, Hebrew, Arabic, and Indic scripts
+    # The 8192-8447 range (Private Use Area) supports custom icon fonts if needed in the future
     local ranges=(
         "0-255"       # Latin, Latin-1 Supplement
         "256-511"     # Latin Extended-A
@@ -326,7 +334,7 @@ generate_glyph_pbf_files() {
         "3328-3583"   # Tamil
         "3584-3839"   # Telugu
         "3840-4095"   # Kannada
-        "8192-8447"   # Private Use Area (for custom icons)
+        "8192-8447"   # Private Use Area (can support custom icon fonts if configured)
     )
     
     local generated_count=0
