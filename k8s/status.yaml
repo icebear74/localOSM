@@ -1855,11 +1855,11 @@ data:
                                     "--lake_centerlines_path=/data/sources/lake_centerline.shp.zip",
                                     "--water_polygons_path=/data/sources/water-polygons-split-3857.zip",
                                     "--natural_earth_path=/data/sources/natural_earth_vector.sqlite.zip",
-                                    # Generate all zoom levels from 0 (world view) to 28 (maximum detail)
-                                    # to support all zoom ranges. With sufficient disk space (>2TB),
+                                    # Generate all zoom levels from 0 (world view) to 16 (maximum supported)
+                                    # to support all zoom ranges. With sufficient disk space (>100GB),
                                     # all zoom levels can be generated for maximum flexibility.
                                     "--minzoom=0",
-                                    "--maxzoom=28",
+                                    "--maxzoom=16",
                                 ],
                                 "volumeMounts": [
                                     {"name": "osm-data", "mountPath": "/data"},
