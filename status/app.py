@@ -1798,6 +1798,8 @@ def build_tileserver_job_manifest():
                                 # needed and would cause MapLibre to overzoom them outside the
                                 # extract area, producing a distorted world-map appearance.
                                 "--minzoom=6",
+                                # Generate tiles up to zoom 14 to support detailed map views
+                                "--maxzoom=14",
                             ],
                             "volumeMounts": [
                                 {"name": "osm-data", "mountPath": "/data"},
