@@ -29,17 +29,18 @@ spec:
               # Download Noto Sans Regular PBF glyph fonts once; cached in /data/fonts on the host.
               # After the first run this is fully offline — no CDN needed at runtime.
               if [ ! -d "/data/fonts/Noto Sans Regular" ]; then
-                echo "Downloading OpenMapTiles Noto Sans fonts (one-time setup)..."
-                apk add --no-cache --quiet git && \
-                  git -c advice.detachedHead=false clone \
-                    --depth=1 --filter=blob:none --sparse \
-                    https://github.com/openmaptiles/fonts.git /tmp/omtfonts && \
-                  git -C /tmp/omtfonts sparse-checkout set noto-sans && \
-                  git -C /tmp/omtfonts checkout && \
-                  cp -r "/tmp/omtfonts/noto-sans/Noto Sans Regular" "/data/fonts/" && \
-                  rm -rf /tmp/omtfonts && \
-                  echo "Fonts installed at /data/fonts." || \
-                  echo "WARNING: Font download failed. Street labels may be invisible."
+                echo "Downloading OpenMapTiles Noto Sans Regular fonts (one-time setup)..."
+                apk add --no-cache --quiet wget unzip && \
+                  wget -q -O /tmp/omtfonts.zip \
+                    "https://github.com/openmaptiles/fonts/archive/refs/heads/master.zip" && \
+                  unzip -q /tmp/omtfonts.zip \
+                    "fonts-master/noto-sans/Noto Sans Regular/*" \
+                    -d /tmp/omtextract && \
+                  cp -r "/tmp/omtextract/fonts-master/noto-sans/Noto Sans Regular" \
+                    "/data/fonts/Noto Sans Regular" && \
+                  rm -rf /tmp/omtfonts.zip /tmp/omtextract && \
+                  echo "Fonts installed ($(ls '/data/fonts/Noto Sans Regular' | wc -l) files)." || \
+                  { rm -f /tmp/omtfonts.zip; rm -rf /tmp/omtextract; echo "WARNING: Font download failed. Street labels may be invisible."; }
               fi
               if [ -f /data/map.mbtiles ]; then
                 # Write full config with data
