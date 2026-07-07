@@ -123,7 +123,9 @@ download_fonts() {
         # Create temporary working directory
         local temp_dir
         temp_dir=$(mktemp -d) || abort "Failed to create temporary directory"
-        trap "rm -rf $temp_dir" RETURN
+        # Use EXIT trap to ensure cleanup happens when function returns or exits
+        # (This will override any previous trap, so it should be safe inside the loop)
+        trap "rm -rf '$temp_dir'" EXIT
         
         # Ensure wget and unzip are available
         if ! command -v wget &> /dev/null || ! command -v unzip &> /dev/null; then
@@ -162,7 +164,7 @@ download_fonts() {
         log_info "  → Extracting fonts..."
         if ! unzip -q "$temp_dir/fonts.zip" \
             "fonts-master/noto-sans/*" \
-            -d "$temp_dir/extract" 2>&1; then
+            -d "$temp_dir/extract" >/dev/null 2>&1; then
             log_error "  Extraction failed"
             [ $retry_count -lt $FONTS_MAX_RETRIES ] && {
                 log_info "Retrying in ${FONTS_RETRY_DELAY}s..."

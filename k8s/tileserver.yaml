@@ -27,6 +27,7 @@ spec:
              # Verify fonts directory structure exists (fonts were pre-downloaded by setup-osm.sh)
              mkdir -p /data/fonts/NotoSansRegular || {
                echo "[WARNING] Failed to create fonts directory"
+               exit 1
              }
               
              # Migrate old font directory name (spaces cause HTTP 400 in TileServer-GL).
