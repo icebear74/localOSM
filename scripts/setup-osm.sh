@@ -304,14 +304,22 @@ generate_glyph_pbf_files() {
     # Install fontnik globally if not already installed
     if ! command -v build-glyphs &> /dev/null; then
         log_info "  Installing fontnik (Mapbox's PBF glyph generator)..."
-        if ! npm install -g fontnik@0.7.7 2>&1 | tail -3; then
-            log_error "fontnik installation failed"
+        local npm_install_output
+        npm_install_output=$(npm install -g fontnik@0.7.7 2>&1)
+        if [ $? -ne 0 ]; then
+            log_error "fontnik installation failed: $npm_install_output"
             return 1
         fi
+        # Show installation summary
+        echo "$npm_install_output" | tail -2 >&2
     fi
     
-    # Verify fontnik installation (need to also clear shell command cache)
-    hash -r 2>/dev/null || true  # Clear shell command cache (bash/dash)
+    # Verify fontnik installation and clear shell command cache if needed
+    # Try to clear shell's command cache (works in bash, zsh, ksh)
+    hash -r 2>/dev/null || true
+    # Also try builtin clear (for compatibility with other shells)
+    builtin hash -r 2>/dev/null || true
+    
     if ! command -v build-glyphs &> /dev/null; then
         log_error "fontnik installation failed or build-glyphs not available in PATH"
         return 1
