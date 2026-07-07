@@ -1658,6 +1658,7 @@ def build_valhalla_job_manifest():
                             "name": "valhalla-import",
                             "image": "ghcr.io/gis-ops/docker-valhalla/valhalla:latest",
                             "imagePullPolicy": "Always",
+                            "resources": {"requests": {"memory": "16Gi"}, "limits": {"memory": "20Gi"}},
                             "securityContext": {"runAsUser": 0, "runAsGroup": 0},
                             "command": ["/bin/sh", "-c"],
                             "args": [
@@ -1781,7 +1782,7 @@ def build_tileserver_job_manifest():
                             "name": "tilemaker-import",
                             "image": "ghcr.io/onthegomap/planetiler:latest",
                             "imagePullPolicy": "Always",
-                            "resources": {"requests": {"memory": "2Gi"}, "limits": {"memory": "6Gi"}},
+                            "resources": {"requests": {"memory": "12Gi"}, "limits": {"memory": "16Gi"}},
                             "securityContext": {"runAsUser": 0, "runAsGroup": 0},
                             "args": [
                                 "--osm-path=/data/import/planet.osm.pbf",
