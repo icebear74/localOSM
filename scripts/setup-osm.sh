@@ -245,7 +245,8 @@ download_fonts() {
     return 0
 }
 
-# Generate glyph PBF files from TTF fonts using fontnik
+# Generate glyph PBF files from TTF fonts using glyph-pbf
+# glyph-pbf is the modern, maintained replacement for the deprecated fontnik tool
 generate_glyph_pbf_files() {
     log_info "Generating glyph PBF files from TTF fonts..."
     
@@ -280,27 +281,42 @@ generate_glyph_pbf_files() {
         return 1
     fi
     
-    # Ensure fontnik is installed
-    if ! command -v fontnik &> /dev/null; then
-        log_info "  Installing fontnik..."
+    # Ensure Node.js is available for running glyph-pbf
+    if ! command -v node &> /dev/null; then
+        log_info "  Installing Node.js..."
         if command -v apt-get &> /dev/null; then
             apt-get update -qq 2>&1 | grep -v "^Get:" | grep -v "^Reading" || true
-            apt-get install -y -qq fontnik 2>&1 | tail -1
+            apt-get install -y -qq nodejs npm 2>&1 | tail -1
         elif command -v apk &> /dev/null; then
-            apk add --no-cache fontnik 2>&1 | tail -1
+            apk add --no-cache nodejs npm 2>&1 | tail -1
         else
-            log_error "Cannot install fontnik (no apt-get or apk available)"
+            log_error "Cannot install Node.js (no apt-get or apk available)"
             return 1
         fi
     fi
     
-    # Verify fontnik installation
-    if ! command -v fontnik &> /dev/null; then
-        log_error "fontnik installation failed or not available in PATH"
+    # Ensure npm is available
+    if ! command -v npm &> /dev/null; then
+        log_error "npm is not available in PATH"
         return 1
     fi
     
-    log_info "  Using fontnik to generate PBF files..."
+    # Install glyph-pbf globally if not already installed
+    if ! command -v glyph-pbf &> /dev/null; then
+        log_info "  Installing glyph-pbf (MapLibre's PBF glyph generator)..."
+        if ! npm install -g glyph-pbf 2>&1 | tail -3; then
+            log_error "glyph-pbf installation failed"
+            return 1
+        fi
+    fi
+    
+    # Verify glyph-pbf installation
+    if ! command -v glyph-pbf &> /dev/null; then
+        log_error "glyph-pbf installation failed or not available in PATH"
+        return 1
+    fi
+    
+    log_info "  Using glyph-pbf to generate PBF files..."
     
     # Create output directory
     mkdir -p "$pbf_dir" || {
@@ -321,67 +337,25 @@ generate_glyph_pbf_files() {
     
     log_debug "Using font file: $ttf_file"
     
-    # Generate glyph ranges covering common Unicode blocks
-    # This includes Latin, Extended Latin, Greek, Cyrillic, Hebrew, Arabic, and Indic scripts
-    # The 8192-8447 range (Private Use Area) is reserved for custom icon fonts if configured
-    local ranges=(
-        "0-255"       # Latin, Latin-1 Supplement
-        "256-511"     # Latin Extended-A
-        "512-767"     # Latin Extended-B
-        "768-1023"    # Combining Diacritical Marks, Greek, Cyrillic
-        "1024-1279"   # Cyrillic Supplement
-        "1280-1535"   # Georgian, Hangul Jamo
-        "1536-1791"   # Hebrew
-        "1792-2047"   # Arabic
-        "2048-2303"   # Devanagari
-        "2304-2559"   # Bengali
-        "2560-2815"   # Gurmukhi
-        "2816-3071"   # Gujarati
-        "3072-3327"   # Odia (formerly Oriya)
-        "3328-3583"   # Tamil
-        "3584-3839"   # Telugu
-        "3840-4095"   # Kannada
-        "8192-8447"   # Private Use Area (for custom icon fonts - requires style and font configuration)
-    )
+    # glyph-pbf generates all glyph ranges automatically and puts them in the output directory
+    # Simply run: glyph-pbf <input-font> <output-directory>
+    local glyph_pbf_error
+    glyph_pbf_error=$(glyph-pbf "$ttf_file" "$pbf_dir" 2>&1)
+    if [ $? -ne 0 ]; then
+        log_error "glyph-pbf generation failed: $glyph_pbf_error"
+        return 1
+    fi
     
-    local generated_count=0
-    local failed_count=0
-    
-    for range in "${ranges[@]}"; do
-        local start="${range%-*}"
-        local end="${range#*-}"
-        local output_file="${pbf_dir}/${range}.pbf"
-        
-        log_debug "  Generating glyph range $range..."
-        
-        local fontnik_error
-        fontnik_error=$(fontnik "$ttf_file" "$output_file" "$start" "$end" 2>&1)
-        if [ $? -eq 0 ]; then
-            local file_size=$(get_file_size "$output_file")
-            if [ "$file_size" -gt "$MIN_VALID_PBF_SIZE" ]; then
-                generated_count=$((generated_count + 1))
-                log_debug "    Generated: $output_file ($file_size bytes)"
-            else
-                log_debug "    Generated file is too small, removing: $output_file"
-                rm -f "$output_file"
-                failed_count=$((failed_count + 1))
-            fi
-        else
-            log_debug "    Failed to generate range $range: $fontnik_error"
-            rm -f "$output_file"
-            failed_count=$((failed_count + 1))
-        fi
-    done
+    # Verify that PBF files were generated
+    local generated_count
+    generated_count=$(find "$pbf_dir" -name "*.pbf" -type f 2>/dev/null | wc -l)
     
     if [ "$generated_count" -eq 0 ]; then
         log_error "Failed to generate any PBF files from TTF font"
         return 1
     fi
     
-    log_success "Generated $generated_count glyph PBF files using fontnik"
-    if [ "$failed_count" -gt 0 ]; then
-        log_warn "  ($failed_count ranges failed to generate)"
-    fi
+    log_success "Generated $generated_count glyph PBF files using glyph-pbf"
     
     return 0
 }
@@ -403,7 +377,7 @@ main() {
     # Step 1: Download and validate fonts
     download_fonts || abort "Font setup failed"
     
-    # Step 2: Generate glyph PBF files from TTF fonts using fontnik
+    # Step 2: Generate glyph PBF files from TTF fonts using glyph-pbf
     generate_glyph_pbf_files || abort "Glyph PBF generation failed - map will not display text labels"
     
     # Summary
