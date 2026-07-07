@@ -323,7 +323,7 @@ generate_glyph_pbf_files() {
     
     # Generate glyph ranges covering common Unicode blocks
     # This includes Latin, Extended Latin, Greek, Cyrillic, Hebrew, Arabic, and Indic scripts
-    # The 8192-8447 range (Private Use Area) supports custom icon fonts if needed in the future
+    # The 8192-8447 range (Private Use Area) is reserved for custom icon fonts if configured
     local ranges=(
         "0-255"       # Latin, Latin-1 Supplement
         "256-511"     # Latin Extended-A
@@ -337,11 +337,11 @@ generate_glyph_pbf_files() {
         "2304-2559"   # Bengali
         "2560-2815"   # Gurmukhi
         "2816-3071"   # Gujarati
-        "3072-3327"   # Oriya
+        "3072-3327"   # Odia (formerly Oriya)
         "3328-3583"   # Tamil
         "3584-3839"   # Telugu
         "3840-4095"   # Kannada
-        "8192-8447"   # Private Use Area (can support custom icon fonts if configured)
+        "8192-8447"   # Private Use Area (for custom icon fonts - requires style and font configuration)
     )
     
     local generated_count=0
@@ -354,7 +354,9 @@ generate_glyph_pbf_files() {
         
         log_debug "  Generating glyph range $range..."
         
-        if fontnik "$ttf_file" "$output_file" "$start" "$end" 2>/dev/null; then
+        local fontnik_error
+        fontnik_error=$(fontnik "$ttf_file" "$output_file" "$start" "$end" 2>&1)
+        if [ $? -eq 0 ]; then
             local file_size=$(get_file_size "$output_file")
             if [ "$file_size" -gt "$MIN_VALID_PBF_SIZE" ]; then
                 generated_count=$((generated_count + 1))
@@ -365,7 +367,7 @@ generate_glyph_pbf_files() {
                 failed_count=$((failed_count + 1))
             fi
         else
-            log_debug "    Failed to generate range $range"
+            log_debug "    Failed to generate range $range: $fontnik_error"
             rm -f "$output_file"
             failed_count=$((failed_count + 1))
         fi
