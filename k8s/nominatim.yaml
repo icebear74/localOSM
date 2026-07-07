@@ -15,6 +15,32 @@ spec:
       labels:
         app: nominatim
     spec:
+      # fsGroup ensures the hostPath volume is owned by the postgres group (GID 100)
+      # inside mediagis/nominatim:4.5, so PostgreSQL can read/write its data directory.
+      securityContext:
+        fsGroup: 100
+      initContainers:
+        # Wait until either the PBF file exists (first import) or the DB is already
+        # initialized (subsequent starts). Prevents CrashLoopBackOff on an empty node.
+        - name: wait-for-data
+          image: busybox:1.36
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              PBF=/import/planet.osm.pbf
+              DB=/nominatim-db/PG_VERSION
+              until [ -f "$PBF" ] || [ -f "$DB" ]; do
+                echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for PBF at $PBF or initialized DB at $DB ..."
+                sleep 30
+              done
+              echo "Data ready — starting Nominatim."
+          volumeMounts:
+            - name: import-data
+              mountPath: /import
+              readOnly: true
+            - name: nominatim-data
+              mountPath: /nominatim-db
+              readOnly: true
       containers:
         - name: nominatim
           image: mediagis/nominatim:4.5
@@ -27,12 +53,11 @@ spec:
           ports:
             - containerPort: 8080
           volumeMounts:
-            # mediagis/nominatim:4.5 bundles PostgreSQL 15
+            # mediagis/nominatim:4.5 bundles PostgreSQL 16
             - name: nominatim-data
-              mountPath: /var/lib/postgresql/15/main
+              mountPath: /var/lib/postgresql/16/main
             - name: import-data
               mountPath: /nominatim/data/import
-              readOnly: true
       volumes:
         - name: nominatim-data
           hostPath:

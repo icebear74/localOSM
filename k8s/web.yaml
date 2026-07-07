@@ -6,6 +6,7 @@ metadata:
 data:
   app.py: |
     from http.server import BaseHTTPRequestHandler, HTTPServer
+    import gzip
     import json
     import os
     import urllib.parse
@@ -16,6 +17,8 @@ data:
     PORT = int(os.environ.get("WEB_PORT", "8080"))
     VALHALLA_URL = os.environ.get("VALHALLA_URL", "http://valhalla.osm.svc.cluster.local:8002")
     NOMINATIM_URL = os.environ.get("NOMINATIM_URL", "http://nominatim.osm.svc.cluster.local:8080")
+    TILESERVER_URL = os.environ.get("TILESERVER_URL", "http://tileserver-gl.osm.svc.cluster.local")
+    STATUS_URL = os.environ.get("STATUS_URL", "")
 
     INDEX_HTML = """<!doctype html>
     <html lang="de">
@@ -23,7 +26,7 @@ data:
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <title>localOSM – Routing &amp; Karte</title>
-      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+      <link rel="stylesheet" href="/static/maplibre-gl.css"/>
       <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: Arial, sans-serif; display: flex; flex-direction: column; height: 100vh; }
@@ -54,7 +57,7 @@ data:
     <body>
     <div id="header">
       <h1>&#127757; localOSM</h1>
-      <a href="http://NODEIP:30083/" id="status-link">Status-Dashboard &rarr;</a>
+      <a href="#" id="status-link" data-port="30083">Status-Dashboard &rarr;</a>
     </div>
     <div id="main">
       <div id="sidebar">
@@ -67,8 +70,8 @@ data:
           </div>
         </div>
         <div class="row2">
-          <div><label>Breitengrad</label><input id="startLat" value="52.5163" step="any"></div>
-          <div><label>Längengrad</label><input id="startLon" value="13.3777" step="any"></div>
+          <div><label>Breitengrad</label><input id="startLat" value="35.1732" step="any"></div>
+          <div><label>Längengrad</label><input id="startLon" value="33.3736" step="any"></div>
         </div>
 
         <div class="section-title">Ziel</div>
@@ -80,8 +83,8 @@ data:
           </div>
         </div>
         <div class="row2">
-          <div><label>Breitengrad</label><input id="endLat" value="52.5219" step="any"></div>
-          <div><label>Längengrad</label><input id="endLon" value="13.4132" step="any"></div>
+          <div><label>Breitengrad</label><input id="endLat" value="34.6857" step="any"></div>
+          <div><label>Längengrad</label><input id="endLon" value="33.0372" step="any"></div>
         </div>
 
         <div class="section-title">Optionen</div>
@@ -111,43 +114,105 @@ data:
       <div id="map"></div>
     </div>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="/static/maplibre-gl.js"></script>
     <script>
-    // Fix status link hostname
-    document.getElementById('status-link').href =
-      location.protocol + '//' + location.hostname + ':30083/';
+    // Fix service link hostnames
+    function updateLinks() {
+      var baseUrl = location.protocol + '//' + location.hostname;
+      ['status-link'].forEach(function(id) {
+        var a = document.getElementById(id);
+        if (a && a.dataset.port) a.href = baseUrl + ':' + a.dataset.port + '/';
+      });
+    }
+    updateLinks();
 
-    var map = L.map('map').setView([52.52, 13.405], 13);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-      maxZoom: 19
-    }).addTo(map);
+    var map = new maplibregl.Map({
+      container: 'map',
+      style: {
+        version: 8,
+        sources: {
+          openmaptiles: {
+            type: 'vector',
+            tiles: [location.protocol + '//' + location.host + '/tiles/{z}/{x}/{y}.pbf'],
+            minzoom: 0,
+            maxzoom: 14
+          }
+        },
+        glyphs: location.protocol + '//' + location.host + '/fonts/{fontstack}/{range}.pbf',
+        layers: [
+          {id:'background',type:'background',paint:{'background-color':'#f2efe9'}},
+          {id:'landcover-wood',type:'fill',source:'openmaptiles','source-layer':'landcover',filter:['in','class','wood','forest'],paint:{'fill-color':'#d0e8c0','fill-opacity':0.6}},
+          {id:'landcover-grass',type:'fill',source:'openmaptiles','source-layer':'landcover',filter:['in','class','grass','farmland','agriculture'],paint:{'fill-color':'#e8f0d0','fill-opacity':0.5}},
+          {id:'landuse-residential',type:'fill',source:'openmaptiles','source-layer':'landuse',filter:['in','class','residential','commercial','industrial'],paint:{'fill-color':'#e8e0d8','fill-opacity':0.5}},
+          {id:'landuse-green',type:'fill',source:'openmaptiles','source-layer':'landuse',filter:['in','class','grass','park','meadow','forest','wood','cemetery'],paint:{'fill-color':'#d0e8c0'}},
+          {id:'water',type:'fill',source:'openmaptiles','source-layer':'water',paint:{'fill-color':'#9cc0d4'}},
+          {id:'waterway',type:'line',source:'openmaptiles','source-layer':'waterway',paint:{'line-color':'#9cc0d4','line-width':1}},
+          {id:'boundary-country',type:'line',source:'openmaptiles','source-layer':'boundary',filter:['==','admin_level',2],paint:{'line-color':'#9e9cab','line-width':['interpolate',['linear'],['zoom'],2,0.5,6,1.5,10,2]}},
+          {id:'boundary-state',type:'line',source:'openmaptiles','source-layer':'boundary',filter:['==','admin_level',4],minzoom:4,paint:{'line-color':'#b0adb8','line-width':0.8,'line-dasharray':[3,2]}},
+          {id:'road',type:'line',source:'openmaptiles','source-layer':'transportation',filter:['in','class','minor','service','track','path'],minzoom:12,paint:{'line-color':'#d4cfc8','line-width':['interpolate',['linear'],['zoom'],12,0.5,14,1,16,3]}},
+          {id:'road-secondary',type:'line',source:'openmaptiles','source-layer':'transportation',filter:['in','class','secondary','tertiary'],minzoom:9,paint:{'line-color':'#c8c3ba','line-width':['interpolate',['linear'],['zoom'],9,0.5,12,1.5,14,3,16,5]}},
+          {id:'road-primary',type:'line',source:'openmaptiles','source-layer':'transportation',filter:['==','class','primary'],minzoom:7,paint:{'line-color':'#fcd354','line-width':['interpolate',['linear'],['zoom'],7,0.5,10,2,14,5,16,8]}},
+          {id:'road-major',type:'line',source:'openmaptiles','source-layer':'transportation',filter:['in','class','motorway','trunk'],paint:{'line-color':'#f9a825','line-width':['interpolate',['linear'],['zoom'],6,1,10,3,14,7,16,12]}},
+          {id:'building',type:'fill',source:'openmaptiles','source-layer':'building',minzoom:14,paint:{'fill-color':'#d9d0c9','fill-opacity':0.9}},
+          {id:'water-name',type:'symbol',source:'openmaptiles','source-layer':'water_name',layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'text-size':['interpolate',['linear'],['zoom'],4,10,10,14],'symbol-placement':'point'},paint:{'text-color':'#5b8db8','text-halo-color':'#fff','text-halo-width':1}},
+          {id:'road-label-minor',type:'symbol',source:'openmaptiles','source-layer':'transportation_name',filter:['in','class','minor','service','track'],minzoom:15,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'symbol-placement':'line','text-size':10,'text-max-angle':30,'text-padding':5},paint:{'text-color':'#555','text-halo-color':'#fff','text-halo-width':1.5}},
+          {id:'road-label-secondary',type:'symbol',source:'openmaptiles','source-layer':'transportation_name',filter:['in','class','secondary','tertiary'],minzoom:13,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'symbol-placement':'line','text-size':11,'text-max-angle':30},paint:{'text-color':'#555','text-halo-color':'#fff','text-halo-width':1.5}},
+          {id:'road-label-primary',type:'symbol',source:'openmaptiles','source-layer':'transportation_name',filter:['in','class','primary','trunk','motorway'],minzoom:10,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'symbol-placement':'line','text-size':12,'text-max-angle':30},paint:{'text-color':'#333','text-halo-color':'#fff','text-halo-width':1.5}},
+          {id:'place-country',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['==','class','country'],layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'text-size':['interpolate',['linear'],['zoom'],2,10,6,16,8,18]},paint:{'text-color':'#333','text-halo-color':'rgba(255,255,255,0.8)','text-halo-width':2}},
+          {id:'place-state',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['==','class','state'],minzoom:5,maxzoom:12,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'text-size':['interpolate',['linear'],['zoom'],5,10,10,14]},paint:{'text-color':'#555','text-halo-color':'rgba(255,255,255,0.8)','text-halo-width':1.5}},
+          {id:'place-city',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['in','class','city'],layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'text-size':['interpolate',['linear'],['zoom'],6,11,10,15,14,18]},paint:{'text-color':'#222','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':2}},
+          {id:'place-town',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['==','class','town'],minzoom:8,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'text-size':['interpolate',['linear'],['zoom'],8,10,12,14,16,17]},paint:{'text-color':'#333','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}},
+          {id:'place-village',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['==','class','village'],minzoom:10,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'text-size':['interpolate',['linear'],['zoom'],10,10,14,13]},paint:{'text-color':'#444','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}},
+          {id:'place-suburb',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['in','class','suburb','quarter','neighbourhood'],minzoom:12,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'text-size':11},paint:{'text-color':'#555','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}},
+          {id:'place-hamlet',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['in','class','hamlet','isolated_dwelling'],minzoom:13,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'text-size':10},paint:{'text-color':'#666','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}}
+        ]
+      },
+      center: [33.3736, 35.1732],
+      zoom: 9,
+      attributionControl: true
+    });
 
     var markers = { start: null, end: null };
-    var routeLayer = null;
     var clickState = 0; // 0=start, 1=end
 
-    var iconStart = L.divIcon({html:'<div style="background:#2c7ab5;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:bold;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)">S</div>', iconSize:[28,28], iconAnchor:[14,14], className:''});
-    var iconEnd   = L.divIcon({html:'<div style="background:#c0392b;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:bold;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)">Z</div>', iconSize:[28,28], iconAnchor:[14,14], className:''});
-
     function setMarker(which, lat, lon) {
-      var icon = which === 'start' ? iconStart : iconEnd;
-      if (markers[which]) map.removeLayer(markers[which]);
-      markers[which] = L.marker([lat, lon], {icon: icon}).addTo(map);
+      var bg = which === 'start' ? '#2c7ab5' : '#c0392b';
+      var label = which === 'start' ? 'S' : 'Z';
+      var el = document.createElement('div');
+      el.style.cssText = 'background:' + bg + ';color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:bold;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)';
+      el.textContent = label;
+      if (markers[which]) markers[which].remove();
+      markers[which] = new maplibregl.Marker({element: el, anchor: 'center'})
+        .setLngLat([lon, lat])
+        .addTo(map);
       document.getElementById(which + 'Lat').value = lat.toFixed(6);
       document.getElementById(which + 'Lon').value = lon.toFixed(6);
     }
 
     map.on('click', function(e) {
+      var lat = e.lngLat.lat, lon = e.lngLat.lng;
       if (clickState === 0) {
-        setMarker('start', e.latlng.lat, e.latlng.lng);
+        setMarker('start', lat, lon);
+        reverseGeocode('start', lat, lon);
         clickState = 1;
       } else {
-        setMarker('end', e.latlng.lat, e.latlng.lng);
+        setMarker('end', lat, lon);
+        reverseGeocode('end', lat, lon);
         clickState = 0;
         doRoute();
       }
     });
+
+    // Reverse geocode a coordinate and populate the address input
+    async function reverseGeocode(which, lat, lon) {
+      try {
+        var resp = await fetch('/api/reverse?lat=' + lat + '&lon=' + lon);
+        var data = await resp.json();
+        if (!data.error && data.display_name) {
+          document.getElementById(which + 'Addr').value = data.display_name;
+        }
+      } catch(e) { /* silently ignore */ }
+    }
 
     // Valhalla uses 1e-6 precision polyline encoding
     function decodePolyline(encoded) {
@@ -165,15 +230,24 @@ data:
     }
 
     function drawRoute(trip) {
-      if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
       var allCoords = [];
       (trip.legs || []).forEach(function(leg) {
-        allCoords = allCoords.concat(decodePolyline(leg.shape || ''));
+        decodePolyline(leg.shape || '').forEach(function(c) {
+          allCoords.push([c[1], c[0]]); // MapLibre GL uses [lng, lat]
+        });
       });
-      if (allCoords.length > 0) {
-        routeLayer = L.polyline(allCoords, {color: '#2c7ab5', weight: 5, opacity: 0.8}).addTo(map);
-        map.fitBounds(routeLayer.getBounds(), {padding: [30, 30]});
+      if (allCoords.length === 0) return;
+      var geojson = {type:'Feature',geometry:{type:'LineString',coordinates:allCoords}};
+      if (map.getSource('route')) {
+        map.getSource('route').setData(geojson);
+      } else {
+        map.addSource('route', {type:'geojson', data: geojson});
+        map.addLayer({id:'route-line',type:'line',source:'route',
+          paint:{'line-color':'#2c7ab5','line-width':5,'line-opacity':0.8}});
       }
+      var bounds = allCoords.reduce(function(b, c) { return b.extend(c); },
+        new maplibregl.LngLatBounds(allCoords[0], allCoords[0]));
+      map.fitBounds(bounds, {padding: 30});
     }
 
     function fmtDuration(secs) {
@@ -258,7 +332,7 @@ data:
         if (results.length === 0) { box.innerHTML = '<span class="err">Keine Treffer fuer: ' + addrInput + '</span>'; return; }
         var r = results[0];
         setMarker(which, parseFloat(r.lat), parseFloat(r.lon));
-        map.setView([parseFloat(r.lat), parseFloat(r.lon)], 15);
+        map.flyTo({center: [parseFloat(r.lon), parseFloat(r.lat)], zoom: 15});
         box.innerHTML = '<span class="ok">&#10003; ' + (which === 'start' ? 'Start' : 'Ziel') + ' gesetzt</span><br>' + (r.display_name || '');
       } catch(err) {
         box.innerHTML = '<span class="err">Geocoding-Fehler: ' + err + '</span>';
@@ -279,9 +353,27 @@ data:
             self.end_headers()
             self.wfile.write(body)
 
+        @staticmethod
+        def _friendly_error(exc, service_name):
+            msg = str(exc)
+            if "111" in msg or "Connection refused" in msg or "ConnectionRefused" in msg:
+                return (
+                    f"{service_name} ist noch nicht erreichbar (startet noch oder importiert Daten). "
+                    "Bitte warten und den Status im Dashboard prüfen."
+                )
+            if "timed out" in msg.lower() or "timeout" in msg.lower():
+                return (
+                    f"{service_name} antwortet nicht (Timeout). "
+                    "Möglicherweise läuft noch ein Daten-Import."
+                )
+            return msg
+
         def do_GET(self):
             if self.path in {"/", "/index.html"}:
-                body = INDEX_HTML.encode("utf-8")
+                html = INDEX_HTML
+                if STATUS_URL:
+                    html = html.replace("http://NODEIP:30083/", STATUS_URL.rstrip("/") + "/")
+                body = html.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
@@ -291,6 +383,85 @@ data:
 
             if self.path == "/healthz":
                 self._send_json({"status": "ok"})
+                return
+
+            if self.path.startswith("/fonts/"):
+                # Serve MapLibre GL glyph PBF files from the shared fonts directory.
+                # This avoids cross-origin requests to TileServer-GL (port 30085).
+                parts = self.path[len("/fonts/"):].split("/")
+                if len(parts) == 2:
+                    fontstack = urllib.parse.unquote(parts[0])
+                    range_file = parts[1]
+                    if range_file.endswith(".pbf") and "/" not in fontstack and ".." not in fontstack:
+                        filepath = os.path.join("/data/fonts", fontstack, range_file)
+                        try:
+                            with open(filepath, "rb") as f:
+                                body = f.read()
+                            self.send_response(200)
+                            self.send_header("Content-Type", "application/x-protobuf")
+                            self.send_header("Content-Length", str(len(body)))
+                            self.send_header("Access-Control-Allow-Origin", "*")
+                            self.end_headers()
+                            self.wfile.write(body)
+                        except FileNotFoundError:
+                            self.send_response(404)
+                            self.end_headers()
+                        return
+                self.send_response(400)
+                self.end_headers()
+                return
+
+            if self.path.startswith("/tiles/"):
+                # Proxy vector tile requests to TileServer-GL via the internal K8s service.
+                # This serves tiles from the same origin as the web page, avoiding CORS issues.
+                z_x_y = self.path[len("/tiles"):]  # e.g. /14/8845/6436.pbf
+                tile_url = TILESERVER_URL + "/data/v3" + z_x_y
+                try:
+                    req = urllib.request.Request(tile_url, headers={"User-Agent": "localosm-web/1.0"})
+                    with urllib.request.urlopen(req, timeout=10) as response:
+                        body = response.read()
+                        content_type = response.headers.get("Content-Type", "application/x-protobuf")
+                        content_encoding = response.headers.get("Content-Encoding", "")
+                    # TileServer-GL may return gzip-encoded tiles. Decompress here so
+                    # the client always receives raw PBF without a Content-Encoding header.
+                    if content_encoding.lower() == "gzip":
+                        try:
+                            body = gzip.decompress(body)
+                        except (gzip.BadGzipFile, OSError):
+                            pass  # Not actually gzip; forward body as-is
+                    self.send_response(200)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "max-age=86400")
+                    self.end_headers()
+                    self.wfile.write(body)
+                except urllib.error.HTTPError as e:
+                    self.send_response(e.code)
+                    self.end_headers()
+                except Exception:
+                    self.send_response(502)
+                    self.end_headers()
+                return
+
+            if self.path.startswith("/static/"):
+                filename = self.path[len("/static/"):]
+                allowed = {"maplibre-gl.js": "application/javascript", "maplibre-gl.css": "text/css"}
+                if filename not in allowed:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                filepath = os.path.join("/data/static", filename)
+                try:
+                    with open(filepath, "rb") as f:
+                        body = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", allowed[filename])
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                except FileNotFoundError:
+                    self.send_response(503)
+                    self.end_headers()
                 return
 
             if self.path == "/api/status":
@@ -313,7 +484,27 @@ data:
                         data = json.loads(response.read().decode("utf-8"))
                     self._send_json({"results": data})
                 except Exception as exc:  # noqa: BLE001
-                    self._send_json({"error": str(exc)}, 502)
+                    self._send_json({"error": self._friendly_error(exc, "Nominatim (Geocoding)")}, 502)
+                return
+
+            if self.path.startswith("/api/reverse"):
+                query = self.path.split("?", 1)[1] if "?" in self.path else ""
+                params = urllib.parse.parse_qs(query)
+                lat = params.get("lat", [""])[0]
+                lon = params.get("lon", [""])[0]
+                if not lat or not lon:
+                    self._send_json({"error": "missing lat/lon parameters"}, 400)
+                    return
+                try:
+                    req = urllib.request.Request(
+                        f"{NOMINATIM_URL}/reverse?lat={urllib.parse.quote(lat)}&lon={urllib.parse.quote(lon)}&format=jsonv2",
+                        headers={"User-Agent": "localosm-web/1.0"}
+                    )
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        data = json.loads(response.read().decode("utf-8"))
+                    self._send_json({"display_name": data.get("display_name", "")})
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": self._friendly_error(exc, "Nominatim (Reverse Geocoding)")}, 502)
                 return
 
             self._send_json({"error": "not found"}, 404)
@@ -372,7 +563,7 @@ data:
                     "trip": data.get("trip"),
                 })
             except Exception as exc:  # noqa: BLE001
-                self._send_json({"error": str(exc)}, 502)
+                self._send_json({"error": self._friendly_error(exc, "Valhalla (Routing)")}, 502)
 
         def _forward_distance(self, payload):
             try:
@@ -385,7 +576,7 @@ data:
                     "units": payload.get("units", "km"),
                 })
             except Exception as exc:  # noqa: BLE001
-                self._send_json({"error": str(exc)}, 502)
+                self._send_json({"error": self._friendly_error(exc, "Valhalla (Routing)")}, 502)
 
         def log_message(self, format, *args):
             return
@@ -417,6 +608,30 @@ spec:
       labels:
         app: web
     spec:
+      initContainers:
+        - name: fetch-static
+          image: alpine:3.20
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              MLGL_VERSION="4.7.1"
+              mkdir -p /data/static
+              if [ ! -f /data/static/maplibre-gl.js ]; then
+                echo "Downloading maplibre-gl.js v${MLGL_VERSION} (one-time setup)..."
+                wget -q -O /data/static/maplibre-gl.js \
+                  "https://unpkg.com/maplibre-gl@${MLGL_VERSION}/dist/maplibre-gl.js" \
+                  || { rm -f /data/static/maplibre-gl.js; echo "ERROR: maplibre-gl.js download failed"; exit 1; }
+              fi
+              if [ ! -f /data/static/maplibre-gl.css ]; then
+                echo "Downloading maplibre-gl.css v${MLGL_VERSION} (one-time setup)..."
+                wget -q -O /data/static/maplibre-gl.css \
+                  "https://unpkg.com/maplibre-gl@${MLGL_VERSION}/dist/maplibre-gl.css" \
+                  || { rm -f /data/static/maplibre-gl.css; echo "ERROR: maplibre-gl.css download failed"; exit 1; }
+              fi
+              echo "Static assets ready."
+          volumeMounts:
+            - name: web-static
+              mountPath: /data/static
       containers:
         - name: web
           image: python:3.12-alpine
@@ -435,15 +650,32 @@ spec:
               value: "http://valhalla.osm.svc.cluster.local:8002"
             - name: NOMINATIM_URL
               value: "http://nominatim.osm.svc.cluster.local:8080"
+            - name: TILESERVER_URL
+              value: "http://tileserver-gl.osm.svc.cluster.local"
+            - name: STATUS_URL
+              value: ""
           ports:
             - containerPort: 8080
           volumeMounts:
             - name: app-code
               mountPath: /config
+            - name: web-static
+              mountPath: /data/static
+            - name: tileserver-fonts
+              mountPath: /data/fonts
+              readOnly: true
       volumes:
         - name: app-code
           configMap:
             name: osm-web-app
+        - name: web-static
+          hostPath:
+            path: /mnt/data/OSM/web-static
+            type: DirectoryOrCreate
+        - name: tileserver-fonts
+          hostPath:
+            path: /mnt/data/OSM/tileserver/fonts
+            type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service
