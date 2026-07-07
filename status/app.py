@@ -1732,12 +1732,47 @@ def build_tileserver_job_manifest():
                                 "  exit 1\n"
                                 "fi\n"
                                 "mkdir -p /data/tileserver\n"
-                            "mkdir -p /data/sources\n"
+                                "mkdir -p /data/sources\n"
                             ],
                             "volumeMounts": [
                                 {"name": "osm-data", "mountPath": "/data"},
                             ],
-                        }
+                        },
+                        {
+                            # Downloads ancillary geographic reference files the first time
+                            # they are missing from the hostPath cache (/mnt/data/OSM/sources/).
+                            # On every subsequent run the files are already present and this
+                            # container exits immediately without touching the network.
+                            # The main tilemaker-import container therefore runs fully offline.
+                            "name": "fetch-sources",
+                            "image": "busybox:1.36",
+                            "command": ["/bin/sh", "-c"],
+                            "args": [
+                                "echo '=== Caching ancillary source files (skipped when already present) ==='\n"
+                                "if [ ! -s /data/sources/lake_centerline.shp.zip ]; then\n"
+                                "  echo 'Downloading lake_centerlines...'\n"
+                                "  wget -q -O /data/sources/lake_centerline.shp.zip"
+                                " https://github.com/acalcutt/osm-lakelines/releases/latest/download/lake_centerline.shp.zip"
+                                " || { echo 'ERROR: lake_centerlines download failed'; rm -f /data/sources/lake_centerline.shp.zip; exit 1; }\n"
+                                "fi\n"
+                                "if [ ! -s /data/sources/water-polygons-split-3857.zip ]; then\n"
+                                "  echo 'Downloading water_polygons...'\n"
+                                "  wget -q -O /data/sources/water-polygons-split-3857.zip"
+                                " https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip"
+                                " || { echo 'ERROR: water_polygons download failed'; rm -f /data/sources/water-polygons-split-3857.zip; exit 1; }\n"
+                                "fi\n"
+                                "if [ ! -s /data/sources/natural_earth_vector.sqlite.zip ]; then\n"
+                                "  echo 'Downloading natural_earth...'\n"
+                                "  wget -q -O /data/sources/natural_earth_vector.sqlite.zip"
+                                " https://naciscdn.org/naturalearth/packages/natural_earth_vector.sqlite.zip"
+                                " || { echo 'ERROR: natural_earth download failed'; rm -f /data/sources/natural_earth_vector.sqlite.zip; exit 1; }\n"
+                                "fi\n"
+                                "echo 'All source files ready.'\n"
+                            ],
+                            "volumeMounts": [
+                                {"name": "osm-data", "mountPath": "/data"},
+                            ],
+                        },
                     ],
                     "containers": [
                         {
@@ -1750,11 +1785,9 @@ def build_tileserver_job_manifest():
                                 "--osm-path=/data/import/planet.osm.pbf",
                                 "--output=/data/tileserver/map.mbtiles",
                                 "--force",
-                                # Download ancillary source files (lake_centerlines,
-                                # water_polygons, natural_earth) on first run and store them
-                                # under /data/sources/ so they persist on the hostPath volume
-                                # and are reused offline on every subsequent build.
-                                "--download",
+                                # Ancillary source files are pre-cached by the fetch-sources
+                                # init container. No --download flag: tile generation runs
+                                # fully offline using only local data.
                                 "--lake_centerlines_path=/data/sources/lake_centerline.shp.zip",
                                 "--water_polygons_path=/data/sources/water-polygons-split-3857.zip",
                                 "--natural_earth_path=/data/sources/natural_earth_vector.sqlite.zip",
