@@ -36,9 +36,9 @@ spec:
              fi
               
              # Check if fonts are available
-             FONT_COUNT=$(find /data/fonts/NotoSansRegular -name "*.pbf" 2>/dev/null | wc -l)
+             FONT_COUNT=$(find /data/fonts/NotoSansRegular -type f \( -name "*.ttf" -o -name "*.otf" \) 2>/dev/null | wc -l)
              if [ "$FONT_COUNT" -gt 0 ]; then
-               echo "[✓] Fonts verified: $FONT_COUNT .pbf files found"
+               echo "[✓] Fonts verified: $FONT_COUNT font files found"
              else
                echo "[!] WARNING: No fonts found. Map will render WITHOUT text labels."
                echo "[!] Fonts should have been downloaded by scripts/setup-osm.sh"

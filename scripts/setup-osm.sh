@@ -78,7 +78,7 @@ fonts_already_available() {
     fi
     
     local font_count
-    font_count=$(find "$FONTS_PATH" -name "*.pbf" 2>/dev/null | wc -l)
+    font_count=$(find "$FONTS_PATH" -type f \( -name "*.ttf" -o -name "*.otf" \) 2>/dev/null | wc -l)
     
     if [ "$font_count" -gt 0 ]; then
         log_debug "Found $font_count existing font files in $FONTS_PATH"
@@ -101,8 +101,8 @@ download_fonts() {
     # Check if fonts are already available
     if fonts_already_available; then
         local font_count
-        font_count=$(find "$FONTS_PATH" -name "*.pbf" 2>/dev/null | wc -l)
-        log_success "Fonts already present ($font_count .pbf files)"
+        font_count=$(find "$FONTS_PATH" -type f \( -name "*.ttf" -o -name "*.otf" \) 2>/dev/null | wc -l)
+        log_success "Fonts already present ($font_count font files)"
         return 0
     fi
     
@@ -198,19 +198,16 @@ download_fonts() {
         log_info "  → Installing fonts..."
         mkdir -p "$FONTS_PATH" || abort "Failed to create fonts destination directory"
         
-        # Copy the TTF/OTF font files to the destination
-        # These will be served by TileServer-GL directly
-        if ! cp "$extracted_source_dir"/*.ttf "$extracted_source_dir"/*.otf "$FONTS_PATH/" 2>/dev/null; then
-            # If the above fails, try a more robust copy
-            if ! find "$extracted_source_dir" -type f \( -name "*.ttf" -o -name "*.otf" \) -exec cp {} "$FONTS_PATH/" \; 2>/dev/null; then
-                log_error "  Installation failed"
-                rm -rf "$FONTS_PATH"
-                [ $retry_count -lt $FONTS_MAX_RETRIES ] && {
-                    log_info "Retrying in ${FONTS_RETRY_DELAY}s..."
-                    sleep "$FONTS_RETRY_DELAY"
-                    continue
-                } || abort "Font installation failed after $FONTS_MAX_RETRIES attempts"
-            fi
+        # Copy the TTF/OTF font files to the destination using find for robustness
+        # This ensures proper handling regardless of which file types are present
+        if ! find "$extracted_source_dir" -type f \( -name "*.ttf" -o -name "*.otf" \) -exec cp {} "$FONTS_PATH/" \; 2>/dev/null; then
+            log_error "  Installation failed"
+            rm -rf "$FONTS_PATH"
+            [ $retry_count -lt $FONTS_MAX_RETRIES ] && {
+                log_info "Retrying in ${FONTS_RETRY_DELAY}s..."
+                sleep "$FONTS_RETRY_DELAY"
+                continue
+            } || abort "Font installation failed after $FONTS_MAX_RETRIES attempts"
         fi
         
         # Validate installed fonts
