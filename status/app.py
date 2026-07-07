@@ -1658,7 +1658,7 @@ def build_valhalla_job_manifest():
                             "name": "valhalla-import",
                             "image": "ghcr.io/gis-ops/docker-valhalla/valhalla:latest",
                             "imagePullPolicy": "Always",
-                            "resources": {"requests": {"memory": "16Gi"}, "limits": {"memory": "20Gi"}},
+                            "resources": {"requests": {"memory": "18Gi"}, "limits": {"memory": "18Gi"}},
                             "securityContext": {"runAsUser": 0, "runAsGroup": 0},
                             "command": ["/bin/sh", "-c"],
                             "args": [
@@ -1782,8 +1782,11 @@ def build_tileserver_job_manifest():
                             "name": "tilemaker-import",
                             "image": "ghcr.io/onthegomap/planetiler:latest",
                             "imagePullPolicy": "Always",
-                            "resources": {"requests": {"memory": "12Gi"}, "limits": {"memory": "16Gi"}},
+                            "resources": {"requests": {"memory": "15Gi"}, "limits": {"memory": "15Gi"}},
                             "securityContext": {"runAsUser": 0, "runAsGroup": 0},
+                            "env": [
+                                {"name": "JAVA_OPTS", "value": "-Xms14g -Xmx14g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"},
+                            ],
                             "args": [
                                 "--osm-path=/data/import/planet.osm.pbf",
                                 "--output=/data/tileserver/map.mbtiles",
