@@ -245,8 +245,8 @@ download_fonts() {
     return 0
 }
 
-# Generate glyph PBF files from TTF fonts using glyph-pbf
-# glyph-pbf is the modern, maintained replacement for the deprecated fontnik tool
+# Generate glyph PBF files from TTF fonts using fontnik
+# fontnik is maintained by Mapbox and provides the build-glyphs CLI tool
 generate_glyph_pbf_files() {
     log_info "Generating glyph PBF files from TTF fonts..."
     
@@ -281,7 +281,7 @@ generate_glyph_pbf_files() {
         return 1
     fi
     
-    # Ensure Node.js is available for running glyph-pbf
+    # Ensure Node.js is available for running fontnik
     if ! command -v node &> /dev/null; then
         log_info "  Installing Node.js..."
         if command -v apt-get &> /dev/null; then
@@ -301,22 +301,23 @@ generate_glyph_pbf_files() {
         return 1
     fi
     
-    # Install glyph-pbf globally if not already installed
-    if ! command -v glyph-pbf &> /dev/null; then
-        log_info "  Installing glyph-pbf (MapLibre's PBF glyph generator)..."
-        if ! npm install -g glyph-pbf 2>&1 | tail -3; then
-            log_error "glyph-pbf installation failed"
+    # Install fontnik globally if not already installed
+    if ! command -v build-glyphs &> /dev/null; then
+        log_info "  Installing fontnik (Mapbox's PBF glyph generator)..."
+        if ! npm install -g fontnik 2>&1 | tail -3; then
+            log_error "fontnik installation failed"
             return 1
         fi
     fi
     
-    # Verify glyph-pbf installation
-    if ! command -v glyph-pbf &> /dev/null; then
-        log_error "glyph-pbf installation failed or not available in PATH"
+    # Verify fontnik installation (need to also clear shell command cache)
+    hash -r 2>/dev/null || true  # Clear shell command cache (bash/dash)
+    if ! command -v build-glyphs &> /dev/null; then
+        log_error "fontnik installation failed or build-glyphs not available in PATH"
         return 1
     fi
     
-    log_info "  Using glyph-pbf to generate PBF files..."
+    log_info "  Using fontnik build-glyphs to generate PBF files..."
     
     # Create output directory
     mkdir -p "$pbf_dir" || {
@@ -337,12 +338,12 @@ generate_glyph_pbf_files() {
     
     log_debug "Using font file: $ttf_file"
     
-    # glyph-pbf generates all glyph ranges automatically and puts them in the output directory
-    # Simply run: glyph-pbf <input-font> <output-directory>
-    local glyph_pbf_error
-    glyph_pbf_error=$(glyph-pbf "$ttf_file" "$pbf_dir" 2>&1)
+    # Generate PBF glyphs using fontnik build-glyphs
+    # Syntax: build-glyphs <fontstack path> <output dir>
+    local glyphs_error
+    glyphs_error=$(build-glyphs "$ttf_file" "$pbf_dir" 2>&1)
     if [ $? -ne 0 ]; then
-        log_error "glyph-pbf generation failed: $glyph_pbf_error"
+        log_error "fontnik build-glyphs generation failed: $glyphs_error"
         return 1
     fi
     
@@ -355,7 +356,7 @@ generate_glyph_pbf_files() {
         return 1
     fi
     
-    log_success "Generated $generated_count glyph PBF files using glyph-pbf"
+    log_success "Generated $generated_count glyph PBF files using fontnik build-glyphs"
     
     return 0
 }
@@ -377,7 +378,7 @@ main() {
     # Step 1: Download and validate fonts
     download_fonts || abort "Font setup failed"
     
-    # Step 2: Generate glyph PBF files from TTF fonts using glyph-pbf
+    # Step 2: Generate glyph PBF files from TTF fonts using fontnik
     generate_glyph_pbf_files || abort "Glyph PBF generation failed - map will not display text labels"
     
     # Summary
