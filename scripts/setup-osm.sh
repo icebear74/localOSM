@@ -304,7 +304,7 @@ generate_glyph_pbf_files() {
     # Install fontnik globally if not already installed
     if ! command -v build-glyphs &> /dev/null; then
         log_info "  Installing fontnik (Mapbox's PBF glyph generator)..."
-        if ! npm install -g fontnik 2>&1 | tail -3; then
+        if ! npm install -g fontnik@0.7.7 2>&1 | tail -3; then
             log_error "fontnik installation failed"
             return 1
         fi
