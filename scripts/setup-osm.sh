@@ -35,6 +35,7 @@ FONTS_URL="https://github.com/openmaptiles/fonts/archive/refs/heads/master.zip"
 FONTS_MAX_RETRIES=3
 FONTS_RETRY_DELAY=5
 MIN_FONT_FILES=5  # Minimum number of font files required for successful installation
+MIN_VALID_PBF_SIZE=10  # Minimum file size (bytes) for valid PBF files (excludes empty stubs)
 
 # Logging functions
 log_info() {
@@ -57,6 +58,12 @@ log_debug() {
     if [ "$VERBOSE" = "1" ]; then
         echo "[DEBUG] $*" >&2
     fi
+}
+
+# Get file size in bytes (works with both BSD and GNU stat)
+get_file_size() {
+    local file="$1"
+    stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null
 }
 
 # Report error and exit with failure
@@ -252,8 +259,8 @@ generate_glyph_pbf_files() {
             local valid_pbf_count=0
             while IFS= read -r pbf_file; do
                 if [ -f "$pbf_file" ]; then
-                    local file_size=$(stat -f%z "$pbf_file" 2>/dev/null || stat -c%s "$pbf_file" 2>/dev/null)
-                    if [ "$file_size" -gt 10 ]; then
+                    local file_size=$(get_file_size "$pbf_file")
+                    if [ "$file_size" -gt "$MIN_VALID_PBF_SIZE" ]; then
                         valid_pbf_count=$((valid_pbf_count + 1))
                     fi
                 fi
@@ -348,8 +355,8 @@ generate_glyph_pbf_files() {
         log_debug "  Generating glyph range $range..."
         
         if fontnik "$ttf_file" "$start" "$end" > "$output_file" 2>/dev/null; then
-            local file_size=$(stat -f%z "$output_file" 2>/dev/null || stat -c%s "$output_file" 2>/dev/null)
-            if [ "$file_size" -gt 10 ]; then
+            local file_size=$(get_file_size "$output_file")
+            if [ "$file_size" -gt "$MIN_VALID_PBF_SIZE" ]; then
                 generated_count=$((generated_count + 1))
                 log_debug "    Generated: $output_file ($file_size bytes)"
             else
