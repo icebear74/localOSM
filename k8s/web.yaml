@@ -422,12 +422,15 @@ data:
                         body = response.read()
                         content_type = response.headers.get("Content-Type", "application/x-protobuf")
                         content_encoding = response.headers.get("Content-Encoding", "")
+                    if len(body) == 0:
+                        print(f"WARNING: Empty tile response from {tile_url} (content-encoding: {content_encoding})", flush=True)
                     # TileServer-GL may return gzip-encoded tiles. Decompress here so
                     # the client always receives raw PBF without a Content-Encoding header.
                     if content_encoding.lower() == "gzip":
                         try:
                             body = gzip.decompress(body)
-                        except (gzip.BadGzipFile, OSError):
+                        except (gzip.BadGzipFile, OSError) as e:
+                            print(f"Gzip decompression failed (body size {len(body)}): {e}", flush=True)
                             pass  # Not actually gzip; forward body as-is
                     self.send_response(200)
                     self.send_header("Content-Type", content_type)
@@ -437,9 +440,13 @@ data:
                     self.wfile.write(body)
                 except urllib.error.HTTPError as e:
                     self.send_response(e.code)
+                    self.send_header("Content-Length", "0")
                     self.end_headers()
-                except Exception:
+                except Exception as exc:
+                    error_msg = f"Tile proxy error: {type(exc).__name__}: {str(exc)}"
+                    print(error_msg, flush=True)
                     self.send_response(502)
+                    self.send_header("Content-Length", "0")
                     self.end_headers()
                 return
 
