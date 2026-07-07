@@ -26,7 +26,7 @@ spec:
            - |
              # Verify fonts directory structure exists (fonts were pre-downloaded by setup-osm.sh)
              mkdir -p /data/fonts/NotoSansRegular || {
-               echo "[WARNING] Failed to create fonts directory"
+               echo "[ERROR] Failed to create fonts directory"
                exit 1
              }
               
