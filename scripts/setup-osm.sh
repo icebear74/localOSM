@@ -160,8 +160,9 @@ download_fonts() {
         
         # Extract fonts archive
         log_info "  → Extracting fonts..."
+        # Extract the full fonts-master/noto-sans directory to handle archive structure variations
         if ! unzip -q "$temp_dir/fonts.zip" \
-            "fonts-master/noto-sans/Noto Sans Regular/*" \
+            "fonts-master/noto-sans/*" \
             -d "$temp_dir/extract" 2>&1; then
             log_error "  Extraction failed"
             [ $retry_count -lt $FONTS_MAX_RETRIES ] && {
@@ -171,15 +172,37 @@ download_fonts() {
             } || abort "Font extraction failed after $FONTS_MAX_RETRIES attempts"
         fi
         
-        # Verify extraction
-        local extracted_font_dir="$temp_dir/extract/fonts-master/noto-sans/Noto Sans Regular"
-        if [ ! -d "$extracted_font_dir" ]; then
+        # Verify extraction and find the actual font directory
+        # The directory structure might vary, so search for any directory containing .pbf files
+        local extracted_font_dir
+        extracted_font_dir=$(find "$temp_dir/extract/fonts-master/noto-sans" -type d -name "*Regular*" 2>/dev/null | head -1)
+        
+        # If no *Regular* directory found, try to find any directory with .pbf files
+        if [ -z "$extracted_font_dir" ]; then
+            extracted_font_dir=$(find "$temp_dir/extract/fonts-master/noto-sans" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)
+        fi
+        
+        # Verify the directory exists and has .pbf files
+        if [ -z "$extracted_font_dir" ] || [ ! -d "$extracted_font_dir" ]; then
             log_error "  Extracted font directory not found"
+            log_debug "  Searching in: $temp_dir/extract/fonts-master/noto-sans"
             [ $retry_count -lt $FONTS_MAX_RETRIES ] && {
                 log_info "Retrying in ${FONTS_RETRY_DELAY}s..."
                 sleep "$FONTS_RETRY_DELAY"
                 continue
             } || abort "Font extraction directory structure invalid after $FONTS_MAX_RETRIES attempts"
+        fi
+        
+        # Verify that the directory contains .pbf files
+        local pbf_count
+        pbf_count=$(find "$extracted_font_dir" -name "*.pbf" 2>/dev/null | wc -l)
+        if [ "$pbf_count" -eq 0 ]; then
+            log_error "  No .pbf files found in extracted directory"
+            [ $retry_count -lt $FONTS_MAX_RETRIES ] && {
+                log_info "Retrying in ${FONTS_RETRY_DELAY}s..."
+                sleep "$FONTS_RETRY_DELAY"
+                continue
+            } || abort "Font directory contains no .pbf files after $FONTS_MAX_RETRIES attempts"
         fi
         
         # Copy fonts to destination
