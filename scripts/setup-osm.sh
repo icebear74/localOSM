@@ -34,6 +34,7 @@ VERBOSE="${VERBOSE:-0}"
 FONTS_URL="https://github.com/openmaptiles/fonts/archive/refs/heads/master.zip"
 FONTS_MAX_RETRIES=3
 FONTS_RETRY_DELAY=5
+MIN_FONT_FILES=5  # Minimum number of font files required for successful installation
 
 # Logging functions
 log_info() {
@@ -114,6 +115,10 @@ download_fonts() {
     
     local retry_count=0
     local download_success=0
+    local temp_dir=""
+    
+    # Set trap to clean up temp directory on exit
+    trap "[ -n \"$temp_dir\" ] && rm -rf \"$temp_dir\"" EXIT
     
     while [ $retry_count -lt $FONTS_MAX_RETRIES ] && [ $download_success -eq 0 ]; do
         retry_count=$((retry_count + 1))
@@ -121,11 +126,7 @@ download_fonts() {
         log_info "Download attempt $retry_count of $FONTS_MAX_RETRIES..."
         
         # Create temporary working directory
-        local temp_dir
         temp_dir=$(mktemp -d) || abort "Failed to create temporary directory"
-        # Use EXIT trap to ensure cleanup happens when function returns or exits
-        # (This will override any previous trap, so it should be safe inside the loop)
-        trap "rm -rf '$temp_dir'" EXIT
         
         # Ensure wget and unzip are available
         if ! command -v wget &> /dev/null || ! command -v unzip &> /dev/null; then
@@ -187,8 +188,8 @@ download_fonts() {
         # Verify that the directory contains font files (TTF/OTF)
         local font_count
         font_count=$(find "$extracted_source_dir" -type f \( -name "*.ttf" -o -name "*.otf" \) 2>/dev/null | wc -l)
-        if [ "$font_count" -lt 5 ]; then
-            log_error "  Insufficient font files found ($font_count files)"
+        if [ "$font_count" -lt "$MIN_FONT_FILES" ]; then
+            log_error "  Insufficient font files found ($font_count files, minimum: $MIN_FONT_FILES)"
             [ $retry_count -lt $FONTS_MAX_RETRIES ] && {
                 log_info "Retrying in ${FONTS_RETRY_DELAY}s..."
                 sleep "$FONTS_RETRY_DELAY"
