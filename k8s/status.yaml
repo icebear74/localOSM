@@ -1806,8 +1806,10 @@ data:
                                 # On every subsequent run the files are already present and this
                                 # container exits immediately without touching the network.
                                 # The main tilemaker-import container therefore runs fully offline.
+                                # alpine:3.20 is used (instead of busybox) because its wget has a
+                                # full OpenSSL TLS stack required by osmdata.openstreetmap.de.
                                 "name": "fetch-sources",
-                                "image": "busybox:1.36",
+                                "image": "alpine:3.20",
                                 "command": ["/bin/sh", "-c"],
                                 "args": [
                                     "echo '=== Caching ancillary source files (skipped when already present) ==='\n"
