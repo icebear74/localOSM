@@ -33,19 +33,48 @@ spec:
               fi
               # Download NotoSansRegular PBF glyph fonts once; cached in /data/fonts on the host.
               # After the first run this is fully offline — no CDN needed at runtime.
-              if [ ! -d "/data/fonts/NotoSansRegular" ]; then
+              if [ ! -d "/data/fonts/NotoSansRegular" ] || [ ! "$(ls /data/fonts/NotoSansRegular 2>/dev/null | wc -l)" -gt 0 ]; then
                 echo "Downloading OpenMapTiles Noto Sans Regular fonts (one-time setup)..."
-                apk add --no-cache --quiet wget unzip && \
-                  wget -q -O /tmp/omtfonts.zip \
-                    "https://github.com/openmaptiles/fonts/archive/refs/heads/master.zip" && \
-                  unzip -q /tmp/omtfonts.zip \
-                    "fonts-master/noto-sans/Noto Sans Regular/*" \
-                    -d /tmp/omtextract && \
-                  cp -r "/tmp/omtextract/fonts-master/noto-sans/Noto Sans Regular" \
-                    "/data/fonts/NotoSansRegular" && \
-                  rm -rf /tmp/omtfonts.zip /tmp/omtextract && \
-                  echo "Fonts installed ($(ls '/data/fonts/NotoSansRegular' | wc -l) files)." || \
-                  { rm -f /tmp/omtfonts.zip; rm -rf /tmp/omtextract; echo "WARNING: Font download failed. Street labels may be invisible."; }
+                DOWNLOAD_SUCCESS=0
+                RETRY_COUNT=0
+                MAX_RETRIES=3
+                while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ $DOWNLOAD_SUCCESS -eq 0 ]; do
+                  RETRY_COUNT=$((RETRY_COUNT + 1))
+                  echo "Font download attempt $RETRY_COUNT of $MAX_RETRIES..."
+                  if apk add --no-cache --quiet wget unzip 2>/dev/null; then
+                    if wget -q --timeout=30 -O /tmp/omtfonts.zip \
+                      "https://github.com/openmaptiles/fonts/archive/refs/heads/master.zip"; then
+                      if unzip -q /tmp/omtfonts.zip \
+                        "fonts-master/noto-sans/Noto Sans Regular/*" \
+                        -d /tmp/omtextract 2>/dev/null; then
+                        if mkdir -p /data/fonts/NotoSansRegular && \
+                          cp -r "/tmp/omtextract/fonts-master/noto-sans/Noto Sans Regular"/* \
+                          "/data/fonts/NotoSansRegular/" 2>/dev/null; then
+                          FONT_COUNT=$(ls '/data/fonts/NotoSansRegular' | wc -l)
+                          if [ "$FONT_COUNT" -gt 0 ]; then
+                            echo "Fonts installed successfully ($FONT_COUNT files)."
+                            DOWNLOAD_SUCCESS=1
+                          else
+                            echo "Font directory is empty after copy, retrying..."
+                          fi
+                        fi
+                      fi
+                    fi
+                    rm -rf /tmp/omtfonts.zip /tmp/omtextract 2>/dev/null || true
+                  fi
+                  if [ $DOWNLOAD_SUCCESS -eq 0 ] && [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                    echo "Font download attempt $RETRY_COUNT failed, waiting 5s before retry..."
+                    sleep 5
+                  fi
+                done
+                if [ $DOWNLOAD_SUCCESS -eq 0 ]; then
+                  echo "WARNING: Font download failed after $MAX_RETRIES attempts. Street labels may not be visible."
+                  echo "To fix this, manually download fonts to: /mnt/data/OSM/tileserver/fonts/NotoSansRegular/"
+                  # Ensure directory structure exists even if download failed
+                  mkdir -p /data/fonts/NotoSansRegular
+                fi
+              else
+                echo "Fonts already available ($(ls '/data/fonts/NotoSansRegular' | wc -l) files)."
               fi
               if [ -f /data/map.mbtiles ]; then
                 # Write full config with data
