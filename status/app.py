@@ -1793,13 +1793,11 @@ def build_tileserver_job_manifest():
                                 "--lake_centerlines_path=/data/sources/lake_centerline.shp.zip",
                                 "--water_polygons_path=/data/sources/water-polygons-split-3857.zip",
                                 "--natural_earth_path=/data/sources/natural_earth_vector.sqlite.zip",
-                                # Skip zoom 0-5 world-overview (NaturalEarth) tiles; the map is
-                                # centered on the local extract so low-zoom world tiles are not
-                                # needed and would cause MapLibre to overzoom them outside the
-                                # extract area, producing a distorted world-map appearance.
-                                "--minzoom=6",
-                                # Generate tiles up to zoom 14 to support detailed map views
-                                "--maxzoom=14",
+                                # Generate all zoom levels from 0 (world view) to 28 (maximum detail)
+                                # to support all zoom ranges. With sufficient disk space (>2TB),
+                                # all zoom levels can be generated for maximum flexibility.
+                                "--minzoom=0",
+                                "--maxzoom=28",
                             ],
                             "volumeMounts": [
                                 {"name": "osm-data", "mountPath": "/data"},
