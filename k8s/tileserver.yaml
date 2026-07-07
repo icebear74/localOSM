@@ -49,7 +49,7 @@ spec:
               fi
               if [ -f /data/map.mbtiles ]; then
                 # Write full config with data
-                printf '%s\n' '{"options":{"paths":{"root":"/","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true},"styles":{"osm":{"style":"/data/style.json"}},"data":{"v3":{"mbtiles":"/data/map.mbtiles"}}}' > /data/config.json
+                printf '%s\n' '{"options":{"paths":{"root":"/","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true,"cors":true},"styles":{"osm":{"style":"/data/style.json"}},"data":{"v3":{"mbtiles":"/data/map.mbtiles"}}}' > /data/config.json
                 # Write default MapLibre GL style only on first start.
                 # After the first tile build the status service writes style.json with
                 # the geographic centre of all downloaded regions, so we must not
@@ -63,7 +63,7 @@ spec:
                 echo "TileServer configured with local map.mbtiles"
               else
                 # Write minimal empty config (no data yet)
-                printf '{"options":{"paths":{"root":"","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true},"styles":{},"data":{}}\n' > /data/config.json
+                printf '{"options":{"paths":{"root":"","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true,"cors":true},"styles":{},"data":{}}\n' > /data/config.json
                 echo "TileServer started without tiles (no map.mbtiles found)"
               fi
           volumeMounts:
