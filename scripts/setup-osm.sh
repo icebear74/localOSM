@@ -31,7 +31,8 @@ FONTS_PATH="${FONTS_DIR}/${FONTS_NAME}"
 VERBOSE="${VERBOSE:-0}"
 
 # Font download configuration
-FONTS_URL="https://github.com/openmaptiles/fonts/archive/refs/heads/master.zip"
+# Use @geops/mapbox-gl-fonts which has pre-built PBF fonts (not TTF source files)
+FONTS_URL="https://registry.npmjs.org/@geops/mapbox-gl-fonts/-/mapbox-gl-fonts-3.0.2.tgz"
 FONTS_MAX_RETRIES=3
 FONTS_RETRY_DELAY=5
 
@@ -125,27 +126,27 @@ download_fonts() {
         temp_dir=$(mktemp -d) || abort "Failed to create temporary directory"
         trap "rm -rf $temp_dir" RETURN
         
-        # Ensure wget is available
-        if ! command -v wget &> /dev/null; then
-            log_debug "wget not found, attempting to install..."
+        # Ensure wget and tar are available
+        if ! command -v wget &> /dev/null || ! command -v tar &> /dev/null; then
+            log_debug "wget/tar not found, attempting to install..."
             if command -v apt-get &> /dev/null; then
                 apt-get update -qq 2>&1 | grep -v "^Get:" | grep -v "^Reading" || true
-                apt-get install -y -qq wget unzip 2>&1 | tail -1
+                apt-get install -y -qq wget tar 2>&1 | tail -1
             elif command -v apk &> /dev/null; then
-                apk add --no-cache wget unzip 2>&1 | tail -1
+                apk add --no-cache wget tar 2>&1 | tail -1
             else
-                log_error "Cannot install wget (no apt-get or apk available)"
+                log_error "Cannot install wget/tar (no apt-get or apk available)"
                 [ $retry_count -lt $FONTS_MAX_RETRIES ] && {
                     log_info "Retrying in ${FONTS_RETRY_DELAY}s..."
                     sleep "$FONTS_RETRY_DELAY"
                     continue
-                } || abort "Failed to install wget"
+                } || abort "Failed to install wget/tar"
             fi
         fi
         
         # Download fonts archive
         log_info "  → Downloading fonts archive..."
-        if ! wget -q --timeout=30 -O "$temp_dir/fonts.zip" "$FONTS_URL" 2>&1; then
+        if ! wget -q --timeout=30 -O "$temp_dir/fonts.tar.gz" "$FONTS_URL" 2>&1; then
             log_error "  Download failed"
             [ $retry_count -lt $FONTS_MAX_RETRIES ] && {
                 log_info "Retrying in ${FONTS_RETRY_DELAY}s..."
@@ -154,16 +155,14 @@ download_fonts() {
             } || abort "Font download failed after $FONTS_MAX_RETRIES attempts"
         fi
         
-        local zip_size
-        zip_size=$(du -h "$temp_dir/fonts.zip" | cut -f1)
-        log_success "  Downloaded ($zip_size)"
+        local tar_size
+        tar_size=$(du -h "$temp_dir/fonts.tar.gz" | cut -f1)
+        log_success "  Downloaded ($tar_size)"
         
         # Extract fonts archive
         log_info "  → Extracting fonts..."
-        # Extract the full fonts-master/noto-sans directory to handle archive structure variations
-        if ! unzip -q "$temp_dir/fonts.zip" \
-            "fonts-master/noto-sans/*" \
-            -d "$temp_dir/extract" 2>&1; then
+        # Extract the tar.gz package (NPM package format)
+        if ! tar -xzf "$temp_dir/fonts.tar.gz" -C "$temp_dir/extract" 2>&1; then
             log_error "  Extraction failed"
             [ $retry_count -lt $FONTS_MAX_RETRIES ] && {
                 log_info "Retrying in ${FONTS_RETRY_DELAY}s..."
@@ -172,20 +171,14 @@ download_fonts() {
             } || abort "Font extraction failed after $FONTS_MAX_RETRIES attempts"
         fi
         
-        # Verify extraction and find the actual font directory
-        # The directory structure might vary, so search for any directory containing .pbf files
-        local extracted_font_dir
-        extracted_font_dir=$(find "$temp_dir/extract/fonts-master/noto-sans" -type d -name "*Regular*" 2>/dev/null | head -1)
-        
-        # If no *Regular* directory found, try to find any directory with .pbf files
-        if [ -z "$extracted_font_dir" ]; then
-            extracted_font_dir=$(find "$temp_dir/extract/fonts-master/noto-sans" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)
-        fi
+        # Verify extraction and find the fonts directory
+        # The NPM package extracts to "package/fonts/NotoSansRegular"
+        local extracted_font_dir="$temp_dir/extract/package/fonts/NotoSansRegular"
         
         # Verify the directory exists and has .pbf files
-        if [ -z "$extracted_font_dir" ] || [ ! -d "$extracted_font_dir" ]; then
-            log_error "  Extracted font directory not found"
-            log_debug "  Searching in: $temp_dir/extract/fonts-master/noto-sans"
+        if [ ! -d "$extracted_font_dir" ]; then
+            log_error "  Extracted font directory not found at $extracted_font_dir"
+            log_debug "  Directory contents: $(ls -la "$temp_dir/extract/package/fonts/" 2>/dev/null || echo 'not found')"
             [ $retry_count -lt $FONTS_MAX_RETRIES ] && {
                 log_info "Retrying in ${FONTS_RETRY_DELAY}s..."
                 sleep "$FONTS_RETRY_DELAY"
