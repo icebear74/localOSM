@@ -206,6 +206,16 @@ ${SUDO} chown -R 1000:1000 "${BASE_DIR}/status"     2>/dev/null || true
 echo "    Directories ready."
 
 # ---------------------------------------------------------------------------
+# Download and verify all required assets
+# ---------------------------------------------------------------------------
+echo ""
+echo ">>> Running initial setup tasks (fonts and dependencies) …"
+if ! bash "${REPO_ROOT}/scripts/setup-osm.sh"; then
+  echo "ERROR: Initial setup failed. Fix the errors above and try again." >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
 # Write node URL to status config (preserves existing config keys)
 # ---------------------------------------------------------------------------
 CONFIG_PATH="${BASE_DIR}/status/config.json"
