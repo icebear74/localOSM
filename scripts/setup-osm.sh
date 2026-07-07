@@ -333,14 +333,27 @@ generate_glyph_pbf_files() {
         return 1
     }
     
-    # Get the first TTF or OTF file
-    local ttf_file=$(find "$FONTS_PATH" -name "*.ttf" | head -1)
-    if [ -z "$ttf_file" ]; then
-        # Try OTF as fallback
-        ttf_file=$(find "$FONTS_PATH" -name "*.otf" | head -1)
+    # Prefer NotoSans-Regular.ttf for best Latin character coverage
+    # This ensures proper glyphs for text labels on maps
+    local ttf_file="$FONTS_PATH/NotoSans-Regular.ttf"
+    
+    if [ ! -f "$ttf_file" ]; then
+        # Fallback: try NotoSans-Bold.ttf
+        ttf_file="$FONTS_PATH/NotoSans-Bold.ttf"
     fi
-    if [ -z "$ttf_file" ]; then
-        log_error "No TTF or OTF file found for glyph generation"
+    
+    if [ ! -f "$ttf_file" ]; then
+        # Last resort: use the first available TTF file
+        ttf_file=$(find "$FONTS_PATH" -name "*.ttf" | sort | head -1)
+    fi
+    
+    if [ ! -f "$ttf_file" ]; then
+        # Try OTF as last resort
+        ttf_file=$(find "$FONTS_PATH" -name "*.otf" | sort | head -1)
+    fi
+    
+    if [ -z "$ttf_file" ] || [ ! -f "$ttf_file" ]; then
+        log_error "No suitable TTF or OTF file found for glyph generation"
         return 1
     fi
     
