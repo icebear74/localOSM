@@ -60,13 +60,14 @@ spec:
                         fi
                       fi
                     fi
-                    rm -rf /tmp/omtfonts.zip /tmp/omtextract 2>/dev/null || true
                   fi
                   if [ $DOWNLOAD_SUCCESS -eq 0 ] && [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
                     echo "Font download attempt $RETRY_COUNT failed, waiting 5s before retry..."
                     sleep 5
                   fi
                 done
+                # Clean up temporary files after all retries complete
+                rm -rf /tmp/omtfonts.zip /tmp/omtextract 2>/dev/null || true
                 if [ $DOWNLOAD_SUCCESS -eq 0 ]; then
                   echo "WARNING: Font download failed after $MAX_RETRIES attempts. Street labels may not be visible."
                   echo "To fix this, manually download fonts to: /mnt/data/OSM/tileserver/fonts/NotoSansRegular/"
