@@ -15,6 +15,10 @@ spec:
       labels:
         app: nominatim
     spec:
+      # fsGroup ensures the hostPath volume is owned by the postgres group (GID 100)
+      # inside mediagis/nominatim:4.5, so PostgreSQL can read/write its data directory.
+      securityContext:
+        fsGroup: 100
       initContainers:
         # Wait until either the PBF file exists (first import) or the DB is already
         # initialized (subsequent starts). Prevents CrashLoopBackOff on an empty node.

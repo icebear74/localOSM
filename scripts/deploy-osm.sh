@@ -197,7 +197,8 @@ done
 
 ${SUDO} chown -R 999:999  "${BASE_DIR}/postgres"   2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${BASE_DIR}/tileserver" 2>/dev/null || true
-${SUDO} chown -R 1000:1000 "${BASE_DIR}/nominatim"  2>/dev/null || true
+# mediagis/nominatim:4.5 bundles PostgreSQL 16; postgres user has UID/GID 100 in that image.
+${SUDO} chown -R 100:100   "${BASE_DIR}/nominatim"  2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${BASE_DIR}/valhalla"   2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${BASE_DIR}/import"     2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${BASE_DIR}/cache"      2>/dev/null || true
