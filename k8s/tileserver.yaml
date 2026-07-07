@@ -20,22 +20,22 @@ spec:
         # when no MBTiles files have been downloaded yet. All font downloads have
         # already been completed by scripts/setup-osm.sh during deployment setup.
         - name: init-config
-         image: alpine:3.19
-         command: ["/bin/sh", "-c"]
-         args:
-           - |
+          image: alpine:3.19
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
              # Verify fonts directory structure exists (fonts were pre-downloaded by setup-osm.sh)
              mkdir -p /data/fonts/NotoSansRegular || {
                echo "[ERROR] Failed to create fonts directory"
                exit 1
              }
-              
+
              # Migrate old font directory name (spaces cause HTTP 400 in TileServer-GL).
              if [ -d "/data/fonts/Noto Sans Regular" ] && [ ! -d "/data/fonts/NotoSansRegular" ]; then
                mv "/data/fonts/Noto Sans Regular" "/data/fonts/NotoSansRegular"
                echo "[INFO] Migrated font directory: 'Noto Sans Regular' -> 'NotoSansRegular'"
              fi
-              
+
              # Check if fonts are available
              FONT_COUNT=$(find /data/fonts/NotoSansRegular -type f \( -name "*.ttf" -o -name "*.otf" \) 2>/dev/null | wc -l)
              if [ "$FONT_COUNT" -gt 0 ]; then
@@ -44,7 +44,7 @@ spec:
                echo "[!] WARNING: No fonts found. Map will render WITHOUT text labels."
                echo "[!] Fonts should have been downloaded by scripts/setup-osm.sh"
              fi
-              
+
              if [ -f /data/map.mbtiles ]; then
                # Write full config with data
                printf '%s\n' '{"options":{"paths":{"root":"/","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true,"cors":true},"styles":{"osm":{"style":"/data/style.json"}},"data":{"v3":{"mbtiles":"/data/map.mbtiles"}}}' > /data/config.json
@@ -64,9 +64,9 @@ spec:
                printf '{"options":{"paths":{"root":"","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true,"cors":true},"styles":{},"data":{}}\n' > /data/config.json
                echo "[INFO] TileServer started without tiles (no map.mbtiles found)"
              fi
-         volumeMounts:
-           - name: tileserver-data
-             mountPath: /data
+          volumeMounts:
+            - name: tileserver-data
+              mountPath: /data
       containers:
         - name: tileserver-gl
           image: maptiler/tileserver-gl:latest
