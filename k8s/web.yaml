@@ -450,15 +450,15 @@ data:
                         try:
                             body = gzip.decompress(body)
                             if is_gzip_magic and not is_gzip_header:
-                                print(f"DEBUG: Detected gzip by magic bytes (no Content-Encoding header) for {tile_url}", flush=True)
+                                print(f"debug: Detected gzip by magic bytes (no Content-Encoding header) for {tile_url}", flush=True)
                         except (gzip.BadGzipFile, OSError) as e:
-                            print(f"Gzip decompression failed (body size {len(body)}, header={is_gzip_header}, magic={is_gzip_magic}): {e}", flush=True)
+                            print(f"error: Gzip decompression failed (body size {len(body)}, header={is_gzip_header}, magic={is_gzip_magic}): {e}", flush=True)
                             # If decompression fails despite magic bytes, try to use body as-is
                             if not is_gzip_header:
-                                print(f"WARNING: Malformed gzip data detected for {tile_url}, forwarding as-is", flush=True)
+                                print(f"warning: Malformed gzip data detected for {tile_url}, forwarding as-is", flush=True)
                     
                     if len(body) == 0:
-                        print(f"WARNING: Empty tile response from {tile_url} (content-encoding: {content_encoding}, after-decompress)", flush=True)
+                        print(f"warning: Empty tile response from {tile_url} (content-encoding: {content_encoding}, after-decompress)", flush=True)
                     
                     self.send_response(200)
                     self.send_header("Content-Type", content_type)
