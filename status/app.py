@@ -1658,7 +1658,7 @@ def build_valhalla_job_manifest():
                             "name": "valhalla-import",
                             "image": "ghcr.io/gis-ops/docker-valhalla/valhalla:latest",
                             "imagePullPolicy": "Always",
-                            "resources": {"requests": {"memory": "12Gi"}, "limits": {"memory": "12Gi"}},
+                            "resources": {"requests": {"memory": "14Gi"}, "limits": {"memory": "14Gi"}},
                             "securityContext": {"runAsUser": 0, "runAsGroup": 0},
                             "command": ["/bin/sh", "-c"],
                             "args": [
@@ -1782,7 +1782,7 @@ def build_tileserver_job_manifest():
                             "name": "tilemaker-import",
                             "image": "ghcr.io/onthegomap/planetiler:latest",
                             "imagePullPolicy": "Always",
-                            "resources": {"requests": {"memory": "12Gi"}, "limits": {"memory": "12Gi"}},
+                            "resources": {"requests": {"memory": "13Gi"}, "limits": {"memory": "13Gi"}},
                             "securityContext": {"runAsUser": 0, "runAsGroup": 0},
                             "env": [
                                 {"name": "JAVA_OPTS", "value": "-Xms11g -Xmx11g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"},
@@ -1791,6 +1791,7 @@ def build_tileserver_job_manifest():
                                 "--osm-path=/data/import/planet.osm.pbf",
                                 "--output=/data/tileserver/map.mbtiles",
                                 "--force",
+                                "--threads=6",
                                 # Ancillary source files are pre-cached by the fetch-sources
                                 # init container. No --download flag: tile generation runs
                                 # fully offline using only local data.
