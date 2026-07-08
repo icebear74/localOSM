@@ -1536,11 +1536,11 @@ data:
                 raise ValueError("auto_update_time must use HH:MM format.")
             config["auto_update_time"] = time_value
         if "routing_costing_models" in payload:
-            config["routing_costing_models"] = payload.get("routing_costing_models", config["routing_costing_models"])
+            config["routing_costing_models"] = payload["routing_costing_models"]
         if "routing_speeds" in payload:
-            config["routing_speeds"] = payload.get("routing_speeds", config["routing_speeds"])
+            config["routing_speeds"] = payload["routing_speeds"]
         if "routing_advanced" in payload:
-            config["routing_advanced"] = payload.get("routing_advanced", config["routing_advanced"])
+            config["routing_advanced"] = payload["routing_advanced"]
         return save_config(config)
 
 
@@ -2353,7 +2353,7 @@ data:
             NOMINATIM_DIR, NOMINATIM_POSTGRES_VERSION, "main", "import-finished"
         )
         deadline = time.monotonic() + timeout_seconds
-        last_marker_check_time = time.monotonic()
+        wait_start_time = time.monotonic()
 
         while time.monotonic() < deadline:
             try:
@@ -2372,7 +2372,7 @@ data:
             if pod_running:
                 # Pod is running but import not finished
                 # Update workflow state with better detail about what we're checking
-                elapsed_total = time.monotonic() - last_marker_check_time
+                elapsed_total = time.monotonic() - wait_start_time
                 write_workflow_state(
                     running=True,
                     phase="search",
@@ -2676,7 +2676,7 @@ data:
                     except Exception as e:
                         raise ValueError(f"Geocoding failed for waypoint '{wp}': {e}")
             else:
-                raise ValueError(f"Invalid waypoint format: {wp}. Use 'lat,lon' (e.g., '52.5200,13.4050') or address.")
+                raise ValueError(f"Invalid waypoint format: {wp}. Expected 'lat,lon' format (e.g., '52.5200,13.4050') or a geocodable address string.")
 
         # Map costing model
         costing_map = {
@@ -2906,6 +2906,7 @@ data:
             pass
         finally:
             server.server_close()
+
 ---
 apiVersion: apps/v1
 kind: Deployment
