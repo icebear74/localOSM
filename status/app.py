@@ -1751,14 +1751,15 @@ def validate_pbf_file(path, *, label="OSM extract"):
         error_msg = str(e)
         # Some PBF files have larger blob headers than osmium fileinfo's strict limit.
         # When this occurs, try osmium cat as a more lenient fallback validation.
-        if "blobheader" in error_msg.lower() or "blob header" in error_msg.lower():
-            try:
-                run_command(["osmium", "cat", "-o", "/dev/null", path], timeout=120)
-            except RuntimeError:
-                # If osmium cat also fails, report the original fileinfo error
-                raise e
-        else:
+        if "blobheader" not in error_msg.lower() and "blob header" not in error_msg.lower():
+            # Not a BlobHeader error, re-raise the original error
             raise
+        # Try the fallback validation with osmium cat
+        try:
+            run_command(["osmium", "cat", "-o", "/dev/null", path], timeout=120)
+        except RuntimeError:
+            # If osmium cat also fails, report the original fileinfo error
+            raise e
 
 
 def clear_directory(path):
