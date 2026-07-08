@@ -1,0 +1,117 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: osm-valhalla-import-config
+  namespace: osm
+data:
+  valhalla.json: |
+    {
+      "mjolnir": {
+        "tile_dir": "/data/tiles",
+        "tile_extract": "/data/valhalla_tiles.tar",
+        "traffic_extract": "/data/traffic.tar",
+        "timezone": "/data/timezone.sqlite",
+        "admin": "/data/admin.sqlite",
+        "default_speeds_config": "/usr/local/share/valhalla/mjolnir/default_speeds.lua",
+        "max_speed": 180,
+        "num_threads": 6,
+        "max_cache_size": 500000000,
+        "lru_mem_cache_hard_control": true,
+        "logging": {
+          "type": "std_out",
+          "color": false
+        }
+      },
+      "loki": {
+        "actions": ["route", "locate", "sources_to_targets", "optimized_route",
+                    "isochrone", "trace_route", "trace_attributes", "height",
+                    "transit_available", "expansion", "centroid", "status"],
+        "logging": {
+          "type": "std_out",
+          "color": false
+        },
+        "service": {
+          "proxy": "ipc:///tmp/loki"
+        }
+      },
+      "thor": {
+        "costmatrix": {
+          "max_reserved_locations": 100
+        },
+        "logging": {
+          "type": "std_out",
+          "color": false
+        },
+        "service": {
+          "proxy": "ipc:///tmp/thor"
+        }
+      },
+      "odin": {
+        "logging": {
+          "type": "std_out",
+          "color": false
+        },
+        "service": {
+          "proxy": "ipc:///tmp/odin"
+        }
+      },
+      "meili": {
+        "mode": "auto",
+        "grid": {
+          "cache_size": 100240,
+          "size": 500
+        },
+        "default": {
+          "beta": 3,
+          "breakage_dist": 2000,
+          "geometry": false,
+          "gps_accuracy": 5,
+          "interpolation_distance": 10,
+          "max_route_distance_factor": 3,
+          "max_route_time_factor": 3,
+          "max_search_radius": 200,
+          "route": true,
+          "search_radius": 50,
+          "sigma_z": 4.07,
+          "turn_penalty_factor": 100
+        },
+        "customizable": ["mode", "search_radius", "turn_penalty_factor",
+                         "gps_accuracy", "interpolation_distance", "sigma_z"],
+        "service": {
+          "proxy": "ipc:///tmp/meili"
+        }
+      },
+      "httpd": {
+        "service": {
+          "listen": "tcp://*:8002",
+          "loopback": "ipc:///tmp/loopback",
+          "interrupt": "ipc:///tmp/interrupt"
+        }
+      },
+      "service_limits": {
+        "auto": {
+          "max_distance": 5000000.0,
+          "max_locations": 20,
+          "max_matrix_distance": 200000.0,
+          "max_matrix_location_pairs": 2500
+        },
+        "pedestrian": {
+          "max_distance": 250000.0,
+          "max_locations": 50,
+          "max_matrix_distance": 200000.0,
+          "max_matrix_location_pairs": 2500
+        },
+        "bicycle": {
+          "max_distance": 500000.0,
+          "max_locations": 50,
+          "max_matrix_distance": 200000.0,
+          "max_matrix_location_pairs": 2500
+        },
+        "truck": {
+          "max_distance": 5000000.0,
+          "max_locations": 20,
+          "max_matrix_distance": 200000.0,
+          "max_matrix_location_pairs": 2500
+        }
+      }
+    }

@@ -37,8 +37,13 @@ spec:
           volumeMounts:
             - name: valhalla-data
               mountPath: /custom_files
+            - name: valhalla-import-config
+              mountPath: /config
       volumes:
         - name: valhalla-data
           hostPath:
             path: /mnt/data/OSM/valhalla
             type: DirectoryOrCreate
+        - name: valhalla-import-config
+          configMap:
+            name: osm-valhalla-import-config

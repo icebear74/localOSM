@@ -1941,7 +1941,7 @@ def build_valhalla_job_manifest():
                         },
                         {
                             "name": "valhalla-config",
-                            "configMap": {"name": "osm-valhalla-config"},
+                            "configMap": {"name": "osm-valhalla-import-config"},
                         },
                     ],
                 }

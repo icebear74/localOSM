@@ -2009,7 +2009,7 @@ data:
                             },
                             {
                                 "name": "valhalla-config",
-                                "configMap": {"name": "osm-valhalla-config"},
+                                "configMap": {"name": "osm-valhalla-import-config"},
                             },
                         ],
                     }
