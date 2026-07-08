@@ -2089,10 +2089,7 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=7200):
             return
         
         if pod_running:
-            # Pod is running but import not finished - check for stability
-            # If pod has been stable for a while without creating marker, assume import is complete
-            elapsed_stable = time.monotonic() - last_update
-            
+            # Pod is running but import not finished
             # Update workflow state with better detail about what we're checking
             elapsed_total = time.monotonic() - last_marker_check_time
             write_workflow_state(
