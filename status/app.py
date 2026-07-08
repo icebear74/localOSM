@@ -33,6 +33,11 @@ COUNTRIES_FILE = os.path.join(STATUS_DIR, "countries.json")
 STATE_FILE = os.path.join(STATUS_DIR, "library-state.json")
 CONFIG_FILE = os.path.join(STATUS_DIR, "config.json")
 
+# PostgreSQL version used by mediagis/nominatim container
+NOMINATIM_POSTGRES_VERSION = "16"
+# Progress value for Nominatim rebuild workflow phase
+NOMINATIM_REBUILD_PROGRESS = 82
+
 CONFIG_DEFAULTS = {
     "node_url": "",
     "auto_update_enabled": False,
@@ -2055,7 +2060,9 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=7200):
     If the import-finished marker doesn't exist and the pod is running, wait for import to complete
     before allowing scale down. This prevents race condition where scale down/up aborts running imports.
     """
-    import_finished_marker = os.path.join(NOMINATIM_DIR, "16", "main", "import-finished")
+    import_finished_marker = os.path.join(
+        NOMINATIM_DIR, NOMINATIM_POSTGRES_VERSION, "main", "import-finished"
+    )
     deadline = time.time() + timeout_seconds
     
     while time.time() < deadline:
@@ -2076,7 +2083,7 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=7200):
             write_workflow_state(
                 running=True,
                 phase="search",
-                progress=82,
+                progress=NOMINATIM_REBUILD_PROGRESS,
                 message="Refreshing Nominatim for address and POI search ...",
                 detail="Waiting for ongoing Nominatim import to complete before rebuild.",
                 country=country["name"],
@@ -2097,7 +2104,7 @@ def rebuild_nominatim(country):
     write_workflow_state(
         running=True,
         phase="search",
-        progress=82,
+        progress=NOMINATIM_REBUILD_PROGRESS,
         message="Refreshing Nominatim for address and POI search ...",
         detail="Scaling the Nominatim deployment down before reimport.",
         country=country["name"],
