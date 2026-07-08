@@ -2906,6 +2906,7 @@ data:
             pass
         finally:
             server.server_close()
+
 spec:
   replicas: 1
   selector:
