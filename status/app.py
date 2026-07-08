@@ -905,7 +905,7 @@ INDEX_HTML = """<!doctype html>
          <button onclick="calculateRoute()">Route berechnen</button>
        </div>
        <div id="route-result" class="hint" style="margin-top: 0.5rem; display: none;"></div>
-       <div class="hint">Geben Sie mehrere Zwischenpunkte ein für Multi-Leg-Routen. Die Routine werden über Valhalla berechnet.</div>
+       <div class="hint">Geben Sie mehrere Zwischenpunkte ein für Multi-Leg-Routen. Die Routen werden über Valhalla berechnet.</div>
      </div>
     </div>
 
@@ -2608,7 +2608,7 @@ def calculate_multi_leg_route(payload):
                 except Exception as e:
                     raise ValueError(f"Geocoding failed for waypoint '{wp}': {e}")
         else:
-            raise ValueError(f"Invalid waypoint format: {wp}. Use 'lat,lon' or address.")
+            raise ValueError(f"Invalid waypoint format: {wp}. Use 'lat,lon' (e.g., '52.5200,13.4050') or address.")
     
     # Map costing model
     costing_map = {
