@@ -2587,28 +2587,28 @@ def calculate_multi_leg_route(payload):
     locations = []
     for wp in waypoints:
         parts = wp.strip().split(",")
-        if len(parts) == 2:
+        if len(parts) != 2:
+            raise ValueError(f"Invalid waypoint format: {wp}. Expected 'lat,lon' format (e.g., '52.5200,13.4050'). For addresses, use a comma-separated format that Nominatim can parse (e.g., 'city, country' or 'street, city').")
+         
+        try:
+            lat = float(parts[0].strip())
+            lon = float(parts[1].strip())
+            locations.append({"lat": lat, "lon": lon})
+        except ValueError:
+            # Try geocoding via nominatim as fallback
             try:
-                lat = float(parts[0].strip())
-                lon = float(parts[1].strip())
-                locations.append({"lat": lat, "lon": lon})
-            except ValueError:
-                # Try geocoding via nominatim
-                try:
-                    resp = urllib.request.urlopen(
-                        f"http://nominatim.osm.svc.cluster.local:8080/search?"
-                        f"q={urllib.parse.quote(wp.strip())}&format=json&limit=1",
-                        timeout=5
-                    )
-                    data = json.loads(resp.read().decode("utf-8"))
-                    if data:
-                        locations.append({"lat": float(data[0]["lat"]), "lon": float(data[0]["lon"])})
-                    else:
-                        raise ValueError(f"Could not geocode waypoint: {wp}")
-                except Exception as e:
-                    raise ValueError(f"Geocoding failed for waypoint '{wp}': {e}")
-        else:
-            raise ValueError(f"Invalid waypoint format: {wp}. Expected 'lat,lon' format (e.g., '52.5200,13.4050') or a geocodable address string.")
+                resp = urllib.request.urlopen(
+                    f"http://nominatim.osm.svc.cluster.local:8080/search?"
+                    f"q={urllib.parse.quote(wp.strip())}&format=json&limit=1",
+                    timeout=5
+                )
+                data = json.loads(resp.read().decode("utf-8"))
+                if data:
+                    locations.append({"lat": float(data[0]["lat"]), "lon": float(data[0]["lon"])})
+                else:
+                    raise ValueError(f"Could not geocode address '{wp}' (no results from Nominatim)")
+            except Exception as e:
+                raise ValueError(f"Invalid waypoint '{wp}': not in 'lat,lon' format and geocoding failed: {e}")
     
     # Map costing model
     costing_map = {
