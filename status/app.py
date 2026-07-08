@@ -2660,7 +2660,7 @@ def calculate_multi_leg_route(payload):
         "distance": total_distance,
         "time": total_time,
         "distance_km": round(total_distance / 1000, 2),
-        "time_minutes": round(total_time / 60, 0),
+        "time_minutes": int(round(total_time / 60)),
         "waypoints_count": len(waypoints),
         "costing": costing,
     }
