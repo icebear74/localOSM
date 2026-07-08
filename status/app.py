@@ -2071,7 +2071,6 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=7200):
         NOMINATIM_DIR, NOMINATIM_POSTGRES_VERSION, "main", "import-finished"
     )
     deadline = time.monotonic() + timeout_seconds
-    last_update = time.monotonic()
     last_marker_check_time = time.monotonic()
     
     while time.monotonic() < deadline:
