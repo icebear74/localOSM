@@ -1898,7 +1898,7 @@ def build_valhalla_job_manifest():
                             "name": "valhalla-import",
                             "image": "ghcr.io/gis-ops/docker-valhalla/valhalla:latest",
                             "imagePullPolicy": "Always",
-                            "resources": {"requests": {"memory": "14Gi"}, "limits": {"memory": "14Gi"}},
+                            "resources": {"requests": {"memory": "18Gi"}, "limits": {"memory": "18Gi"}},
                             "securityContext": {"runAsUser": 0, "runAsGroup": 0},
                             "command": ["/bin/sh", "-c"],
                             "args": [
@@ -2089,7 +2089,7 @@ def rebuild_valhalla(country):
     KUBE.create_job(build_valhalla_job_manifest())
 
     job_start = time.time()
-    deadline = job_start + 7200
+    deadline = job_start + 21600
     while time.time() < deadline:
         try:
             job_data = KUBE.get_job("valhalla-import")
@@ -2174,7 +2174,7 @@ def rebuild_tileserver(country):
     KUBE.create_job(build_tileserver_job_manifest())
 
     job_start = time.time()
-    deadline = job_start + 7200
+    deadline = job_start + 21600
     while time.time() < deadline:
         try:
             job_data = KUBE.get_job("tilemaker-import")
