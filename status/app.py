@@ -833,6 +833,83 @@ INDEX_HTML = """<!doctype html>
     </div>
 
     <div class="card">
+     <h2>Routing Konfiguration</h2>
+     <div class="controls">
+       <div>
+         <label style="margin-bottom: 0.5rem; display: block;">Costing Modelle (Verkehrsmittel)</label>
+         <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+           <input type="checkbox" id="routing-car-enabled" style="width:auto">
+           Auto
+         </label>
+         <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+           <input type="checkbox" id="routing-foot-enabled" style="width:auto">
+           Fußgänger
+         </label>
+         <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+           <input type="checkbox" id="routing-bicycle-enabled" style="width:auto">
+           Fahrrad
+         </label>
+       </div>
+       <div>
+         <label>Geschwindigkeiten (km/h)</label>
+         <div class="row2">
+           <input type="number" id="routing-car-speed" placeholder="Auto" min="1" max="200">
+           <input type="number" id="routing-foot-speed" placeholder="Fußgänger" min="1" max="10">
+         </div>
+         <input type="number" id="routing-bicycle-speed" placeholder="Fahrrad" min="1" max="50">
+       </div>
+       <details style="font-size: 0.82rem; margin-top: 0.5rem;">
+         <summary style="cursor: pointer; color: #2c7ab5; font-weight: 600;">Erweiterte Parameter</summary>
+         <div style="margin-top: 0.5rem; padding: 0.5rem; background: #f9f9f9; border-radius: 4px;">
+           <label style="margin-bottom: 0.3rem; display: block;">Auto-Parameter</label>
+           <div class="row2" style="margin-bottom: 0.5rem;">
+             <input type="number" id="routing-car-toll" placeholder="Mautfaktor" step="0.1" min="0" max="10">
+             <input type="number" id="routing-car-unpaved" placeholder="Unbef. Faktor" step="0.1" min="0" max="10">
+           </div>
+           <input type="number" id="routing-car-ferry" placeholder="Fähren-Faktor" step="0.1" min="0" max="10">
+           <label style="margin-top: 0.5rem; margin-bottom: 0.3rem; display: block;">Fußgänger & Fahrrad-Parameter</label>
+           <div class="row2">
+             <input type="number" id="routing-ped-hill" placeholder="Hügel-Faktor (Fußg.)" step="0.1" min="0" max="10">
+             <input type="number" id="routing-bike-hill" placeholder="Hügel-Faktor (Bike)" step="0.1" min="0" max="10">
+           </div>
+         </div>
+       </details>
+       <button onclick="saveRoutingConfig()">Speichern</button>
+       <div id="routing-status" class="hint"></div>
+       <div class="hint">Konfiguriert die Valhalla-Routing-Parameter wie Geschwindigkeiten, Kostenmodelle und Penaltys.</div>
+     </div>
+    </div>
+
+    <div class="card">
+     <h2>Multi-Destinationen Routenplaner</h2>
+     <div class="controls">
+       <div>
+         <label style="margin-bottom: 0.5rem; display: block;">Wegpunkte hinzufügen</label>
+         <div id="route-waypoints">
+           <div class="waypoint-item" style="display:flex;gap:0.5rem;margin-bottom:0.5rem;">
+             <input type="text" class="waypoint-input" placeholder="Start (Adresse/Koordinaten)" style="flex:1">
+             <button type="button" onclick="addWaypoint()" style="flex:0 0 auto; width: 100px;">+ Punkt</button>
+           </div>
+           <div class="waypoint-item" style="display:flex;gap:0.5rem;">
+             <input type="text" class="waypoint-input" placeholder="Ziel (Adresse/Koordinaten)" style="flex:1">
+             <button type="button" onclick="clearWaypoints()" style="flex:0 0 auto; width: 100px; background:#999;">Löschen</button>
+           </div>
+         </div>
+       </div>
+       <div class="row2">
+         <select id="route-costing">
+           <option value="auto">Auto</option>
+           <option value="foot">Fußgänger</option>
+           <option value="bicycle">Fahrrad</option>
+         </select>
+         <button onclick="calculateRoute()">Route berechnen</button>
+       </div>
+       <div id="route-result" class="hint" style="margin-top: 0.5rem; display: none;"></div>
+       <div class="hint">Geben Sie mehrere Zwischenpunkte ein für Multi-Leg-Routen. Die Routine werden über Valhalla berechnet.</div>
+     </div>
+    </div>
+
+    <div class="card">
       <h2>Workflow Fortschritt</h2>
       <div id="workflow-body">Lade ...</div>
     </div>
@@ -1130,6 +1207,121 @@ INDEX_HTML = """<!doctype html>
     }
   }
 
+  async function saveRoutingConfig() {
+    var config = {
+      routing_costing_models: {
+        car: {enabled: document.getElementById('routing-car-enabled').checked},
+        foot: {enabled: document.getElementById('routing-foot-enabled').checked},
+        bicycle: {enabled: document.getElementById('routing-bicycle-enabled').checked}
+      },
+      routing_speeds: {
+        car: parseInt(document.getElementById('routing-car-speed').value || 120),
+        foot: parseInt(document.getElementById('routing-foot-speed').value || 5),
+        bicycle: parseInt(document.getElementById('routing-bicycle-speed').value || 25)
+      },
+      routing_advanced: {
+        car: {
+          toll_factor: parseFloat(document.getElementById('routing-car-toll').value || 1.0),
+          unpaved_factor: parseFloat(document.getElementById('routing-car-unpaved').value || 1.0),
+          ferry_factor: parseFloat(document.getElementById('routing-car-ferry').value || 1.0)
+        },
+        foot: {
+          hill_factor: parseFloat(document.getElementById('routing-ped-hill').value || 1.0),
+          unpaved_factor: 1.0
+        },
+        bicycle: {
+          hill_factor: parseFloat(document.getElementById('routing-bike-hill').value || 1.0),
+          unpaved_factor: 1.0
+        }
+      }
+    };
+    var resp = await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(config)});
+    var statusDiv = document.getElementById('routing-status');
+    if (resp.ok) {
+      statusDiv.textContent = '✓ Routing-Konfiguration gespeichert.';
+      statusDiv.style.color = '#2ecc71';
+      setTimeout(function() { statusDiv.textContent = ''; }, 3000);
+    } else {
+      statusDiv.textContent = '✗ Fehler beim Speichern.';
+      statusDiv.style.color = '#e74c3c';
+    }
+  }
+
+  function addWaypoint() {
+    var container = document.getElementById('route-waypoints');
+    var item = document.createElement('div');
+    item.className = 'waypoint-item';
+    item.style.cssText = 'display:flex;gap:0.5rem;margin-bottom:0.5rem;';
+    item.innerHTML = '<input type="text" class="waypoint-input" placeholder="Zwischenpunkt (Adresse/Koordinaten)" style="flex:1"> <button type="button" onclick="this.parentElement.remove()" style="flex:0 0 auto; width: 100px; background:#999;">Entf.</button>';
+    container.insertBefore(item, container.lastElementChild);
+  }
+
+  function clearWaypoints() {
+    var container = document.getElementById('route-waypoints');
+    while (container.children.length > 2) {
+      container.children[1].remove();
+    }
+    container.querySelectorAll('.waypoint-input').forEach(function(inp) { inp.value = ''; });
+  }
+
+  async function calculateRoute() {
+    var waypoints = [];
+    document.querySelectorAll('.waypoint-input').forEach(function(inp) {
+      if (inp.value.trim()) waypoints.push(inp.value.trim());
+    });
+    if (waypoints.length < 2) {
+      alert('Mindestens 2 Wegpunkte erforderlich (Start und Ziel)');
+      return;
+    }
+    var costing = document.getElementById('route-costing').value;
+    var resultDiv = document.getElementById('route-result');
+    resultDiv.style.display = 'block';
+    resultDiv.textContent = 'Berechne Route...';
+    try {
+      var resp = await fetch('/api/routing/calculate', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({waypoints: waypoints, costing: costing})
+      });
+      if (resp.ok) {
+        var result = await resp.json();
+        var distance = (result.distance / 1000).toFixed(2);
+        var time = Math.round(result.time / 60);
+        resultDiv.textContent = '✓ Route: ' + distance + ' km, ca. ' + time + ' Minuten';
+        resultDiv.style.color = '#2ecc71';
+      } else {
+        var err = await resp.json();
+        resultDiv.textContent = '✗ ' + (err.error || 'Fehler bei Routenberechnung');
+        resultDiv.style.color = '#e74c3c';
+      }
+    } catch (e) {
+      resultDiv.textContent = '✗ Fehler: ' + e.message;
+      resultDiv.style.color = '#e74c3c';
+    }
+  }
+
+  function loadRoutingConfig() {
+    fetch('/api/config').then(function(r) { return r.json(); }).then(function(cfg) {
+      if (cfg.routing_costing_models) {
+        document.getElementById('routing-car-enabled').checked = cfg.routing_costing_models.car?.enabled ?? true;
+        document.getElementById('routing-foot-enabled').checked = cfg.routing_costing_models.foot?.enabled ?? true;
+        document.getElementById('routing-bicycle-enabled').checked = cfg.routing_costing_models.bicycle?.enabled ?? true;
+      }
+      if (cfg.routing_speeds) {
+        document.getElementById('routing-car-speed').value = cfg.routing_speeds.car || 120;
+        document.getElementById('routing-foot-speed').value = cfg.routing_speeds.foot || 5;
+        document.getElementById('routing-bicycle-speed').value = cfg.routing_speeds.bicycle || 25;
+      }
+      if (cfg.routing_advanced) {
+        document.getElementById('routing-car-toll').value = cfg.routing_advanced.car?.toll_factor || 1.0;
+        document.getElementById('routing-car-unpaved').value = cfg.routing_advanced.car?.unpaved_factor || 1.0;
+        document.getElementById('routing-car-ferry').value = cfg.routing_advanced.car?.ferry_factor || 1.0;
+        document.getElementById('routing-ped-hill').value = cfg.routing_advanced.foot?.hill_factor || 1.0;
+        document.getElementById('routing-bike-hill').value = cfg.routing_advanced.bicycle?.hill_factor || 1.0;
+      }
+    }).catch(function(e) { console.error('Fehler beim Laden der Routing-Konfiguration:', e); });
+  }
+
   async function refresh() {
     try {
       var resp = await fetch('/api/status');
@@ -1195,6 +1387,7 @@ INDEX_HTML = """<!doctype html>
   }
 
   loadConfig();
+  loadRoutingConfig();
   refresh();
   </script>
 </body>
@@ -1274,6 +1467,12 @@ def apply_config_update(payload):
         if not valid_time_value(time_value):
             raise ValueError("auto_update_time must use HH:MM format.")
         config["auto_update_time"] = time_value
+    if "routing_costing_models" in payload:
+        config["routing_costing_models"] = payload.get("routing_costing_models", config["routing_costing_models"])
+    if "routing_speeds" in payload:
+        config["routing_speeds"] = payload.get("routing_speeds", config["routing_speeds"])
+    if "routing_advanced" in payload:
+        config["routing_advanced"] = payload.get("routing_advanced", config["routing_advanced"])
     return save_config(config)
 
 
@@ -2375,6 +2574,92 @@ def run_scheduler_loop():
             SCHEDULER_LOCK.release()
 
 
+def calculate_multi_leg_route(payload):
+    """Calculate a multi-leg route via Valhalla API."""
+    waypoints = payload.get("waypoints", [])
+    costing = payload.get("costing", "auto")
+    
+    if not waypoints or len(waypoints) < 2:
+        raise ValueError("At least 2 waypoints (start and destination) required.")
+    
+    # Parse waypoints - they can be "lat,lon" or address-like strings
+    # For now, we'll assume format is "lat,lon" or try to geocode via nominatim
+    locations = []
+    for wp in waypoints:
+        parts = wp.strip().split(",")
+        if len(parts) == 2:
+            try:
+                lat = float(parts[0].strip())
+                lon = float(parts[1].strip())
+                locations.append({"lat": lat, "lon": lon})
+            except ValueError:
+                # Try geocoding via nominatim
+                try:
+                    resp = urllib.request.urlopen(
+                        f"http://nominatim.osm.svc.cluster.local:8080/search?"
+                        f"q={urllib.parse.quote(wp.strip())}&format=json&limit=1",
+                        timeout=5
+                    )
+                    data = json.loads(resp.read().decode("utf-8"))
+                    if data:
+                        locations.append({"lat": float(data[0]["lat"]), "lon": float(data[0]["lon"])})
+                    else:
+                        raise ValueError(f"Could not geocode waypoint: {wp}")
+                except Exception as e:
+                    raise ValueError(f"Geocoding failed for waypoint '{wp}': {e}")
+        else:
+            raise ValueError(f"Invalid waypoint format: {wp}. Use 'lat,lon' or address.")
+    
+    # Map costing model
+    costing_map = {
+        "auto": "auto",
+        "car": "auto",
+        "foot": "pedestrian",
+        "pedestrian": "pedestrian",
+        "bicycle": "bicycle",
+        "bike": "bicycle",
+    }
+    valhalla_costing = costing_map.get(costing.lower(), "auto")
+    
+    # Build Valhalla request
+    valhalla_request = {
+        "locations": locations,
+        "costing": valhalla_costing,
+        "directions_options": {"language": "en"},
+    }
+    
+    # Call Valhalla API
+    try:
+        valhalla_url = "http://valhalla.osm.svc.cluster.local:8002/route"
+        req = urllib.request.Request(
+            valhalla_url,
+            data=json.dumps(valhalla_request).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=10) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except Exception as e:
+        raise RuntimeError(f"Valhalla routing failed: {e}")
+    
+    # Extract summary info
+    if "trip" not in result or not result["trip"].get("legs"):
+        raise ValueError("No route found for the given waypoints.")
+    
+    trip = result["trip"]
+    total_distance = sum(leg.get("distance", 0) for leg in trip.get("legs", []))
+    total_time = sum(leg.get("time", 0) for leg in trip.get("legs", []))
+    
+    return {
+        "distance": total_distance,
+        "time": total_time,
+        "distance_km": round(total_distance / 1000, 2),
+        "time_minutes": round(total_time / 60, 0),
+        "waypoints_count": len(waypoints),
+        "costing": costing,
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send_json(self, payload, status=200):
         body = json.dumps(payload, indent=2).encode("utf-8")
@@ -2511,6 +2796,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(exc)}, 400)
                 return
             self._send_json(config)
+            return
+
+        if self.path == "/api/routing/calculate":
+            try:
+                result = calculate_multi_leg_route(payload)
+                self._send_json(result)
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 400)
+                return
+            except RuntimeError as exc:
+                self._send_json({"error": str(exc)}, 503)
+                return
             return
 
         self._send_json({"error": "not found"}, 404)
