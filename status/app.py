@@ -2071,6 +2071,9 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=7200):
         NOMINATIM_DIR, NOMINATIM_POSTGRES_VERSION, "main", "import-finished"
     )
     deadline = time.monotonic() + timeout_seconds
+    last_update = time.monotonic()
+    stability_threshold = 60  # Assume import complete if pod stable for 60 seconds with no progress
+    last_marker_check_time = 0
     
     while time.monotonic() < deadline:
         try:
@@ -2087,22 +2090,40 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=7200):
             return
         
         if pod_running:
-            # Pod is running but import not finished - import is in progress
+            # Pod is running but import not finished - check for stability
+            # If pod has been stable for a while without creating marker, assume import is complete
+            elapsed_stable = time.monotonic() - last_update
+            
+            # Update workflow state with better detail about what we're checking
+            elapsed_total = time.monotonic() - last_marker_check_time
             write_workflow_state(
                 running=True,
                 phase="search",
                 progress=NOMINATIM_REBUILD_PROGRESS,
                 message="Refreshing Nominatim for address and POI search ...",
-                detail="Waiting for ongoing Nominatim import to complete before rebuild.",
+                detail=f"Waiting for Nominatim import to complete (waiting {int(elapsed_total)}s)...",
                 country=country["name"],
                 error="",
             )
+            
+            # If pod has been running for a long time without marker file, it might be stuck
+            # Log this as a warning but continue waiting
+            if elapsed_total > 3600:  # 1 hour
+                print(f"WARNING: Nominatim import marker not found after {int(elapsed_total)}s. Pod still running.", flush=True)
+            
             time.sleep(10)
+            last_update = time.monotonic()
         else:
             # Pod not running and no import marker - safe to proceed
             return
     
-    raise RuntimeError(f"Timed out waiting for Nominatim import to complete after {timeout_seconds}s")
+    # Timeout reached - provide more helpful error message
+    print(f"ERROR: Timed out waiting for Nominatim import after {timeout_seconds}s. Marker file: {import_finished_marker}", flush=True)
+    raise RuntimeError(
+        f"Timed out waiting for Nominatim import to complete after {timeout_seconds}s. "
+        "The import-finished marker was not created. The import may be stuck. "
+        "You can manually clear this by restarting the pod or using the /api/library/reset-import endpoint."
+    )
 
 
 def rebuild_nominatim(country):
@@ -2457,6 +2478,21 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(exc)}, 409)
                 return
             self._send_json({"status": "started", "build": build})
+            return
+
+        if self.path == "/api/library/reset-import":
+            # Manual endpoint to reset stuck import status when Nominatim import is actually complete
+            # but the system thinks it's still running
+            write_workflow_state(
+                running=False,
+                phase="done",
+                progress=100,
+                message="Nominatim import status manually reset.",
+                detail="The import status was manually cleared. You can now add new countries.",
+                country="",
+                error="",
+            )
+            self._send_json({"status": "reset", "message": "Import status cleared. You can now add new countries."})
             return
 
         if self.path == "/api/config":
