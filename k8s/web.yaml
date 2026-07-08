@@ -112,15 +112,6 @@ data:
         <div>
           <label><input type="checkbox" id="avoid_tolls"> Mautstraßen meiden</label>
         </div>
-        <div class="row2">
-          <div>
-            <label>Routenpräferenz</label>
-            <select id="preference">
-              <option value="fastest">Schnellste</option>
-              <option value="shortest">Kürzeste</option>
-            </select>
-          </div>
-        </div>
         <button class="btn btn-primary" onclick="doRoute()">&#128205; Route berechnen</button>
         <button class="btn btn-secondary" onclick="doDistance()">&#8596; Nur Distanz</button>
         <p class="hint">Tipp: Klicke auf die Karte, um Start- (1. Klick) und Zielpunkt (2. Klick) zu setzen.</p>
@@ -293,8 +284,7 @@ data:
                  lon: parseFloat(document.getElementById('endLon').value) },
         costing: document.getElementById('costing').value,
         units:   document.getElementById('units').value,
-        avoid_tolls: document.getElementById('avoid_tolls').checked,
-        preference: document.getElementById('preference').value
+        avoid_tolls: document.getElementById('avoid_tolls').checked
       };
     }
 
@@ -619,7 +609,6 @@ data:
             end = payload.get("end", {})
             costing = payload.get("costing", "auto")
             avoid_tolls = payload.get("avoid_tolls", False)
-            preference = payload.get("preference", "fastest")
             
             # Build the base request
             request = {
@@ -634,21 +623,11 @@ data:
             # Add costing options for toll avoidance (only for auto and truck)
             # Note: In Valhalla, use_tolls: False means avoid tolls
             if avoid_tolls and costing in ("auto", "truck"):
-                request["costing_options"] = {
-                    costing: {
-                        "use_tolls": False  # False = avoid tolls, True = allow tolls
-                    }
-                }
-            
-            # Add preference for route optimization
-            # Valhalla's "cost model" is typically fastest by default
-            # For shortest routes, additional parameters may be needed per costing type
-            # This is prepared for future enhancement if needed
-            if preference == "shortest":
                 if "costing_options" not in request:
                     request["costing_options"] = {}
                 if costing not in request["costing_options"]:
                     request["costing_options"][costing] = {}
+                request["costing_options"][costing]["use_tolls"] = False
             
             return request
 

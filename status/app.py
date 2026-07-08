@@ -2108,7 +2108,6 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=7200):
                 print(f"WARNING: Nominatim import marker not found after {int(elapsed_total)}s. Pod still running.", flush=True)
             
             time.sleep(10)
-            last_update = time.monotonic()
         else:
             # Pod not running and no import marker - safe to proceed
             return
