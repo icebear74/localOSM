@@ -2111,7 +2111,51 @@ data:
         raise RuntimeError("Timed out waiting for Nominatim to become ready.")
 
 
+    def wait_for_nominatim_import_if_running(country, timeout_seconds=7200):
+        """
+        Check if Nominatim import is already in progress (after scaling up from previous cycle).
+        If the import-finished marker doesn't exist and the pod is running, wait for import to complete
+        before allowing scale down. This prevents race condition where scale down/up aborts running imports.
+        """
+        import_finished_marker = os.path.join(NOMINATIM_DIR, "16", "main", "import-finished")
+        deadline = time.time() + timeout_seconds
+        
+        while time.time() < deadline:
+            try:
+                pods = KUBE.list_pods("app=nominatim")
+                pod_running = bool(pods.get("items"))
+            except RuntimeError:
+                time.sleep(5)
+                continue
+            
+            # Check if import-finished marker exists
+            if os.path.isfile(import_finished_marker):
+                # Import is complete (or was never started), safe to proceed
+                return
+            
+            if pod_running:
+                # Pod is running but import not finished - import is in progress
+                write_workflow_state(
+                    running=True,
+                    phase="search",
+                    progress=82,
+                    message="Refreshing Nominatim for address and POI search ...",
+                    detail="Waiting for ongoing Nominatim import to complete before rebuild.",
+                    country=country["name"],
+                    error="",
+                )
+                time.sleep(10)
+            else:
+                # Pod not running and no import marker - safe to proceed
+                return
+        
+        raise RuntimeError(f"Timed out waiting for Nominatim import to complete after {timeout_seconds}s")
+
+
     def rebuild_nominatim(country):
+        # First, wait for any running import to complete before scaling down
+        wait_for_nominatim_import_if_running(country)
+        
         write_workflow_state(
             running=True,
             phase="search",
