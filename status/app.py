@@ -2070,12 +2070,12 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=7200):
     import_finished_marker = os.path.join(
         NOMINATIM_DIR, NOMINATIM_POSTGRES_VERSION, "main", "import-finished"
     )
-    deadline = time.time() + timeout_seconds
+    deadline = time.monotonic() + timeout_seconds
     
-    while time.time() < deadline:
+    while time.monotonic() < deadline:
         try:
             pods = KUBE.list_pods("app=nominatim")
-            pod_running = bool(pods.get("items"))
+            pod_running = bool(pods.get("items", []))
         except RuntimeError:
             # Kubernetes API temporarily unavailable, retry after delay
             time.sleep(5)
