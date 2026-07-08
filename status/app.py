@@ -2072,8 +2072,7 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=7200):
     )
     deadline = time.monotonic() + timeout_seconds
     last_update = time.monotonic()
-    stability_threshold = 60  # Assume import complete if pod stable for 60 seconds with no progress
-    last_marker_check_time = 0
+    last_marker_check_time = time.monotonic()
     
     while time.monotonic() < deadline:
         try:

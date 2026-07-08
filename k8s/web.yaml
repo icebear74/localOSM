@@ -632,22 +632,23 @@ data:
             }
             
             # Add costing options for toll avoidance (only for auto and truck)
+            # Note: In Valhalla, use_tolls: False means avoid tolls
             if avoid_tolls and costing in ("auto", "truck"):
                 request["costing_options"] = {
                     costing: {
-                        "use_tolls": False
+                        "use_tolls": False  # False = avoid tolls, True = allow tolls
                     }
                 }
             
-            # Add preference for route optimization (if different from default)
+            # Add preference for route optimization
+            # Valhalla's "cost model" is typically fastest by default
+            # For shortest routes, additional parameters may be needed per costing type
+            # This is prepared for future enhancement if needed
             if preference == "shortest":
                 if "costing_options" not in request:
                     request["costing_options"] = {}
                 if costing not in request["costing_options"]:
                     request["costing_options"][costing] = {}
-                # Note: Valhalla uses "costing_model" but it's typically handled through the costing selection
-                # For shortest routes, we can use "shortest" option if supported
-                # This is typically done by selecting appropriate costing
             
             return request
 

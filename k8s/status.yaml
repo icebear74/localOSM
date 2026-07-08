@@ -2140,8 +2140,7 @@ data:
         )
         deadline = time.monotonic() + timeout_seconds
         last_update = time.monotonic()
-        stability_threshold = 60  # Assume import complete if pod stable for 60 seconds with no progress
-        last_marker_check_time = 0
+        last_marker_check_time = time.monotonic()
         
         while time.monotonic() < deadline:
             try:
@@ -2563,6 +2562,43 @@ data:
                 self._send_json({"status": "reset", "message": "Import status cleared. You can now add new countries."})
                 return
     
+            if self.path == "/api/config":
+                try:
+                    config = apply_config_update(payload)
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, 400)
+                    return
+                self._send_json(config)
+                return
+    
+            self._send_json({"error": "not found"}, 404)
+    
+        def log_message(self, format, *args):
+            return
+    
+    
+    if __name__ == "__main__":
+        ensure_dirs()
+        _startup_state = read_workflow_state()
+        if _startup_state.get("running"):
+            write_workflow_state(
+                running=False,
+                phase="interrupted",
+                progress=0,
+                message="Workflow was interrupted by a pod restart.",
+                detail="Start a new workflow to continue.",
+                error="",
+            )
+        sched = threading.Thread(target=run_scheduler_loop, daemon=True)
+        sched.start()
+        server = ThreadingHTTPServer((HOST, PORT), Handler)
+        print(f"OSM status server listening on {HOST}:{PORT}")
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.server_close()
             if self.path == "/api/config":
                 try:
                     config = apply_config_update(payload)
