@@ -2906,7 +2906,14 @@ data:
             pass
         finally:
             server.server_close()
-
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: status
+  namespace: osm
+  labels:
+    app: status
 spec:
   replicas: 1
   selector:
