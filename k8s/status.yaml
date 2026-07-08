@@ -901,81 +901,88 @@ data:
         </div>
 
         <div class="card">
-         <h2>Routing Konfiguration</h2>
-         <div class="controls">
-           <div>
-             <label style="margin-bottom: 0.5rem; display: block;">Costing Modelle (Verkehrsmittel)</label>
-             <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
-               <input type="checkbox" id="routing-car-enabled" style="width:auto">
-               Auto
-             </label>
-             <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
-               <input type="checkbox" id="routing-foot-enabled" style="width:auto">
-               Fußgänger
-             </label>
-             <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
-               <input type="checkbox" id="routing-bicycle-enabled" style="width:auto">
-               Fahrrad
-             </label>
-           </div>
-           <div>
-             <label>Geschwindigkeiten (km/h)</label>
-             <div class="row2">
-               <input type="number" id="routing-car-speed" placeholder="Auto" min="1" max="200">
-               <input type="number" id="routing-foot-speed" placeholder="Fußgänger" min="1" max="10">
-             </div>
-             <input type="number" id="routing-bicycle-speed" placeholder="Fahrrad" min="1" max="50">
-           </div>
-           <details style="font-size: 0.82rem; margin-top: 0.5rem;">
-             <summary style="cursor: pointer; color: #2c7ab5; font-weight: 600;">Erweiterte Parameter</summary>
-             <div style="margin-top: 0.5rem; padding: 0.5rem; background: #f9f9f9; border-radius: 4px;">
-               <label style="margin-bottom: 0.3rem; display: block;">Auto-Parameter</label>
-               <div class="row2" style="margin-bottom: 0.5rem;">
-                 <input type="number" id="routing-car-toll" placeholder="Mautfaktor" step="0.1" min="0" max="10">
-                 <input type="number" id="routing-car-unpaved" placeholder="Unbef. Faktor" step="0.1" min="0" max="10">
-               </div>
-               <input type="number" id="routing-car-ferry" placeholder="Fähren-Faktor" step="0.1" min="0" max="10">
-               <label style="margin-top: 0.5rem; margin-bottom: 0.3rem; display: block;">Fußgänger & Fahrrad-Parameter</label>
-               <div class="row2">
-                 <input type="number" id="routing-ped-hill" placeholder="Hügel-Faktor (Fußg.)" step="0.1" min="0" max="10">
-                 <input type="number" id="routing-bike-hill" placeholder="Hügel-Faktor (Bike)" step="0.1" min="0" max="10">
-               </div>
-             </div>
-           </details>
-           <button onclick="saveRoutingConfig()">Speichern</button>
-           <div id="routing-status" class="hint"></div>
-           <div class="hint">Konfiguriert die Valhalla-Routing-Parameter wie Geschwindigkeiten, Kostenmodelle und Penaltys.</div>
+          <h2>Routing Konfiguration</h2>
+          <div class="controls">
+            <div>
+              <label style="margin-bottom: 0.5rem; display: block;">Costing Modelle (Verkehrsmittel)</label>
+              <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer" title="Aktiviert Auto-Routing für PKW und Motorräder">
+                <input type="checkbox" id="routing-car-enabled" style="width:auto">
+                Auto
+              </label>
+              <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer" title="Aktiviert Fußgänger-Routing für Fußwege">
+                <input type="checkbox" id="routing-foot-enabled" style="width:auto">
+                Fußgänger
+              </label>
+              <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer" title="Aktiviert Fahrrad-Routing optimiert für Radwege">
+                <input type="checkbox" id="routing-bicycle-enabled" style="width:auto">
+                Fahrrad
+              </label>
+            </div>
+            <div>
+              <label>Geschwindigkeiten (km/h) - für Fahrtzeit-Berechnung</label>
+              <div class="row2">
+                <input type="number" id="routing-car-speed" placeholder="Auto (z.B. 120)" min="1" max="200" title="Durchschnittsgeschwindigkeit für Autos: typisch 80-130 km/h">
+                <input type="number" id="routing-foot-speed" placeholder="Fußgänger (z.B. 5)" min="1" max="10" title="Fußgänger-Geschwindigkeit: typisch 3-6 km/h">
+              </div>
+              <input type="number" id="routing-bicycle-speed" placeholder="Fahrrad (z.B. 25)" min="1" max="50" title="Fahrrad-Geschwindigkeit: typisch 15-30 km/h">
+            </div>
+            <details style="font-size: 0.82rem; margin-top: 0.5rem;">
+              <summary style="cursor: pointer; color: #2c7ab5; font-weight: 600;">Erweiterte Parameter</summary>
+              <div style="margin-top: 0.5rem; padding: 0.5rem; background: #f9f9f9; border-radius: 4px;">
+                <label style="margin-bottom: 0.3rem; display: block;">Auto-Parameter (Faktoren: 1.0 = normal, >1 = meiden, <1 = bevorzugen)</label>
+                <div class="row2" style="margin-bottom: 0.5rem;">
+                  <input type="number" id="routing-car-toll" placeholder="Mautfaktor (z.B. 1.0)" step="0.1" min="0" max="10" title="1.0=neutral, 2.0=doppelt so teuer meiden, 0.5=bevorzugen">
+                  <input type="number" id="routing-car-unpaved" placeholder="Unbef. Faktor (z.B. 1.0)" step="0.1" min="0" max="10" title="Unbefestigte Straßen: 1.0=neutral, >1.0=meiden">
+                </div>
+                <input type="number" id="routing-car-ferry" placeholder="Fähren-Faktor (z.B. 1.0)" step="0.1" min="0" max="10" title="Fährverbindungen: 1.0=neutral, >1.0=meiden">
+                <label style="margin-top: 0.5rem; margin-bottom: 0.3rem; display: block;">Fußgänger & Fahrrad-Parameter</label>
+                <div class="row2">
+                  <input type="number" id="routing-ped-hill" placeholder="Hügel-Faktor Fußg. (z.B. 1.0)" step="0.1" min="0" max="10" title="Steigungen für Fußgänger: 1.0=neutral, >1.0=Hügel meiden">
+                  <input type="number" id="routing-bike-hill" placeholder="Hügel-Faktor Bike (z.B. 1.0)" step="0.1" min="0" max="10" title="Steigungen für Fahrräder: 1.0=neutral, >1.0=Hügel meiden">
+                </div>
+              </div>
+            </details>
+            <button onclick="saveRoutingConfig()">Speichern</button>
+            <div id="routing-status" class="hint"></div>
+            <div class="hint">
+              Konfiguriert die Valhalla-Routing-Parameter. Geschwindigkeiten beeinflussen Fahrtzeit-Berechnung. 
+              Faktoren (erweitert): 1.0=neutral, >1.0=Route meiden, &lt;1.0=Route bevorzugen.
+            </div>
+          </div>
          </div>
-        </div>
 
-        <div class="card">
-         <h2>Multi-Destinationen Routenplaner</h2>
-         <div class="controls">
-           <div>
-             <label style="margin-bottom: 0.5rem; display: block;">Wegpunkte hinzufügen</label>
-             <div id="route-waypoints">
-               <div class="waypoint-item" style="display:flex;gap:0.5rem;margin-bottom:0.5rem;">
-                 <input type="text" class="waypoint-input" placeholder="Start (Adresse/Koordinaten)" style="flex:1">
-                 <button type="button" onclick="addWaypoint()" style="flex:0 0 auto; width: 100px;">+ Punkt</button>
-               </div>
-               <div class="waypoint-item" style="display:flex;gap:0.5rem;">
-                 <input type="text" class="waypoint-input" placeholder="Ziel (Adresse/Koordinaten)" style="flex:1">
-                 <button type="button" onclick="clearWaypoints()" style="flex:0 0 auto; width: 100px; background:#999;">Löschen</button>
-               </div>
-             </div>
-           </div>
-           <div class="row2">
-             <select id="route-costing">
-               <option value="auto">Auto</option>
-               <option value="foot">Fußgänger</option>
-               <option value="bicycle">Fahrrad</option>
-             </select>
-             <button onclick="calculateRoute()">Route berechnen</button>
-           </div>
-           <div id="route-result" class="hint" style="margin-top: 0.5rem; display: none;"></div>
-           <div class="hint">Geben Sie mehrere Zwischenpunkte ein für Multi-Leg-Routen. Die Routen werden über Valhalla berechnet.</div>
+         <div class="card">
+          <h2>Multi-Destinationen Routenplaner</h2>
+          <div class="controls">
+            <div>
+              <label style="margin-bottom: 0.5rem; display: block;">Wegpunkte hinzufügen</label>
+              <div id="route-waypoints">
+                <div class="waypoint-item" style="display:flex;gap:0.5rem;margin-bottom:0.5rem;">
+                  <input type="text" class="waypoint-input" placeholder="Start (Adresse/Koordinaten)" style="flex:1" title="Adresse (z.B. 'Berlin') oder Koordinaten (z.B. '52.52,13.40')">
+                  <button type="button" onclick="addWaypoint()" style="flex:0 0 auto; width: 100px;">+ Punkt</button>
+                </div>
+                <div class="waypoint-item" style="display:flex;gap:0.5rem;">
+                  <input type="text" class="waypoint-input" placeholder="Ziel (Adresse/Koordinaten)" style="flex:1" title="Adresse oder Koordinaten des Ziels">
+                  <button type="button" onclick="clearWaypoints()" style="flex:0 0 auto; width: 100px; background:#999;">Löschen</button>
+                </div>
+              </div>
+            </div>
+            <div class="row2">
+              <select id="route-costing" title="Wählen Sie das Verkehrsmittel für die Routenberechnung">
+                <option value="auto">Auto</option>
+                <option value="foot">Fußgänger</option>
+                <option value="bicycle">Fahrrad</option>
+              </select>
+              <button onclick="calculateRoute()">Route berechnen</button>
+            </div>
+            <div id="route-result" class="hint" style="margin-top: 0.5rem; display: none;"></div>
+            <div class="hint">
+              Geben Sie Start und Ziel ein, optional Zwischenpunkte mit "+ Punkt". 
+              Adressen werden automatisch geocodiert (Nominatim), Koordinaten im Format Lat,Lon (z.B. 52.5,13.4). 
+              Die Route wird über Valhalla mit den konfigurierten Routing-Parametern berechnet.
+            </div>
+          </div>
          </div>
-        </div>
 
         <div class="card">
           <h2>Workflow Fortschritt</h2>
@@ -2339,8 +2346,9 @@ data:
     def wait_for_nominatim_import_if_running(country, timeout_seconds=7200):
         """
         Check if Nominatim import is already in progress (after scaling up from previous cycle).
-        If the import-finished marker doesn't exist and the pod is running, wait for import to complete
-        before allowing scale down. This prevents race condition where scale down/up aborts running imports.
+        If the pod is running, wait for it to become ready (via HTTP health check) before allowing
+        scale down. This prevents race condition where scale down/up aborts running imports.
+        When Nominatim responds to HTTP requests, the import/initialization is complete.
 
         Args:
             country: Dictionary containing country metadata, must have a 'name' key for workflow status updates
@@ -2349,9 +2357,6 @@ data:
         Raises:
             RuntimeError: If import does not complete within timeout_seconds
         """
-        import_finished_marker = os.path.join(
-            NOMINATIM_DIR, NOMINATIM_POSTGRES_VERSION, "main", "import-finished"
-        )
         deadline = time.monotonic() + timeout_seconds
         wait_start_time = time.monotonic()
 
@@ -2364,40 +2369,41 @@ data:
                 time.sleep(5)
                 continue
 
-            # Check if import-finished marker exists
-            if os.path.isfile(import_finished_marker):
-                # Import is complete (or was never started), safe to proceed
-                return
-
             if pod_running:
-                # Pod is running but import not finished
-                # Update workflow state with better detail about what we're checking
+                # Pod is running - check if Nominatim service is ready (health check)
+                # When Nominatim responds to HTTP requests, import/initialization is complete
+                ok, detail = check_http("http://nominatim.osm.svc.cluster.local:8080/")
+                if ok:
+                    # Nominatim is ready, import is complete
+                    print(f"Nominatim import/initialization complete - service is ready", flush=True)
+                    return
+
+                # Pod is running but not ready yet
                 elapsed_total = time.monotonic() - wait_start_time
                 write_workflow_state(
                     running=True,
                     phase="search",
                     progress=NOMINATIM_REBUILD_PROGRESS,
                     message="Refreshing Nominatim for address and POI search ...",
-                    detail=f"Waiting for Nominatim import to complete (waiting {int(elapsed_total)}s)...",
+                    detail=f"Waiting for Nominatim to become ready (waiting {int(elapsed_total)}s)... {detail}",
                     country=country["name"],
                     error="",
                 )
 
-                # If pod has been running for a long time without marker file, it might be stuck
-                # Log this as a warning but continue waiting
+                # If pod has been running for a long time without becoming ready, log warning
                 if elapsed_total > 3600:  # 1 hour
-                    print(f"WARNING: Nominatim import marker not found after {int(elapsed_total)}s. Pod still running.", flush=True)
+                    print(f"WARNING: Nominatim not responding after {int(elapsed_total)}s. Pod still running.", flush=True)
 
                 time.sleep(10)
             else:
-                # Pod not running and no import marker - safe to proceed
+                # Pod not running - safe to proceed (no import in progress)
                 return
 
         # Timeout reached - provide more helpful error message
-        print(f"ERROR: Timed out waiting for Nominatim import after {timeout_seconds}s. Marker file: {import_finished_marker}", flush=True)
+        print(f"ERROR: Timed out waiting for Nominatim to become ready after {timeout_seconds}s", flush=True)
         raise RuntimeError(
             f"Timed out waiting for Nominatim import to complete after {timeout_seconds}s. "
-            "The import-finished marker was not created. The import may be stuck. "
+            "The service did not become ready. The import may be stuck. "
             "You can manually clear this by restarting the pod or using the /api/library/reset-import endpoint."
         )
 
