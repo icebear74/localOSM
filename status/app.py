@@ -42,6 +42,21 @@ CONFIG_DEFAULTS = {
     "node_url": "",
     "auto_update_enabled": False,
     "auto_update_time": "03:00",
+    "routing_costing_models": {
+        "car": {"enabled": True},
+        "foot": {"enabled": True},
+        "bicycle": {"enabled": True},
+    },
+    "routing_speeds": {
+        "car": 120,
+        "foot": 5,
+        "bicycle": 25,
+    },
+    "routing_advanced": {
+        "car": {"toll_factor": 1.0, "unpaved_factor": 1.0, "ferry_factor": 1.0},
+        "foot": {"hill_factor": 1.0, "unpaved_factor": 1.0},
+        "bicycle": {"hill_factor": 1.0, "unpaved_factor": 1.0},
+    },
 }
 
 SERVICES = [
