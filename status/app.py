@@ -2059,6 +2059,13 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=7200):
     Check if Nominatim import is already in progress (after scaling up from previous cycle).
     If the import-finished marker doesn't exist and the pod is running, wait for import to complete
     before allowing scale down. This prevents race condition where scale down/up aborts running imports.
+    
+    Args:
+        country: Dictionary containing country metadata, must have a 'name' key for workflow status updates
+        timeout_seconds: Maximum time to wait for import to complete (default 2 hours = 7200 seconds)
+    
+    Raises:
+        RuntimeError: If import does not complete within timeout_seconds
     """
     import_finished_marker = os.path.join(
         NOMINATIM_DIR, NOMINATIM_POSTGRES_VERSION, "main", "import-finished"
@@ -2070,6 +2077,7 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=7200):
             pods = KUBE.list_pods("app=nominatim")
             pod_running = bool(pods.get("items"))
         except RuntimeError:
+            # Kubernetes API temporarily unavailable, retry after delay
             time.sleep(5)
             continue
         

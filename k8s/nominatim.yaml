@@ -50,7 +50,9 @@ spec:
               value: /nominatim/data/import/planet.osm.pbf
             - name: NOMINATIM_PASSWORD
               value: nominatim
-            # Limit thread count to prevent OOM during import with large datasets
+            # Limit thread count to prevent OOM during import with large datasets.
+            # 6 threads balances memory usage and import speed for 12Gi container limit.
+            # Consistent with Valhalla and Planetiler thread allocation.
             - name: THREADS
               value: "6"
           ports:
