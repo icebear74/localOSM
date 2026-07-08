@@ -27,6 +27,13 @@ spec:
               value: "True"
             - name: build_tar
               value: "True"
+          resources:
+            requests:
+              memory: "18Gi"
+              cpu: "6"
+            limits:
+              memory: "18Gi"
+              cpu: "6"
           volumeMounts:
             - name: valhalla-data
               mountPath: /custom_files

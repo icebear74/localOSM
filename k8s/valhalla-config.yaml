@@ -15,6 +15,8 @@ data:
         "default_speeds_config": "/usr/local/share/valhalla/mjolnir/default_speeds.lua",
         "max_speed": 180,
         "num_threads": 6,
+        "max_cache_size": 500000000,
+        "lru_mem_cache_hard_control": true,
         "logging": {
           "type": "std_out",
           "color": false
@@ -33,6 +35,9 @@ data:
         }
       },
       "thor": {
+        "costmatrix": {
+          "max_reserved_locations": 100
+        },
         "logging": {
           "type": "std_out",
           "color": false

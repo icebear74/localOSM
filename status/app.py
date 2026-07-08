@@ -1898,7 +1898,7 @@ def build_valhalla_job_manifest():
                             "name": "valhalla-import",
                             "image": "ghcr.io/gis-ops/docker-valhalla/valhalla:latest",
                             "imagePullPolicy": "Always",
-                            "resources": {"requests": {"memory": "18Gi"}, "limits": {"memory": "18Gi"}},
+                            "resources": {"requests": {"memory": "18Gi", "cpu": "6"}, "limits": {"memory": "18Gi", "cpu": "6"}},
                             "securityContext": {"runAsUser": 0, "runAsGroup": 0},
                             "command": ["/bin/sh", "-c"],
                             "args": [
