@@ -35,6 +35,10 @@ CONFIG_FILE = os.path.join(STATUS_DIR, "config.json")
 
 # PostgreSQL version used by mediagis/nominatim container
 NOMINATIM_POSTGRES_VERSION = "16"
+NOMINATIM_IMPORT_FINISHED_FILE = os.path.join(
+    NOMINATIM_DIR,
+    "import-finished",
+)
 # Optional safety cap for Nominatim waits; 0 means wait indefinitely.
 NOMINATIM_MAX_WAIT_SECONDS = int(os.environ.get("NOMINATIM_MAX_WAIT_SECONDS", "0"))
 DEFAULT_NOMINATIM_WAIT_SECONDS = 7200
@@ -58,6 +62,10 @@ def _maybe_log_nominatim_wait(last_log_time, message):
         print(message, flush=True)
         return now
     return last_log_time
+
+
+def _nominatim_import_finished():
+    return os.path.isfile(NOMINATIM_IMPORT_FINISHED_FILE)
 
 CONFIG_DEFAULTS = {
     "node_url": "",
@@ -2422,18 +2430,29 @@ def rebuild_nominatim(country):
         wait_for_nominatim_ready(country)
         return
 
-    write_workflow_state(
-        running=True,
-        phase="search",
-        progress=NOMINATIM_REBUILD_PROGRESS,
-        message="Refreshing Nominatim for address and POI search ...",
-        detail="Scaling the Nominatim deployment down before reimport.",
-        country=country["name"],
-        error="",
-    )
-    scale_nominatim(0)
-    wait_for_nominatim_pods_to_stop()
-    clear_directory(NOMINATIM_DIR)
+    if _nominatim_import_finished():
+        write_workflow_state(
+            running=True,
+            phase="search",
+            progress=NOMINATIM_REBUILD_PROGRESS,
+            message="Nominatim is rebuilding from scratch for the new map ...",
+            detail="Previous import finished, so the existing data directory is cleared before the new map is installed.",
+            country=country["name"],
+            error="",
+        )
+        scale_nominatim(0)
+        wait_for_nominatim_pods_to_stop()
+        clear_directory(NOMINATIM_DIR)
+    else:
+        write_workflow_state(
+            running=True,
+            phase="search",
+            progress=NOMINATIM_REBUILD_PROGRESS,
+            message="Nominatim import was interrupted - continuing ...",
+            detail="Existing database files are kept so the import can resume instead of starting over.",
+            country=country["name"],
+            error="",
+        )
     scale_nominatim(1)
     wait_for_nominatim_ready(country)
 
