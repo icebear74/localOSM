@@ -2433,9 +2433,10 @@ data:
         Raises:
             RuntimeError: If the configured deadline is reached before Nominatim becomes ready.
         """
+        warn_timeout_deprecated = timeout_seconds is not None
         if timeout_seconds is None:
             timeout_seconds = DEFAULT_NOMINATIM_WAIT_SECONDS
-        else:
+        if warn_timeout_deprecated:
             print(
                 "DEPRECATION WARNING: timeout_seconds is deprecated; NOMINATIM_MAX_WAIT_SECONDS takes precedence.",
                 flush=True,
