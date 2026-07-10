@@ -2301,7 +2301,7 @@ def wait_for_nominatim_ready(country):
         time.sleep(10)
 
 
-def wait_for_nominatim_import_if_running(country):
+def wait_for_nominatim_import_if_running(country, timeout_seconds=None):
     """
     Check if Nominatim import is already in progress (after scaling up from previous cycle).
     If the pod is running, wait for it to become ready (via HTTP health check) before allowing
@@ -2311,6 +2311,7 @@ def wait_for_nominatim_import_if_running(country):
     Args:
         country: Dictionary containing country metadata, must have a 'name' key for workflow status updates
     """
+    _ = timeout_seconds  # Retained for compatibility; waits are governed by NOMINATIM_MAX_WAIT_SECONDS.
     deadline = _nominatim_wait_deadline()
     wait_start_time = time.monotonic()
 
