@@ -2264,6 +2264,8 @@ def wait_for_nominatim_pods_to_stop(timeout_seconds=300):
 
 def wait_for_nominatim_ready(country):
     deadline = _nominatim_wait_deadline()
+    wait_start_time = time.monotonic()
+    last_log_time = time.monotonic()
     while True:
         if deadline is not None and time.monotonic() >= deadline:
             raise RuntimeError(
@@ -2298,6 +2300,13 @@ def wait_for_nominatim_ready(country):
             country=country["name"],
             error="",
         )
+        now = time.monotonic()
+        if now - last_log_time >= 300:
+            print(
+                f"Nominatim still importing after {int(now - wait_start_time)}s; last probe: {detail}",
+                flush=True,
+            )
+            last_log_time = now
         time.sleep(10)
 
 
@@ -2312,9 +2321,14 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=None):
         country: Dictionary containing country metadata, must have a 'name' key for workflow status updates
         timeout_seconds: Retained for compatibility only; use NOMINATIM_MAX_WAIT_SECONDS instead.
     """
-    _ = timeout_seconds  # Retained for compatibility; waits are governed by NOMINATIM_MAX_WAIT_SECONDS.
+    if timeout_seconds is not None:
+        print(
+            "DEPRECATION WARNING: timeout_seconds is ignored; use NOMINATIM_MAX_WAIT_SECONDS instead.",
+            flush=True,
+        )
     deadline = _nominatim_wait_deadline()
     wait_start_time = time.monotonic()
+    last_log_time = wait_start_time
 
     while True:
         if deadline is not None and time.monotonic() >= deadline:
@@ -2354,7 +2368,13 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=None):
             # If pod has been running for a long time without becoming ready, log warning
             if elapsed_total > 3600:  # 1 hour
                 print(f"WARNING: Nominatim not responding after {int(elapsed_total)}s. Pod still running.", flush=True)
-            
+            if time.monotonic() - last_log_time >= 300:
+                print(
+                    f"Nominatim import still running after {int(elapsed_total)}s; last probe: {detail}",
+                    flush=True,
+                )
+                last_log_time = time.monotonic()
+
             time.sleep(10)
         else:
             # Pod not running - safe to proceed (no import in progress)
