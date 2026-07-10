@@ -37,6 +37,8 @@ CONFIG_FILE = os.path.join(STATUS_DIR, "config.json")
 NOMINATIM_POSTGRES_VERSION = "16"
 # Optional safety cap for Nominatim waits; 0 means wait indefinitely.
 NOMINATIM_MAX_WAIT_SECONDS = int(os.environ.get("NOMINATIM_MAX_WAIT_SECONDS", "0"))
+# Log long-running Nominatim waits every 5 minutes.
+NOMINATIM_LOG_INTERVAL_SECONDS = 300
 # Progress value for Nominatim rebuild workflow phase
 NOMINATIM_REBUILD_PROGRESS = 82
 
@@ -2265,7 +2267,7 @@ def wait_for_nominatim_pods_to_stop(timeout_seconds=300):
 def wait_for_nominatim_ready(country):
     deadline = _nominatim_wait_deadline()
     wait_start_time = time.monotonic()
-    last_log_time = time.monotonic()
+    last_log_time = wait_start_time
     while True:
         if deadline is not None and time.monotonic() >= deadline:
             raise RuntimeError(
@@ -2301,7 +2303,7 @@ def wait_for_nominatim_ready(country):
             error="",
         )
         now = time.monotonic()
-        if now - last_log_time >= 300:
+        if now - last_log_time >= NOMINATIM_LOG_INTERVAL_SECONDS:
             print(
                 f"Nominatim still importing after {int(now - wait_start_time)}s; last probe: {detail}",
                 flush=True,
@@ -2368,7 +2370,7 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=None):
             # If pod has been running for a long time without becoming ready, log warning
             if elapsed_total > 3600:  # 1 hour
                 print(f"WARNING: Nominatim not responding after {int(elapsed_total)}s. Pod still running.", flush=True)
-            if time.monotonic() - last_log_time >= 300:
+            if time.monotonic() - last_log_time >= NOMINATIM_LOG_INTERVAL_SECONDS:
                 print(
                     f"Nominatim import still running after {int(elapsed_total)}s; last probe: {detail}",
                     flush=True,
