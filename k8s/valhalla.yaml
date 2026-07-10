@@ -48,11 +48,11 @@ spec:
               value: "6"
           resources:
             requests:
-              memory: "14Gi"
-              cpu: "6"
+              memory: "6Gi"
+              cpu: "4"
             limits:
-              memory: "14Gi"
-              cpu: "6"
+              memory: "8Gi"
+              cpu: "4"
           ports:
             - containerPort: 8002
           volumeMounts:
