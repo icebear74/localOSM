@@ -40,6 +40,12 @@ NOMINATIM_MAX_WAIT_SECONDS = int(os.environ.get("NOMINATIM_MAX_WAIT_SECONDS", "0
 # Progress value for Nominatim rebuild workflow phase
 NOMINATIM_REBUILD_PROGRESS = 82
 
+
+def _nominatim_wait_deadline():
+    if NOMINATIM_MAX_WAIT_SECONDS <= 0:
+        return None
+    return time.monotonic() + NOMINATIM_MAX_WAIT_SECONDS
+
 CONFIG_DEFAULTS = {
     "node_url": "",
     "auto_update_enabled": False,
@@ -2257,12 +2263,13 @@ def wait_for_nominatim_pods_to_stop(timeout_seconds=300):
 
 
 def wait_for_nominatim_ready(country):
-    deadline = (
-        time.monotonic() + NOMINATIM_MAX_WAIT_SECONDS if NOMINATIM_MAX_WAIT_SECONDS > 0 else None
-    )
+    deadline = _nominatim_wait_deadline()
     while True:
         if deadline is not None and time.monotonic() >= deadline:
-            raise RuntimeError("Timed out waiting for Nominatim to become ready.")
+            raise RuntimeError(
+                "Timed out waiting for Nominatim to become ready. "
+                "Increase NOMINATIM_MAX_WAIT_SECONDS to wait longer."
+            )
         try:
             deployment = KUBE.get_deployment("nominatim")
         except RuntimeError:
@@ -2304,9 +2311,7 @@ def wait_for_nominatim_import_if_running(country):
     Args:
         country: Dictionary containing country metadata, must have a 'name' key for workflow status updates
     """
-    deadline = (
-        time.monotonic() + NOMINATIM_MAX_WAIT_SECONDS if NOMINATIM_MAX_WAIT_SECONDS > 0 else None
-    )
+    deadline = _nominatim_wait_deadline()
     wait_start_time = time.monotonic()
 
     while True:
