@@ -34,10 +34,12 @@ data:
         #header h1 { font-size: 1.1rem; }
         #header a { color: #cde; font-size: 0.85rem; text-decoration: none; }
         #main { display: flex; flex: 1; overflow: hidden; }
+        #map-container { flex: 1; position: relative; display: flex; }
         #sidebar { width: 340px; min-width: 280px; background: #f8f9fa; border-right: 1px solid #ddd;
                    display: flex; flex-direction: column; overflow-y: auto; padding: 1rem; gap: 0.75rem; }
-        #map { flex: 1; }
+        #map { flex: 1; height: 100%; }
         label { font-size: 0.8rem; font-weight: 600; color: #444; display: block; margin-bottom: 2px; }
+        label input[type="checkbox"] { display: inline; width: auto; margin-right: 0.5rem; }
         input, select { width: 100%; padding: 0.45rem 0.5rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem; }
         .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
         .btn { padding: 0.55rem; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600; width: 100%; }
@@ -52,6 +54,7 @@ data:
         .geocode-row { display: flex; gap: 4px; }
         .geocode-row input { flex: 1; }
         .geocode-row button { white-space: nowrap; padding: 0 0.6rem; border: 1px solid #ccc; border-radius: 4px; background: #e9ecef; cursor: pointer; font-size: 0.8rem; }
+        #zoom-display { position: absolute; bottom: 10px; right: 10px; background: rgba(0,0,0,0.6); color: #fff; padding: 6px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 600; z-index: 10; pointer-events: none; }
       </style>
     </head>
     <body>
@@ -106,12 +109,18 @@ data:
             </select>
           </div>
         </div>
+        <div>
+          <label><input type="checkbox" id="avoid_tolls"> Mautstraßen meiden</label>
+        </div>
         <button class="btn btn-primary" onclick="doRoute()">&#128205; Route berechnen</button>
         <button class="btn btn-secondary" onclick="doDistance()">&#8596; Nur Distanz</button>
         <p class="hint">Tipp: Klicke auf die Karte, um Start- (1. Klick) und Zielpunkt (2. Klick) zu setzen.</p>
         <div id="result-box">Noch keine Anfrage.</div>
       </div>
-      <div id="map"></div>
+      <div id="map-container" style="flex:1;position:relative;">
+        <div id="map"></div>
+        <div id="zoom-display">Zoom: 9</div>
+      </div>
     </div>
 
     <script src="/static/maplibre-gl.js"></script>
@@ -135,7 +144,7 @@ data:
             type: 'vector',
             tiles: [location.protocol + '//' + location.host + '/tiles/{z}/{x}/{y}.pbf'],
             minzoom: 0,
-            maxzoom: 14
+            maxzoom: 16
           }
         },
         glyphs: location.protocol + '//' + location.host + '/fonts/{fontstack}/{range}.pbf',
@@ -203,6 +212,15 @@ data:
       }
     });
 
+    // Update zoom level display
+    function updateZoomDisplay() {
+      var zoomLevel = Math.round(map.getZoom() * 10) / 10;
+      document.getElementById('zoom-display').textContent = 'Zoom: ' + zoomLevel.toFixed(1);
+    }
+    map.on('zoom', updateZoomDisplay);
+    map.on('move', updateZoomDisplay);
+    updateZoomDisplay(); // Initialize on load
+
     // Reverse geocode a coordinate and populate the address input
     async function reverseGeocode(which, lat, lon) {
       try {
@@ -265,7 +283,8 @@ data:
         end:   { lat: parseFloat(document.getElementById('endLat').value),
                  lon: parseFloat(document.getElementById('endLon').value) },
         costing: document.getElementById('costing').value,
-        units:   document.getElementById('units').value
+        units:   document.getElementById('units').value,
+        avoid_tolls: document.getElementById('avoid_tolls').checked
       };
     }
 
@@ -381,58 +400,46 @@ data:
                 self.wfile.write(body)
                 return
 
+            if self.path == "/favicon.ico":
+                # Return a minimal favicon (or 404, browsers don't care much)
+                self.send_response(404)
+                self.end_headers()
+                return
+
             if self.path == "/healthz":
                 self._send_json({"status": "ok"})
                 return
 
             if self.path.startswith("/fonts/"):
-                # Serve MapLibre GL glyph PBF files from the shared fonts directory.
+                # Proxy MapLibre GL glyph PBF requests to TileServer-GL.
+                # TileServer-GL generates PBF files from TTF/OTF sources on demand.
                 # This avoids cross-origin requests to TileServer-GL (port 30085).
-                parts = self.path[len("/fonts/"):].split("/")
-                if len(parts) == 2:
-                    fontstack = urllib.parse.unquote(parts[0])
-                    range_file = parts[1]
-                    if range_file.endswith(".pbf") and "/" not in fontstack and ".." not in fontstack:
-                        filepath = os.path.join("/data/fonts", fontstack, range_file)
-                        try:
-                            with open(filepath, "rb") as f:
-                                body = f.read()
-                            self.send_response(200)
-                            self.send_header("Content-Type", "application/x-protobuf")
-                            self.send_header("Content-Length", str(len(body)))
-                            self.send_header("Access-Control-Allow-Origin", "*")
-                            self.end_headers()
-                            self.wfile.write(body)
-                        except FileNotFoundError:
-                            self.send_response(404)
-                            self.end_headers()
-                        return
-                self.send_response(400)
-                self.end_headers()
-                return
-
-            if self.path.startswith("/tiles/"):
-                # Proxy vector tile requests to TileServer-GL via the internal K8s service.
-                # This serves tiles from the same origin as the web page, avoiding CORS issues.
-                z_x_y = self.path[len("/tiles"):]  # e.g. /14/8845/6436.pbf
-                tile_url = TILESERVER_URL + "/data/v3" + z_x_y
+                font_url = TILESERVER_URL + "/fonts" + self.path[len("/fonts"):]
                 try:
-                    req = urllib.request.Request(tile_url, headers={"User-Agent": "localosm-web/1.0"})
+                    req = urllib.request.Request(font_url, headers={
+                        "User-Agent": "localosm-web/1.0",
+                        "Accept-Encoding": "gzip"
+                    })
                     with urllib.request.urlopen(req, timeout=10) as response:
+                        http_status = response.status
                         body = response.read()
                         content_type = response.headers.get("Content-Type", "application/x-protobuf")
-                        content_encoding = response.headers.get("Content-Encoding", "")
-                    # TileServer-GL may return gzip-encoded tiles. Decompress here so
-                    # the client always receives raw PBF without a Content-Encoding header.
-                    if content_encoding.lower() == "gzip":
+                        content_encoding = response.headers.get("Content-Encoding", "").lower()
+                    
+                    # Handle gzip decompression (same as tile proxy).
+                    is_gzip_header = content_encoding == "gzip"
+                    is_gzip_magic = len(body) >= 2 and body[0:2] == b'\x1f\x8b'
+                    
+                    if is_gzip_header or is_gzip_magic:
                         try:
                             body = gzip.decompress(body)
-                        except (gzip.BadGzipFile, OSError):
-                            pass  # Not actually gzip; forward body as-is
-                    self.send_response(200)
+                        except Exception:
+                            pass  # Not valid gzip; send as-is
+                    
+                    self.send_response(http_status)
                     self.send_header("Content-Type", content_type)
                     self.send_header("Content-Length", str(len(body)))
-                    self.send_header("Cache-Control", "max-age=86400")
+                    self.send_header("Access-Control-Allow-Origin", "*")
                     self.end_headers()
                     self.wfile.write(body)
                 except urllib.error.HTTPError as e:
@@ -441,6 +448,75 @@ data:
                 except Exception:
                     self.send_response(502)
                     self.end_headers()
+                return
+
+            if self.path.startswith("/tiles/"):
+                # Proxy vector tile requests to TileServer-GL via the internal K8s service.
+                # This serves tiles from the same origin as the web page, avoiding CORS issues.
+                z_x_y = self.path[len("/tiles"):]  # e.g. /14/8845/6436.pbf
+                tile_url = TILESERVER_URL + "/data/v3" + z_x_y
+                try:
+                    # Request gzip encoding to reduce network transfer; will conditionally decompress here
+                    # based on Content-Encoding header and gzip magic bytes detection.
+                    req = urllib.request.Request(tile_url, headers={
+                        "User-Agent": "localosm-web/1.0",
+                        "Accept-Encoding": "gzip"
+                    })
+                    with urllib.request.urlopen(req, timeout=10) as response:
+                        http_status = response.status
+                        body = response.read()
+                        content_type = response.headers.get("Content-Type", "application/x-protobuf")
+                        content_encoding = response.headers.get("Content-Encoding", "").lower()
+                    
+                    # Handle gzip decompression. Check both Content-Encoding header and gzip magic bytes.
+                    # TileServer-GL may omit the header but still send gzip data.
+                    is_gzip_header = content_encoding == "gzip"
+                    is_gzip_magic = len(body) >= 2 and body[0:2] == b'\x1f\x8b'
+                    
+                    if is_gzip_header or is_gzip_magic:
+                        try:
+                            body = gzip.decompress(body)
+                            if is_gzip_magic and not is_gzip_header:
+                                print(f"debug: Detected gzip by magic bytes (no Content-Encoding header) for {tile_url}", flush=True)
+                        except (gzip.BadGzipFile, OSError) as e:
+                            print(f"error: Gzip decompression failed (body size {len(body)}, header={is_gzip_header}, magic={is_gzip_magic}): {e}", flush=True)
+                            # Log additional context when header indicated gzip but decompression failed
+                            if is_gzip_header:
+                                print(f"error: Content-Encoding header claimed gzip but decompression failed for {tile_url}", flush=True)
+                            else:
+                                print(f"warning: Malformed gzip data detected for {tile_url}, forwarding as-is", flush=True)
+                    
+                    if len(body) == 0:
+                        print(f"debug: Empty tile response (status={http_status}) from {tile_url}", flush=True)
+                    
+                    # Forward the upstream HTTP status code (e.g., 204 No Content) instead of always 200.
+                    # This allows clients to handle empty/non-existent tiles correctly.
+                    try:
+                        self.send_response(http_status)
+                        self.send_header("Content-Type", content_type)
+                        self.send_header("Content-Length", str(len(body)))
+                        self.send_header("Cache-Control", "max-age=86400")
+                        self.end_headers()
+                        if len(body) > 0:
+                            self.wfile.write(body)
+                    except BrokenPipeError:
+                        print(f"debug: Client disconnected while sending tile {z_x_y}", flush=True)
+                except urllib.error.HTTPError as e:
+                    try:
+                        self.send_response(e.code)
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                    except BrokenPipeError:
+                        print(f"debug: Client disconnected during error response for {tile_url}", flush=True)
+                except Exception as exc:
+                    error_msg = f"Tile proxy error: {type(exc).__name__}: {str(exc)}"
+                    print(error_msg, flush=True)
+                    try:
+                        self.send_response(502)
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                    except BrokenPipeError:
+                        print(f"debug: Client disconnected during error response for {tile_url}", flush=True)
                 return
 
             if self.path.startswith("/static/"):
@@ -531,14 +607,29 @@ data:
         def _build_valhalla_request(self, payload):
             start = payload.get("start", {})
             end = payload.get("end", {})
-            return {
+            costing = payload.get("costing", "auto")
+            avoid_tolls = payload.get("avoid_tolls", False)
+            
+            # Build the base request
+            request = {
                 "locations": [
                     {"lat": start.get("lat"), "lon": start.get("lon")},
                     {"lat": end.get("lat"), "lon": end.get("lon")},
                 ],
-                "costing": payload.get("costing", "auto"),
+                "costing": costing,
                 "units": payload.get("units", "km"),
             }
+            
+            # Add costing options for toll avoidance (only for auto and truck)
+            # Note: In Valhalla, use_tolls: False means avoid tolls
+            if avoid_tolls and costing in ("auto", "truck"):
+                if "costing_options" not in request:
+                    request["costing_options"] = {}
+                if costing not in request["costing_options"]:
+                    request["costing_options"][costing] = {}
+                request["costing_options"][costing]["use_tolls"] = False
+            
+            return request
 
         def _call_valhalla(self, endpoint, valhalla_payload):
             req = urllib.request.Request(
@@ -661,9 +752,6 @@ spec:
               mountPath: /config
             - name: web-static
               mountPath: /data/static
-            - name: tileserver-fonts
-              mountPath: /data/fonts
-              readOnly: true
       volumes:
         - name: app-code
           configMap:
@@ -671,10 +759,6 @@ spec:
         - name: web-static
           hostPath:
             path: /mnt/data/OSM/web-static
-            type: DirectoryOrCreate
-        - name: tileserver-fonts
-          hostPath:
-            path: /mnt/data/OSM/tileserver/fonts
             type: DirectoryOrCreate
 ---
 apiVersion: v1

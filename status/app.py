@@ -33,10 +33,30 @@ COUNTRIES_FILE = os.path.join(STATUS_DIR, "countries.json")
 STATE_FILE = os.path.join(STATUS_DIR, "library-state.json")
 CONFIG_FILE = os.path.join(STATUS_DIR, "config.json")
 
+# PostgreSQL version used by mediagis/nominatim container
+NOMINATIM_POSTGRES_VERSION = "16"
+# Progress value for Nominatim rebuild workflow phase
+NOMINATIM_REBUILD_PROGRESS = 82
+
 CONFIG_DEFAULTS = {
     "node_url": "",
     "auto_update_enabled": False,
     "auto_update_time": "03:00",
+    "routing_costing_models": {
+        "car": {"enabled": True},
+        "foot": {"enabled": True},
+        "bicycle": {"enabled": True},
+    },
+    "routing_speeds": {
+        "car": 120,
+        "foot": 5,
+        "bicycle": 25,
+    },
+    "routing_advanced": {
+        "car": {"toll_factor": 1.0, "unpaved_factor": 1.0, "ferry_factor": 1.0},
+        "foot": {"hill_factor": 1.0, "unpaved_factor": 1.0},
+        "bicycle": {"hill_factor": 1.0, "unpaved_factor": 1.0},
+    },
 }
 
 SERVICES = [
@@ -813,6 +833,90 @@ INDEX_HTML = """<!doctype html>
     </div>
 
     <div class="card">
+      <h2>Routing Konfiguration</h2>
+      <div class="controls">
+        <div>
+          <label style="margin-bottom: 0.5rem; display: block;">Costing Modelle (Verkehrsmittel)</label>
+          <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer" title="Aktiviert Auto-Routing für PKW und Motorräder">
+            <input type="checkbox" id="routing-car-enabled" style="width:auto">
+            Auto
+          </label>
+          <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer" title="Aktiviert Fußgänger-Routing für Fußwege">
+            <input type="checkbox" id="routing-foot-enabled" style="width:auto">
+            Fußgänger
+          </label>
+          <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer" title="Aktiviert Fahrrad-Routing optimiert für Radwege">
+            <input type="checkbox" id="routing-bicycle-enabled" style="width:auto">
+            Fahrrad
+          </label>
+        </div>
+        <div>
+          <label>Geschwindigkeiten (km/h) - für Fahrtzeit-Berechnung</label>
+          <div class="row2">
+            <input type="number" id="routing-car-speed" placeholder="Auto (z.B. 120)" min="1" max="200" title="Durchschnittsgeschwindigkeit für Autos: typisch 80-130 km/h">
+            <input type="number" id="routing-foot-speed" placeholder="Fußgänger (z.B. 5)" min="1" max="10" title="Fußgänger-Geschwindigkeit: typisch 3-6 km/h">
+          </div>
+          <input type="number" id="routing-bicycle-speed" placeholder="Fahrrad (z.B. 25)" min="1" max="50" title="Fahrrad-Geschwindigkeit: typisch 15-30 km/h">
+        </div>
+        <details style="font-size: 0.82rem; margin-top: 0.5rem;">
+          <summary style="cursor: pointer; color: #2c7ab5; font-weight: 600;">Erweiterte Parameter</summary>
+          <div style="margin-top: 0.5rem; padding: 0.5rem; background: #f9f9f9; border-radius: 4px;">
+            <label style="margin-bottom: 0.3rem; display: block;">Auto-Parameter (Faktoren: 1.0 = normal, >1 = meiden, <1 = bevorzugen)</label>
+            <div class="row2" style="margin-bottom: 0.5rem;">
+              <input type="number" id="routing-car-toll" placeholder="Mautfaktor (z.B. 1.0)" step="0.1" min="0" max="10" title="1.0=neutral, 2.0=doppelt so teuer meiden, 0.5=bevorzugen">
+              <input type="number" id="routing-car-unpaved" placeholder="Unbef. Faktor (z.B. 1.0)" step="0.1" min="0" max="10" title="Unbefestigte Straßen: 1.0=neutral, >1.0=meiden">
+            </div>
+            <input type="number" id="routing-car-ferry" placeholder="Fähren-Faktor (z.B. 1.0)" step="0.1" min="0" max="10" title="Fährverbindungen: 1.0=neutral, >1.0=meiden">
+            <label style="margin-top: 0.5rem; margin-bottom: 0.3rem; display: block;">Fußgänger & Fahrrad-Parameter</label>
+            <div class="row2">
+              <input type="number" id="routing-ped-hill" placeholder="Hügel-Faktor Fußg. (z.B. 1.0)" step="0.1" min="0" max="10" title="Steigungen für Fußgänger: 1.0=neutral, >1.0=Hügel meiden">
+              <input type="number" id="routing-bike-hill" placeholder="Hügel-Faktor Bike (z.B. 1.0)" step="0.1" min="0" max="10" title="Steigungen für Fahrräder: 1.0=neutral, >1.0=Hügel meiden">
+            </div>
+          </div>
+        </details>
+        <button onclick="saveRoutingConfig()">Speichern</button>
+        <div id="routing-status" class="hint"></div>
+        <div class="hint">
+          Konfiguriert die Valhalla-Routing-Parameter. Geschwindigkeiten beeinflussen Fahrtzeit-Berechnung. 
+          Faktoren (erweitert): 1.0=neutral, >1.0=Route meiden, &lt;1.0=Route bevorzugen.
+        </div>
+      </div>
+     </div>
+
+     <div class="card">
+      <h2>Multi-Destinationen Routenplaner</h2>
+      <div class="controls">
+        <div>
+          <label style="margin-bottom: 0.5rem; display: block;">Wegpunkte hinzufügen</label>
+          <div id="route-waypoints">
+            <div class="waypoint-item" style="display:flex;gap:0.5rem;margin-bottom:0.5rem;">
+              <input type="text" class="waypoint-input" placeholder="Start (Adresse/Koordinaten)" style="flex:1" title="Adresse (z.B. 'Berlin') oder Koordinaten (z.B. '52.52,13.40')">
+              <button type="button" onclick="addWaypoint()" style="flex:0 0 auto; width: 100px;">+ Punkt</button>
+            </div>
+            <div class="waypoint-item" style="display:flex;gap:0.5rem;">
+              <input type="text" class="waypoint-input" placeholder="Ziel (Adresse/Koordinaten)" style="flex:1" title="Adresse oder Koordinaten des Ziels">
+              <button type="button" onclick="clearWaypoints()" style="flex:0 0 auto; width: 100px; background:#999;">Löschen</button>
+            </div>
+          </div>
+        </div>
+        <div class="row2">
+          <select id="route-costing" title="Wählen Sie das Verkehrsmittel für die Routenberechnung">
+            <option value="auto">Auto</option>
+            <option value="foot">Fußgänger</option>
+            <option value="bicycle">Fahrrad</option>
+          </select>
+          <button onclick="calculateRoute()">Route berechnen</button>
+        </div>
+        <div id="route-result" class="hint" style="margin-top: 0.5rem; display: none;"></div>
+        <div class="hint">
+          Geben Sie Start und Ziel ein, optional Zwischenpunkte mit "+ Punkt". 
+          Adressen werden automatisch geocodiert (Nominatim), Koordinaten im Format Lat,Lon (z.B. 52.5,13.4). 
+          Die Route wird über Valhalla mit den konfigurierten Routing-Parametern berechnet.
+        </div>
+      </div>
+     </div>
+
+    <div class="card">
       <h2>Workflow Fortschritt</h2>
       <div id="workflow-body">Lade ...</div>
     </div>
@@ -1110,6 +1214,121 @@ INDEX_HTML = """<!doctype html>
     }
   }
 
+  async function saveRoutingConfig() {
+    var config = {
+      routing_costing_models: {
+        car: {enabled: document.getElementById('routing-car-enabled').checked},
+        foot: {enabled: document.getElementById('routing-foot-enabled').checked},
+        bicycle: {enabled: document.getElementById('routing-bicycle-enabled').checked}
+      },
+      routing_speeds: {
+        car: parseInt(document.getElementById('routing-car-speed').value || 120),
+        foot: parseInt(document.getElementById('routing-foot-speed').value || 5),
+        bicycle: parseInt(document.getElementById('routing-bicycle-speed').value || 25)
+      },
+      routing_advanced: {
+        car: {
+          toll_factor: parseFloat(document.getElementById('routing-car-toll').value || 1.0),
+          unpaved_factor: parseFloat(document.getElementById('routing-car-unpaved').value || 1.0),
+          ferry_factor: parseFloat(document.getElementById('routing-car-ferry').value || 1.0)
+        },
+        foot: {
+          hill_factor: parseFloat(document.getElementById('routing-ped-hill').value || 1.0),
+          unpaved_factor: 1.0
+        },
+        bicycle: {
+          hill_factor: parseFloat(document.getElementById('routing-bike-hill').value || 1.0),
+          unpaved_factor: 1.0
+        }
+      }
+    };
+    var resp = await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(config)});
+    var statusDiv = document.getElementById('routing-status');
+    if (resp.ok) {
+      statusDiv.textContent = '✓ Routing-Konfiguration gespeichert.';
+      statusDiv.style.color = '#2ecc71';
+      setTimeout(function() { statusDiv.textContent = ''; }, 3000);
+    } else {
+      statusDiv.textContent = '✗ Fehler beim Speichern.';
+      statusDiv.style.color = '#e74c3c';
+    }
+  }
+
+  function addWaypoint() {
+    var container = document.getElementById('route-waypoints');
+    var item = document.createElement('div');
+    item.className = 'waypoint-item';
+    item.style.cssText = 'display:flex;gap:0.5rem;margin-bottom:0.5rem;';
+    item.innerHTML = '<input type="text" class="waypoint-input" placeholder="Zwischenpunkt (Adresse/Koordinaten)" style="flex:1"> <button type="button" onclick="this.parentElement.remove()" style="flex:0 0 auto; width: 100px; background:#999;">Entf.</button>';
+    container.insertBefore(item, container.lastElementChild);
+  }
+
+  function clearWaypoints() {
+    var container = document.getElementById('route-waypoints');
+    while (container.children.length > 2) {
+      container.children[1].remove();
+    }
+    container.querySelectorAll('.waypoint-input').forEach(function(inp) { inp.value = ''; });
+  }
+
+  async function calculateRoute() {
+    var waypoints = [];
+    document.querySelectorAll('.waypoint-input').forEach(function(inp) {
+      if (inp.value.trim()) waypoints.push(inp.value.trim());
+    });
+    if (waypoints.length < 2) {
+      alert('Mindestens 2 Wegpunkte erforderlich (Start und Ziel)');
+      return;
+    }
+    var costing = document.getElementById('route-costing').value;
+    var resultDiv = document.getElementById('route-result');
+    resultDiv.style.display = 'block';
+    resultDiv.textContent = 'Berechne Route...';
+    try {
+      var resp = await fetch('/api/routing/calculate', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({waypoints: waypoints, costing: costing})
+      });
+      if (resp.ok) {
+        var result = await resp.json();
+        var distance = (result.distance / 1000).toFixed(2);
+        var time = Math.round(result.time / 60);
+        resultDiv.textContent = '✓ Route: ' + distance + ' km, ca. ' + time + ' Minuten';
+        resultDiv.style.color = '#2ecc71';
+      } else {
+        var err = await resp.json();
+        resultDiv.textContent = '✗ ' + (err.error || 'Fehler bei Routenberechnung');
+        resultDiv.style.color = '#e74c3c';
+      }
+    } catch (e) {
+      resultDiv.textContent = '✗ Fehler: ' + e.message;
+      resultDiv.style.color = '#e74c3c';
+    }
+  }
+
+  function loadRoutingConfig() {
+    fetch('/api/config').then(function(r) { return r.json(); }).then(function(cfg) {
+      if (cfg.routing_costing_models) {
+        document.getElementById('routing-car-enabled').checked = cfg.routing_costing_models.car?.enabled ?? true;
+        document.getElementById('routing-foot-enabled').checked = cfg.routing_costing_models.foot?.enabled ?? true;
+        document.getElementById('routing-bicycle-enabled').checked = cfg.routing_costing_models.bicycle?.enabled ?? true;
+      }
+      if (cfg.routing_speeds) {
+        document.getElementById('routing-car-speed').value = cfg.routing_speeds.car || 120;
+        document.getElementById('routing-foot-speed').value = cfg.routing_speeds.foot || 5;
+        document.getElementById('routing-bicycle-speed').value = cfg.routing_speeds.bicycle || 25;
+      }
+      if (cfg.routing_advanced) {
+        document.getElementById('routing-car-toll').value = cfg.routing_advanced.car?.toll_factor || 1.0;
+        document.getElementById('routing-car-unpaved').value = cfg.routing_advanced.car?.unpaved_factor || 1.0;
+        document.getElementById('routing-car-ferry').value = cfg.routing_advanced.car?.ferry_factor || 1.0;
+        document.getElementById('routing-ped-hill').value = cfg.routing_advanced.foot?.hill_factor || 1.0;
+        document.getElementById('routing-bike-hill').value = cfg.routing_advanced.bicycle?.hill_factor || 1.0;
+      }
+    }).catch(function(e) { console.error('Fehler beim Laden der Routing-Konfiguration:', e); });
+  }
+
   async function refresh() {
     try {
       var resp = await fetch('/api/status');
@@ -1175,6 +1394,7 @@ INDEX_HTML = """<!doctype html>
   }
 
   loadConfig();
+  loadRoutingConfig();
   refresh();
   </script>
 </body>
@@ -1254,6 +1474,12 @@ def apply_config_update(payload):
         if not valid_time_value(time_value):
             raise ValueError("auto_update_time must use HH:MM format.")
         config["auto_update_time"] = time_value
+    if "routing_costing_models" in payload:
+        config["routing_costing_models"] = payload["routing_costing_models"]
+    if "routing_speeds" in payload:
+        config["routing_speeds"] = payload["routing_speeds"]
+    if "routing_advanced" in payload:
+        config["routing_advanced"] = payload["routing_advanced"]
     return save_config(config)
 
 
@@ -1519,7 +1745,21 @@ def validate_pbf_file(path, *, label="OSM extract"):
         raise RuntimeError(f"{label} not found: {path}")
     if os.path.getsize(path) <= 0:
         raise RuntimeError(f"{label} is empty: {path}")
-    run_command(["osmium", "fileinfo", "-F", "pbf", path], timeout=120)
+    try:
+        run_command(["osmium", "fileinfo", "-F", "pbf", path], timeout=120)
+    except RuntimeError as e:
+        error_msg = str(e)
+        # Some PBF files have larger blob headers than osmium fileinfo's strict limit.
+        # When this occurs, try osmium cat as a more lenient fallback validation.
+        if "blobheader" not in error_msg.lower().replace(" ", ""):
+            # Not a BlobHeader error, re-raise the original error
+            raise
+        # Try the fallback validation with osmium cat
+        try:
+            run_command(["osmium", "cat", "-o", "/dev/null", path], timeout=120)
+        except RuntimeError:
+            # If osmium cat also fails, report the original fileinfo error
+            raise e
 
 
 def clear_directory(path):
@@ -1658,6 +1898,7 @@ def build_valhalla_job_manifest():
                             "name": "valhalla-import",
                             "image": "ghcr.io/gis-ops/docker-valhalla/valhalla:latest",
                             "imagePullPolicy": "Always",
+                            "resources": {"requests": {"memory": "18Gi", "cpu": "6"}, "limits": {"memory": "18Gi", "cpu": "6"}},
                             "securityContext": {"runAsUser": 0, "runAsGroup": 0},
                             "command": ["/bin/sh", "-c"],
                             "args": [
@@ -1700,7 +1941,7 @@ def build_valhalla_job_manifest():
                         },
                         {
                             "name": "valhalla-config",
-                            "configMap": {"name": "osm-valhalla-config"},
+                            "configMap": {"name": "osm-valhalla-import-config"},
                         },
                     ],
                 }
@@ -1781,23 +2022,27 @@ def build_tileserver_job_manifest():
                             "name": "tilemaker-import",
                             "image": "ghcr.io/onthegomap/planetiler:latest",
                             "imagePullPolicy": "Always",
-                            "resources": {"requests": {"memory": "2Gi"}, "limits": {"memory": "6Gi"}},
+                            "resources": {"requests": {"memory": "13Gi"}, "limits": {"memory": "13Gi"}},
                             "securityContext": {"runAsUser": 0, "runAsGroup": 0},
+                            "env": [
+                                {"name": "JAVA_OPTS", "value": "-Xms11g -Xmx11g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"},
+                            ],
                             "args": [
                                 "--osm-path=/data/import/planet.osm.pbf",
                                 "--output=/data/tileserver/map.mbtiles",
                                 "--force",
+                                "--threads=6",
                                 # Ancillary source files are pre-cached by the fetch-sources
                                 # init container. No --download flag: tile generation runs
                                 # fully offline using only local data.
                                 "--lake_centerlines_path=/data/sources/lake_centerline.shp.zip",
                                 "--water_polygons_path=/data/sources/water-polygons-split-3857.zip",
                                 "--natural_earth_path=/data/sources/natural_earth_vector.sqlite.zip",
-                                # Skip zoom 0-5 world-overview (NaturalEarth) tiles; the map is
-                                # centered on the local extract so low-zoom world tiles are not
-                                # needed and would cause MapLibre to overzoom them outside the
-                                # extract area, producing a distorted world-map appearance.
-                                "--minzoom=6",
+                                # Generate all zoom levels from 0 (world view) to 16 (maximum supported)
+                                # to support all zoom ranges. With sufficient disk space (>100GB),
+                                # all zoom levels can be generated for maximum flexibility.
+                                "--minzoom=0",
+                                "--maxzoom=16",
                             ],
                             "volumeMounts": [
                                 {"name": "osm-data", "mountPath": "/data"},
@@ -1844,7 +2089,7 @@ def rebuild_valhalla(country):
     KUBE.create_job(build_valhalla_job_manifest())
 
     job_start = time.time()
-    deadline = job_start + 7200
+    deadline = job_start + 21600
     while time.time() < deadline:
         try:
             job_data = KUBE.get_job("valhalla-import")
@@ -1929,7 +2174,7 @@ def rebuild_tileserver(country):
     KUBE.create_job(build_tileserver_job_manifest())
 
     job_start = time.time()
-    deadline = job_start + 7200
+    deadline = job_start + 21600
     while time.time() < deadline:
         try:
             job_data = KUBE.get_job("tilemaker-import")
@@ -2044,11 +2289,79 @@ def wait_for_nominatim_ready(country):
     raise RuntimeError("Timed out waiting for Nominatim to become ready.")
 
 
+def wait_for_nominatim_import_if_running(country, timeout_seconds=7200):
+    """
+    Check if Nominatim import is already in progress (after scaling up from previous cycle).
+    If the pod is running, wait for it to become ready (via HTTP health check) before allowing
+    scale down. This prevents race condition where scale down/up aborts running imports.
+    When Nominatim responds to HTTP requests, the import/initialization is complete.
+    
+    Args:
+        country: Dictionary containing country metadata, must have a 'name' key for workflow status updates
+        timeout_seconds: Maximum time to wait for import to complete (default 2 hours = 7200 seconds)
+    
+    Raises:
+        RuntimeError: If import does not complete within timeout_seconds
+    """
+    deadline = time.monotonic() + timeout_seconds
+    wait_start_time = time.monotonic()
+    
+    while time.monotonic() < deadline:
+        try:
+            pods = KUBE.list_pods("app=nominatim")
+            pod_running = bool(pods.get("items", []))
+        except RuntimeError:
+            # Kubernetes API temporarily unavailable, retry after delay
+            time.sleep(5)
+            continue
+        
+        if pod_running:
+            # Pod is running - check if Nominatim service is ready (health check)
+            # When Nominatim responds to HTTP requests, import/initialization is complete
+            ok, detail = check_http("http://nominatim.osm.svc.cluster.local:8080/")
+            if ok:
+                # Nominatim is ready, import is complete
+                print(f"Nominatim import/initialization complete - service is ready", flush=True)
+                return
+            
+            # Pod is running but not ready yet
+            elapsed_total = time.monotonic() - wait_start_time
+            write_workflow_state(
+                running=True,
+                phase="search",
+                progress=NOMINATIM_REBUILD_PROGRESS,
+                message="Refreshing Nominatim for address and POI search ...",
+                detail=f"Waiting for Nominatim to become ready (waiting {int(elapsed_total)}s)... {detail}",
+                country=country["name"],
+                error="",
+            )
+            
+            # If pod has been running for a long time without becoming ready, log warning
+            if elapsed_total > 3600:  # 1 hour
+                print(f"WARNING: Nominatim not responding after {int(elapsed_total)}s. Pod still running.", flush=True)
+            
+            time.sleep(10)
+        else:
+            # Pod not running - safe to proceed (no import in progress)
+            return
+    
+    # Timeout reached - provide more helpful error message
+    print(f"ERROR: Timed out waiting for Nominatim to become ready after {timeout_seconds}s", flush=True)
+    raise RuntimeError(
+        f"Timed out waiting for Nominatim import to complete after {timeout_seconds}s. "
+        "The service did not become ready. The import may be stuck. "
+        "You can manually clear this by restarting the pod or using the /api/library/reset-import endpoint."
+    )
+
+
 def rebuild_nominatim(country):
+    # First, wait for any running import to complete before scaling down
+    wait_for_nominatim_import_if_running(country)
+    
     write_workflow_state(
         running=True,
         phase="search",
-        progress=82,
+        progress=NOMINATIM_REBUILD_PROGRESS,
         message="Refreshing Nominatim for address and POI search ...",
         detail="Scaling the Nominatim deployment down before reimport.",
         country=country["name"],
@@ -2281,6 +2594,92 @@ def run_scheduler_loop():
             SCHEDULER_LOCK.release()
 
 
+def calculate_multi_leg_route(payload):
+    """Calculate a multi-leg route via Valhalla API."""
+    waypoints = payload.get("waypoints", [])
+    costing = payload.get("costing", "auto")
+    
+    if not waypoints or len(waypoints) < 2:
+        raise ValueError("At least 2 waypoints (start and destination) required.")
+    
+    # Parse waypoints - they can be "lat,lon" or address-like strings
+    # For now, we'll assume format is "lat,lon" or try to geocode via nominatim
+    locations = []
+    for wp in waypoints:
+        parts = wp.strip().split(",")
+        if len(parts) != 2:
+            raise ValueError(f"Invalid waypoint format: {wp}. Expected 'lat,lon' format (e.g., '52.5200,13.4050'). For addresses, use a comma-separated format that Nominatim can parse (e.g., 'city, country' or 'street, city').")
+         
+        try:
+            lat = float(parts[0].strip())
+            lon = float(parts[1].strip())
+            locations.append({"lat": lat, "lon": lon})
+        except ValueError:
+            # Try geocoding via nominatim as fallback
+            try:
+                resp = urllib.request.urlopen(
+                    f"http://nominatim.osm.svc.cluster.local:8080/search?"
+                    f"q={urllib.parse.quote(wp.strip())}&format=json&limit=1",
+                    timeout=5
+                )
+                data = json.loads(resp.read().decode("utf-8"))
+                if data:
+                    locations.append({"lat": float(data[0]["lat"]), "lon": float(data[0]["lon"])})
+                else:
+                    raise ValueError(f"Could not geocode address '{wp}' (no results from Nominatim)")
+            except Exception as e:
+                raise ValueError(f"Invalid waypoint '{wp}': not in 'lat,lon' format and geocoding failed: {e}")
+    
+    # Map costing model
+    costing_map = {
+        "auto": "auto",
+        "car": "auto",
+        "foot": "pedestrian",
+        "pedestrian": "pedestrian",
+        "bicycle": "bicycle",
+        "bike": "bicycle",
+    }
+    valhalla_costing = costing_map.get(costing.lower(), "auto")
+    
+    # Build Valhalla request
+    valhalla_request = {
+        "locations": locations,
+        "costing": valhalla_costing,
+        "directions_options": {"language": "en"},
+    }
+    
+    # Call Valhalla API
+    try:
+        valhalla_url = "http://valhalla.osm.svc.cluster.local:8002/route"
+        req = urllib.request.Request(
+            valhalla_url,
+            data=json.dumps(valhalla_request).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=10) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except Exception as e:
+        raise RuntimeError(f"Valhalla routing failed: {e}")
+    
+    # Extract summary info
+    if "trip" not in result or not result["trip"].get("legs"):
+        raise ValueError("No route found for the given waypoints.")
+    
+    trip = result["trip"]
+    total_distance = sum(leg.get("distance", 0) for leg in trip.get("legs", []))
+    total_time = sum(leg.get("time", 0) for leg in trip.get("legs", []))
+    
+    return {
+        "distance": total_distance,
+        "time": total_time,
+        "distance_km": round(total_distance / 1000, 2),
+        "time_minutes": int(round(total_time / 60)),
+        "waypoints_count": len(waypoints),
+        "costing": costing,
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send_json(self, payload, status=200):
         body = json.dumps(payload, indent=2).encode("utf-8")
@@ -2395,6 +2794,21 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"status": "started", "build": build})
             return
 
+        if self.path == "/api/library/reset-import":
+            # Manual endpoint to reset stuck import status when Nominatim import is actually complete
+            # but the system thinks it's still running
+            write_workflow_state(
+                running=False,
+                phase="done",
+                progress=100,
+                message="Nominatim import status manually reset.",
+                detail="The import status was manually cleared. You can now add new countries.",
+                country="",
+                error="",
+            )
+            self._send_json({"status": "reset", "message": "Import status cleared. You can now add new countries."})
+            return
+
         if self.path == "/api/config":
             try:
                 config = apply_config_update(payload)
@@ -2402,6 +2816,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(exc)}, 400)
                 return
             self._send_json(config)
+            return
+
+        if self.path == "/api/routing/calculate":
+            try:
+                result = calculate_multi_leg_route(payload)
+                self._send_json(result)
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 400)
+                return
+            except RuntimeError as exc:
+                self._send_json({"error": str(exc)}, 503)
+                return
             return
 
         self._send_json({"error": "not found"}, 404)
