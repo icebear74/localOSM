@@ -2275,6 +2275,17 @@ def wait_for_nominatim_pods_to_stop(timeout_seconds=300):
     raise RuntimeError("Timed out waiting for the Nominatim pod to stop.")
 
 
+def is_nominatim_import_running():
+    try:
+        pods = KUBE.list_pods("app=nominatim")
+    except RuntimeError:
+        return False
+    if not pods.get("items"):
+        return False
+    ok, _ = check_http("http://nominatim.osm.svc.cluster.local:8080/")
+    return not ok
+
+
 def wait_for_nominatim_ready(country):
     deadline = _get_nominatim_wait_deadline()
     wait_start_time = time.monotonic()
@@ -2397,9 +2408,20 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=DEFAULT_NOMINA
 
 
 def rebuild_nominatim(country):
-    # First, wait for any running import to complete before scaling down
-    wait_for_nominatim_import_if_running(country)
-    
+    # If Nominatim is already importing, continue that import instead of wiping it.
+    if is_nominatim_import_running():
+        write_workflow_state(
+            running=True,
+            phase="search",
+            progress=NOMINATIM_REBUILD_PROGRESS,
+            message="Nominatim import already started - continuing ...",
+            detail="An existing import is still running, so the current data directory is kept.",
+            country=country["name"],
+            error="",
+        )
+        wait_for_nominatim_ready(country)
+        return
+
     write_workflow_state(
         running=True,
         phase="search",
