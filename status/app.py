@@ -35,6 +35,8 @@ CONFIG_FILE = os.path.join(STATUS_DIR, "config.json")
 
 # PostgreSQL version used by mediagis/nominatim container
 NOMINATIM_POSTGRES_VERSION = "16"
+# Optional safety cap for Nominatim waits; 0 means wait indefinitely.
+NOMINATIM_MAX_WAIT_SECONDS = int(os.environ.get("NOMINATIM_MAX_WAIT_SECONDS", "0"))
 # Progress value for Nominatim rebuild workflow phase
 NOMINATIM_REBUILD_PROGRESS = 82
 
@@ -2255,7 +2257,12 @@ def wait_for_nominatim_pods_to_stop(timeout_seconds=300):
 
 
 def wait_for_nominatim_ready(country):
+    deadline = (
+        time.monotonic() + NOMINATIM_MAX_WAIT_SECONDS if NOMINATIM_MAX_WAIT_SECONDS > 0 else None
+    )
     while True:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise RuntimeError("Timed out waiting for Nominatim to become ready.")
         try:
             deployment = KUBE.get_deployment("nominatim")
         except RuntimeError:
@@ -2297,9 +2304,17 @@ def wait_for_nominatim_import_if_running(country):
     Args:
         country: Dictionary containing country metadata, must have a 'name' key for workflow status updates
     """
+    deadline = (
+        time.monotonic() + NOMINATIM_MAX_WAIT_SECONDS if NOMINATIM_MAX_WAIT_SECONDS > 0 else None
+    )
     wait_start_time = time.monotonic()
 
     while True:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise RuntimeError(
+                "Timed out waiting for Nominatim import to complete. "
+                "Increase NOMINATIM_MAX_WAIT_SECONDS to wait longer."
+            )
         try:
             pods = KUBE.list_pods("app=nominatim")
             pod_running = bool(pods.get("items", []))
