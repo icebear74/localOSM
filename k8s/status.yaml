@@ -111,10 +111,20 @@ data:
     NOMINATIM_REBUILD_PROGRESS = 82
 
 
-    def _nominatim_wait_deadline():
-        if NOMINATIM_MAX_WAIT_SECONDS <= 0:
-            return None
-        return time.monotonic() + NOMINATIM_MAX_WAIT_SECONDS
+    def _nominatim_wait_deadline(timeout_seconds=None):
+        if NOMINATIM_MAX_WAIT_SECONDS > 0:
+            return time.monotonic() + NOMINATIM_MAX_WAIT_SECONDS
+        if timeout_seconds is not None and timeout_seconds > 0:
+            return time.monotonic() + timeout_seconds
+        return None
+
+
+    def _maybe_log_nominatim_wait(last_log_time, message):
+        now = time.monotonic()
+        if now - last_log_time >= NOMINATIM_LOG_INTERVAL_SECONDS:
+            print(message, flush=True)
+            return now
+        return last_log_time
 
     CONFIG_DEFAULTS = {
         "node_url": "",
@@ -2349,14 +2359,14 @@ data:
                 continue
             status = deployment.get("status", {})
             ready = status.get("readyReplicas", 0)
-            ok, detail = check_http("http://nominatim.osm.svc.cluster.local:8080/")
+            ok, probe_detail = check_http("http://nominatim.osm.svc.cluster.local:8080/")
             if ready >= 1 and ok:
                 write_workflow_state(
                     running=True,
                     phase="search",
                     progress=95,
                     message="Nominatim address + POI search is ready.",
-                    detail=detail,
+                    detail=probe_detail,
                     country=country["name"],
                     error="",
                 )
@@ -2366,17 +2376,14 @@ data:
                 phase="search",
                 progress=88,
                 message="Nominatim is importing the merged dataset ...",
-                detail=f"Ready replicas: {ready}. Last probe: {detail}",
+                detail=f"Ready replicas: {ready}. Last probe: {probe_detail}",
                 country=country["name"],
                 error="",
             )
-            now = time.monotonic()
-            if now - last_log_time >= NOMINATIM_LOG_INTERVAL_SECONDS:
-                print(
-                    f"Nominatim still importing after {int(now - wait_start_time)}s; last probe: {detail}",
-                    flush=True,
-                )
-                last_log_time = now
+            last_log_time = _maybe_log_nominatim_wait(
+                last_log_time,
+                f"Nominatim still importing after {int(time.monotonic() - wait_start_time)}s; last probe: {probe_detail}",
+            )
             time.sleep(10)
 
 
@@ -2386,18 +2393,24 @@ data:
         If the pod is running, wait for it to become ready (via HTTP health check) before allowing
         scale down. This prevents race condition where scale down/up aborts running imports.
         When Nominatim responds to HTTP requests, the import/initialization is complete.
-        If it does not become ready before the timeout, a RuntimeError is raised.
+        If NOMINATIM_MAX_WAIT_SECONDS is set to a positive value, the wait ends at the configured
+        deadline and raises RuntimeError if Nominatim is still not ready.
+        If NOMINATIM_MAX_WAIT_SECONDS is 0 or negative, the wait continues indefinitely unless
+        timeout_seconds is provided for compatibility.
 
         Args:
             country: Dictionary containing country metadata, must have a 'name' key for workflow status updates
             timeout_seconds: Retained for compatibility only; use NOMINATIM_MAX_WAIT_SECONDS instead.
+
+        Raises:
+            RuntimeError: If the configured deadline is reached before Nominatim becomes ready.
         """
         if timeout_seconds is not None:
             print(
-                "DEPRECATION WARNING: timeout_seconds is ignored; use NOMINATIM_MAX_WAIT_SECONDS instead.",
+                "DEPRECATION WARNING: timeout_seconds is deprecated; NOMINATIM_MAX_WAIT_SECONDS takes precedence.",
                 flush=True,
             )
-        deadline = _nominatim_wait_deadline()
+        deadline = _nominatim_wait_deadline(timeout_seconds)
         wait_start_time = time.monotonic()
         last_log_time = wait_start_time
 
@@ -2418,7 +2431,7 @@ data:
             if pod_running:
                 # Pod is running - check if Nominatim service is ready (health check)
                 # When Nominatim responds to HTTP requests, import/initialization is complete
-                ok, detail = check_http("http://nominatim.osm.svc.cluster.local:8080/")
+                ok, probe_detail = check_http("http://nominatim.osm.svc.cluster.local:8080/")
                 if ok:
                     # Nominatim is ready, import is complete
                     print(f"Nominatim import/initialization complete - service is ready", flush=True)
@@ -2431,7 +2444,7 @@ data:
                     phase="search",
                     progress=NOMINATIM_REBUILD_PROGRESS,
                     message="Refreshing Nominatim for address and POI search ...",
-                    detail=f"Waiting for Nominatim to become ready (waiting {int(elapsed_total)}s)... {detail}",
+                    detail=f"Waiting for Nominatim to become ready (waiting {int(elapsed_total)}s)... {probe_detail}",
                     country=country["name"],
                     error="",
                 )
@@ -2439,12 +2452,10 @@ data:
                 # If pod has been running for a long time without becoming ready, log warning
                 if elapsed_total > 3600:  # 1 hour
                     print(f"WARNING: Nominatim not responding after {int(elapsed_total)}s. Pod still running.", flush=True)
-                if time.monotonic() - last_log_time >= NOMINATIM_LOG_INTERVAL_SECONDS:
-                    print(
-                        f"Nominatim import still running after {int(elapsed_total)}s; last probe: {detail}",
-                        flush=True,
-                    )
-                    last_log_time = time.monotonic()
+                last_log_time = _maybe_log_nominatim_wait(
+                    last_log_time,
+                    f"Nominatim import still running after {int(elapsed_total)}s; last probe: {probe_detail}",
+                )
 
                 time.sleep(10)
             else:
