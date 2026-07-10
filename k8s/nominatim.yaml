@@ -51,18 +51,19 @@ spec:
             - name: NOMINATIM_PASSWORD
               value: nominatim
             # Limit thread count to prevent OOM during import with large datasets.
-            # 6 threads balances memory usage and import speed for 12Gi container limit.
+            # 6 threads balances memory usage and import speed for the 12Gi container limit.
             # Consistent with Valhalla and Planetiler thread allocation.
             - name: THREADS
-              value: "14"
+              value: "6"
           ports:
             - containerPort: 8080
           resources:
             requests:
-              memory: "8Gi"
+              memory: "12Gi"
+              cpu: "6"
             limits:
-              memory: "10Gi"
-              cpu: "16"
+              memory: "12Gi"
+              cpu: "6"
           volumeMounts:
             # mediagis/nominatim:4.5 bundles PostgreSQL 16
             - name: nominatim-data

@@ -2318,7 +2318,8 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=None):
     If the pod is running, wait for it to become ready (via HTTP health check) before allowing
     scale down. This prevents race condition where scale down/up aborts running imports.
     When Nominatim responds to HTTP requests, the import/initialization is complete.
-    
+    If it does not become ready before the timeout, a RuntimeError is raised.
+
     Args:
         country: Dictionary containing country metadata, must have a 'name' key for workflow status updates
         timeout_seconds: Retained for compatibility only; use NOMINATIM_MAX_WAIT_SECONDS instead.
