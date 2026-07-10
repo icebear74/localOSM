@@ -205,6 +205,11 @@ ${SUDO} chown -R 1000:1000 "${BASE_DIR}/cache"      2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${BASE_DIR}/status"     2>/dev/null || true
 echo "    Directories ready."
 
+if [ -f "${REPO_ROOT}/k8s/style.json" ]; then
+  ${SUDO} cp "${REPO_ROOT}/k8s/style.json" "${BASE_DIR}/tileserver/style.template.json"
+  ${SUDO} chown 1000:1000 "${BASE_DIR}/tileserver/style.template.json" 2>/dev/null || true
+fi
+
 # ---------------------------------------------------------------------------
 # Download and verify all required assets
 # ---------------------------------------------------------------------------

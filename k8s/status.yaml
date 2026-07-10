@@ -100,6 +100,7 @@ data:
     COUNTRIES_FILE = os.path.join(STATUS_DIR, "countries.json")
     STATE_FILE = os.path.join(STATUS_DIR, "library-state.json")
     CONFIG_FILE = os.path.join(STATUS_DIR, "config.json")
+    STYLE_TEMPLATE_FILE = os.path.join(TILESERVER_DIR, "style.template.json")
 
     # PostgreSQL version used by mediagis/nominatim container
     NOMINATIM_POSTGRES_VERSION = "16"
@@ -569,10 +570,11 @@ data:
         "venezuela": (-73.35, 0.64, -59.76, 12.20),
     }
 
-    # MapLibre GL base style – kept in sync with k8s/tileserver.yaml init container.
-    # The status service writes this to /mnt/data/OSM/tileserver/style.json after every
-    # successful tile build, injecting the geographic center of all imported regions so
-    # that the map opens centred on the downloaded area.
+    # MapLibre GL base style fallback. The status service prefers the copied
+    # /mnt/data/OSM/tileserver/style.template.json file (installed from k8s/style.json)
+    # and writes /mnt/data/OSM/tileserver/style.json after each successful tile build,
+    # injecting the geographic center of all imported regions so that the map opens
+    # centred on the downloaded area.
     _STYLE_JSON = (
         '{"version":8,"name":"LocalOSM","sources":{"openmaptiles":{"type":"vector","url":"mbtiles://{v3}"}},'
         '"glyphs":"http://localhost/fonts/{fontstack}/{range}.pbf","layers":['
@@ -635,7 +637,11 @@ data:
 
     def build_style_json(center_lon=None, center_lat=None, zoom=6):
         """Return the MapLibre GL style dict, optionally with initial center and zoom."""
-        style = json.loads(_STYLE_JSON)
+        try:
+            with open(STYLE_TEMPLATE_FILE) as fh:
+                style = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            style = json.loads(_STYLE_JSON)
         if center_lon is not None and center_lat is not None:
             style["center"] = [center_lon, center_lat]
             style["zoom"] = zoom

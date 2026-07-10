@@ -45,6 +45,11 @@ spec:
                echo "[!] Fonts should have been downloaded by scripts/setup-osm.sh"
              fi
 
+             if [ -f /data/style.template.json ] && [ ! -f /data/style.json ]; then
+               cp /data/style.template.json /data/style.json
+               echo "[INFO] TileServer: installed style.json from style.template.json"
+             fi
+
              if [ -f /data/map.mbtiles ]; then
                # Write full config with data
                printf '%s\n' '{"options":{"paths":{"root":"/","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true,"cors":true},"styles":{"osm":{"style":"/data/style.json"}},"data":{"v3":{"mbtiles":"/data/map.mbtiles"}}}' > /data/config.json
