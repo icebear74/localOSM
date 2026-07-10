@@ -39,6 +39,7 @@ NOMINATIM_IMPORT_FINISHED_FILE = os.path.join(
     NOMINATIM_DIR,
     "import-finished",
 )
+_NOMINATIM_WAIT_TIMEOUT_SENTINEL = object()
 # Optional safety cap for Nominatim waits; 0 means wait indefinitely.
 NOMINATIM_MAX_WAIT_SECONDS = int(os.environ.get("NOMINATIM_MAX_WAIT_SECONDS", "0"))
 DEFAULT_NOMINATIM_WAIT_SECONDS = 7200
@@ -2339,7 +2340,7 @@ def wait_for_nominatim_ready(country):
         time.sleep(10)
 
 
-def wait_for_nominatim_import_if_running(country, timeout_seconds=DEFAULT_NOMINATIM_WAIT_SECONDS):
+def wait_for_nominatim_import_if_running(country, timeout_seconds=_NOMINATIM_WAIT_TIMEOUT_SENTINEL):
     """
     Check if Nominatim import is already in progress (after scaling up from previous cycle).
     If the pod is running, wait for it to become ready (via HTTP health check) before allowing
@@ -2359,7 +2360,9 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=DEFAULT_NOMINA
     Raises:
         RuntimeError: If the configured deadline is reached before Nominatim becomes ready.
     """
-    if timeout_seconds not in (None, DEFAULT_NOMINATIM_WAIT_SECONDS):
+    if timeout_seconds is _NOMINATIM_WAIT_TIMEOUT_SENTINEL:
+        timeout_seconds = DEFAULT_NOMINATIM_WAIT_SECONDS
+    else:
         print(
             "DEPRECATION WARNING: timeout_seconds is deprecated; NOMINATIM_MAX_WAIT_SECONDS takes precedence.",
             flush=True,

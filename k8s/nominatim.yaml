@@ -51,8 +51,8 @@ spec:
             - name: NOMINATIM_PASSWORD
               value: nominatim
             # Limit thread count to prevent OOM during import with large datasets.
-            # Keep THREADS at 6 so the importer stays within the memory envelope
-            # used by the larger OSM imports in this stack.
+            # Keep THREADS at 6 to match the 6-core Valhalla and Planetiler import
+            # jobs in this stack and stay within the memory envelope for large imports.
             - name: THREADS
               value: "6"
           ports:
