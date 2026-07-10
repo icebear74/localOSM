@@ -37,13 +37,14 @@ CONFIG_FILE = os.path.join(STATUS_DIR, "config.json")
 NOMINATIM_POSTGRES_VERSION = "16"
 # Optional safety cap for Nominatim waits; 0 means wait indefinitely.
 NOMINATIM_MAX_WAIT_SECONDS = int(os.environ.get("NOMINATIM_MAX_WAIT_SECONDS", "0"))
+DEFAULT_NOMINATIM_WAIT_SECONDS = 7200
 # Log long-running Nominatim waits every 5 minutes.
 NOMINATIM_LOG_INTERVAL_SECONDS = 300
 # Progress value for Nominatim rebuild workflow phase
 NOMINATIM_REBUILD_PROGRESS = 82
 
 
-def _nominatim_wait_deadline(timeout_seconds=None):
+def _get_nominatim_wait_deadline(timeout_seconds=DEFAULT_NOMINATIM_WAIT_SECONDS):
     if NOMINATIM_MAX_WAIT_SECONDS > 0:
         return time.monotonic() + NOMINATIM_MAX_WAIT_SECONDS
     if timeout_seconds is not None and timeout_seconds > 0:
@@ -2275,7 +2276,7 @@ def wait_for_nominatim_pods_to_stop(timeout_seconds=300):
 
 
 def wait_for_nominatim_ready(country):
-    deadline = _nominatim_wait_deadline()
+    deadline = _get_nominatim_wait_deadline()
     wait_start_time = time.monotonic()
     last_log_time = wait_start_time
     while True:
@@ -2319,7 +2320,7 @@ def wait_for_nominatim_ready(country):
         time.sleep(10)
 
 
-def wait_for_nominatim_import_if_running(country, timeout_seconds=None):
+def wait_for_nominatim_import_if_running(country, timeout_seconds=DEFAULT_NOMINATIM_WAIT_SECONDS):
     """
     Check if Nominatim import is already in progress (after scaling up from previous cycle).
     If the pod is running, wait for it to become ready (via HTTP health check) before allowing
@@ -2327,22 +2328,24 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=None):
     When Nominatim responds to HTTP requests, the import/initialization is complete.
     If NOMINATIM_MAX_WAIT_SECONDS is set to a positive value, the wait ends at the configured
     deadline and raises RuntimeError if Nominatim is still not ready.
-    If NOMINATIM_MAX_WAIT_SECONDS is 0 or negative, the wait continues indefinitely unless
-    timeout_seconds is provided for compatibility.
+    If NOMINATIM_MAX_WAIT_SECONDS is 0 or negative, the wait continues for the
+    default timeout (DEFAULT_NOMINATIM_WAIT_SECONDS) unless a different timeout_seconds
+    value is provided.
 
     Args:
         country: Dictionary containing country metadata, must have a 'name' key for workflow status updates
-        timeout_seconds: Retained for compatibility only; use NOMINATIM_MAX_WAIT_SECONDS instead.
+        timeout_seconds: Retained for compatibility only; used only if NOMINATIM_MAX_WAIT_SECONDS
+            is unset or non-positive.
 
     Raises:
         RuntimeError: If the configured deadline is reached before Nominatim becomes ready.
     """
-    if timeout_seconds is not None:
+    if timeout_seconds not in (None, DEFAULT_NOMINATIM_WAIT_SECONDS):
         print(
             "DEPRECATION WARNING: timeout_seconds is deprecated; NOMINATIM_MAX_WAIT_SECONDS takes precedence.",
             flush=True,
         )
-    deadline = _nominatim_wait_deadline(timeout_seconds)
+    deadline = _get_nominatim_wait_deadline(timeout_seconds)
     wait_start_time = time.monotonic()
     last_log_time = wait_start_time
 
@@ -2382,8 +2385,6 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=None):
             )
             
             # If pod has been running for a long time without becoming ready, log warning
-            if elapsed_total > 3600:  # 1 hour
-                print(f"WARNING: Nominatim not responding after {int(elapsed_total)}s. Pod still running.", flush=True)
             last_log_time = _maybe_log_nominatim_wait(
                 last_log_time,
                 f"Nominatim import still running after {int(elapsed_total)}s; last probe: {probe_detail}",

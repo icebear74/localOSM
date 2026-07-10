@@ -51,13 +51,16 @@ spec:
             - name: NOMINATIM_PASSWORD
               value: nominatim
             # Limit thread count to prevent OOM during import with large datasets.
-            # 6 threads balances memory usage and import speed for the 12Gi container limit.
-            # Consistent with Valhalla and Planetiler thread allocation.
+            # The importer is capped at 6 threads so it stays within the memory
+            # envelope used by the larger OSM imports in this stack.
+            # Consistent with the other import jobs that keep thread counts capped.
             - name: THREADS
               value: "6"
           ports:
             - containerPort: 8080
           resources:
+            # Match requests to limits so the scheduler reserves the full import
+            # footprint and the pod is less likely to be evicted mid-import.
             requests:
               memory: "12Gi"
               cpu: "6"
