@@ -2310,6 +2310,7 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=None):
     
     Args:
         country: Dictionary containing country metadata, must have a 'name' key for workflow status updates
+        timeout_seconds: Retained for compatibility only; use NOMINATIM_MAX_WAIT_SECONDS instead.
     """
     _ = timeout_seconds  # Retained for compatibility; waits are governed by NOMINATIM_MAX_WAIT_SECONDS.
     deadline = _nominatim_wait_deadline()
