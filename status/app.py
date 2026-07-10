@@ -2255,8 +2255,7 @@ def wait_for_nominatim_pods_to_stop(timeout_seconds=300):
 
 
 def wait_for_nominatim_ready(country):
-    deadline = time.time() + 7200
-    while time.time() < deadline:
+    while True:
         try:
             deployment = KUBE.get_deployment("nominatim")
         except RuntimeError:
@@ -2286,10 +2285,9 @@ def wait_for_nominatim_ready(country):
             error="",
         )
         time.sleep(10)
-    raise RuntimeError("Timed out waiting for Nominatim to become ready.")
 
 
-def wait_for_nominatim_import_if_running(country, timeout_seconds=7200):
+def wait_for_nominatim_import_if_running(country):
     """
     Check if Nominatim import is already in progress (after scaling up from previous cycle).
     If the pod is running, wait for it to become ready (via HTTP health check) before allowing
@@ -2298,15 +2296,10 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=7200):
     
     Args:
         country: Dictionary containing country metadata, must have a 'name' key for workflow status updates
-        timeout_seconds: Maximum time to wait for import to complete (default 2 hours = 7200 seconds)
-    
-    Raises:
-        RuntimeError: If import does not complete within timeout_seconds
     """
-    deadline = time.monotonic() + timeout_seconds
     wait_start_time = time.monotonic()
-    
-    while time.monotonic() < deadline:
+
+    while True:
         try:
             pods = KUBE.list_pods("app=nominatim")
             pod_running = bool(pods.get("items", []))
@@ -2344,14 +2337,6 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=7200):
         else:
             # Pod not running - safe to proceed (no import in progress)
             return
-    
-    # Timeout reached - provide more helpful error message
-    print(f"ERROR: Timed out waiting for Nominatim to become ready after {timeout_seconds}s", flush=True)
-    raise RuntimeError(
-        f"Timed out waiting for Nominatim import to complete after {timeout_seconds}s. "
-        "The service did not become ready. The import may be stuck. "
-        "You can manually clear this by restarting the pod or using the /api/library/reset-import endpoint."
-    )
 
 
 def rebuild_nominatim(country):
