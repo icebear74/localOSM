@@ -25,7 +25,7 @@ spec:
               cpu: "4"         # Garantiert 4 CPU-Kerne
             limits:
               memory: "20Gi"   # Maximaler Puffer für Spitzen (z.B. Index-Erstellung)
-              cpu: "8"
+              cpu: "14"
           args:
             - "-c"
             - "shared_buffers=8GB"               # ~25% deines RAMs
