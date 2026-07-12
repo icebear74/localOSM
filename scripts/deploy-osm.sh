@@ -133,9 +133,9 @@ clean_data_directory() {
   if [ "$PRESERVE_DOWNLOADS" = true ]; then
     shopt -s dotglob nullglob
     for entry in "${BASE_DIR}"/*; do
-      case "$entry" in
-        "${BASE_DIR}/import"|"${BASE_DIR}/library") continue ;;
-      esac
+      if [ "$entry" = "${BASE_DIR}/import" ] || [ "$entry" = "${BASE_DIR}/library" ]; then
+        continue
+      fi
       ${SUDO} rm -rf -- "$entry"
     done
   else

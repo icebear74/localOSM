@@ -50,7 +50,7 @@ import datetime
 import sys
 
 url, dest = sys.argv[1], sys.argv[2]
-timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="microseconds")
 with open(dest + ".meta", "w", encoding="utf-8") as fh:
     fh.write(f"downloaded_at={timestamp}\n")
     fh.write(f"source={url}\n")

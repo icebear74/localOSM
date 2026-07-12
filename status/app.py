@@ -2314,7 +2314,7 @@ def wait_for_nominatim_ready(country):
         time.sleep(10)
 
 
-def wait_for_nominatim_import_if_running():
+def wait_for_nominatim_import_if_running(country):
     """
     Wait for Nominatim to finish any current import/initialization cycle before
     the rebuild workflow scales the deployment down or promotes new data.
@@ -2336,6 +2336,15 @@ def wait_for_nominatim_import_if_running():
                 print("Nominatim import/initialization complete - service is ready", flush=True)
                 return
 
+            write_workflow_state(
+                running=True,
+                phase="search",
+                progress=NOMINATIM_REBUILD_PROGRESS,
+                message="Waiting for Nominatim to finish importing the existing dataset ...",
+                detail=f"Last probe: {probe_detail}",
+                country=country["name"],
+                error="",
+            )
             last_log_time = _maybe_log_nominatim_wait(
                 last_log_time,
                 f"Nominatim import still running after {int(time.monotonic() - wait_start_time)}s; last probe: {probe_detail}",
@@ -2346,7 +2355,7 @@ def wait_for_nominatim_import_if_running():
 
 
 def rebuild_nominatim(country):
-    wait_for_nominatim_import_if_running()
+    wait_for_nominatim_import_if_running(country)
 
     if _nominatim_import_finished():
         write_workflow_state(
