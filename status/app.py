@@ -1791,12 +1791,18 @@ def clear_directory(path):
 
 
 def wait_for_job_deletion(name):
+    wait_start_time = time.monotonic()
+    last_log_time = wait_start_time
     while True:
         try:
             KUBE.get_job(name)
         except RuntimeError as exc:
             if "404" in str(exc):
                 return
+        last_log_time = _maybe_log_nominatim_wait(
+            last_log_time,
+            f"Still waiting for job deletion: {name} ({int(time.monotonic() - wait_start_time)}s)",
+        )
         time.sleep(2)
 
 
@@ -2253,6 +2259,8 @@ def scale_nominatim(replicas):
 
 
 def wait_for_nominatim_pods_to_stop():
+    wait_start_time = time.monotonic()
+    last_log_time = wait_start_time
     while True:
         try:
             pods = KUBE.list_pods("app=nominatim")
@@ -2261,6 +2269,10 @@ def wait_for_nominatim_pods_to_stop():
             continue
         if not pods.get("items"):
             return
+        last_log_time = _maybe_log_nominatim_wait(
+            last_log_time,
+            f"Still waiting for Nominatim pods to stop ({int(time.monotonic() - wait_start_time)}s)",
+        )
         time.sleep(3)
 
 def wait_for_nominatim_ready(country):

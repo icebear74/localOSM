@@ -182,16 +182,16 @@ if [ "$CLEAN" = true ]; then
 
   echo ">>> Deleting contents of data directory ${BASE_DIR} …"
   if [ "$PRESERVE_DOWNLOADS" = true ]; then
-    ${SUDO} bash -lc '
+    BASE_DIR_PATH="${BASE_DIR}" ${SUDO} bash -lc '
       set -e
       shopt -s dotglob nullglob
-      for entry in "${0}"/*; do
+      for entry in "${BASE_DIR_PATH}"/*; do
         case "$entry" in
-          "${0}/import"|"${0}/library") continue ;;
+          "${BASE_DIR_PATH}/import"|"${BASE_DIR_PATH}/library") continue ;;
         esac
         rm -rf -- "$entry"
       done
-    ' "${BASE_DIR}"
+    '
   else
     ${SUDO} find "${BASE_DIR:?}" -mindepth 1 -delete
   fi

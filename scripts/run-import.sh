@@ -32,6 +32,31 @@ if [ -z "$URL" ]; then
   exit 1
 fi
 
+write_metadata_file() {
+  local url="$1"
+  local dest="$2"
+  local python_bin=""
+  if command -v python3 >/dev/null 2>&1; then
+    python_bin="python3"
+  elif command -v python >/dev/null 2>&1; then
+    python_bin="python"
+  else
+    echo "Neither python3 nor python found" >&2
+    return 1
+  fi
+
+  "$python_bin" - "$url" "$dest" <<'PY'
+import datetime
+import sys
+
+url, dest = sys.argv[1], sys.argv[2]
+with open(dest + ".meta", "w", encoding="utf-8") as fh:
+    fh.write(f"downloaded_at={datetime.datetime.utcnow().isoformat()}Z\n")
+    fh.write(f"source={url}\n")
+    fh.write(f"path={dest}\n")
+PY
+}
+
 mkdir -p "$(dirname "$DEST")"
 
 echo "=== localOSM – Download OSM PBF ==="
@@ -80,26 +105,7 @@ PY
 fi
 
 # Write metadata file next to the PBF
-PYTHON_BIN=""
-if command -v python3 >/dev/null 2>&1; then
-  PYTHON_BIN="python3"
-elif command -v python >/dev/null 2>&1; then
-  PYTHON_BIN="python"
-else
-  echo "Neither python3 nor python found" >&2
-  exit 1
-fi
-
-"$PYTHON_BIN" - "$URL" "$DEST" <<'PY'
-import datetime
-import sys
-
-url, dest = sys.argv[1], sys.argv[2]
-with open(dest + ".meta", "w", encoding="utf-8") as fh:
-    fh.write(f"downloaded_at={datetime.datetime.utcnow().isoformat()}Z\n")
-    fh.write(f"source={url}\n")
-    fh.write(f"path={dest}\n")
-PY
+write_metadata_file "$URL" "$DEST"
 
 PBF_SIZE=$(du -sh "$DEST" | cut -f1)
 echo "Downloaded ${PBF_SIZE} → ${DEST}"
