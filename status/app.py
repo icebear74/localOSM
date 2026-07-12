@@ -39,20 +39,15 @@ NOMINATIM_IMPORT_FINISHED_FILE = os.path.join(
     NOMINATIM_DIR,
     "import-finished",
 )
-# Optional safety cap for Nominatim waits; 0 means wait indefinitely.
-NOMINATIM_MAX_WAIT_SECONDS = int(os.environ.get("NOMINATIM_MAX_WAIT_SECONDS", "0"))
-DEFAULT_NOMINATIM_WAIT_SECONDS = 7200
 # Log long-running Nominatim waits every 5 minutes.
 NOMINATIM_LOG_INTERVAL_SECONDS = 300
 # Progress value for Nominatim rebuild workflow phase
 NOMINATIM_REBUILD_PROGRESS = 82
 
 
-def _get_nominatim_wait_deadline(timeout_seconds=DEFAULT_NOMINATIM_WAIT_SECONDS):
-    if NOMINATIM_MAX_WAIT_SECONDS > 0:
-        return time.monotonic() + NOMINATIM_MAX_WAIT_SECONDS
-    if timeout_seconds is not None and timeout_seconds > 0:
-        return time.monotonic() + timeout_seconds
+def _get_nominatim_wait_deadline(timeout_seconds=None):
+    # Keep waiting until the service is ready; hard deadlines are disabled for
+    # long-running offline builds on constrained hardware.
     return None
 
 
@@ -1801,16 +1796,14 @@ def clear_directory(path):
             os.unlink(full_path)
 
 
-def wait_for_job_deletion(name, timeout_seconds=60):
-    deadline = time.time() + timeout_seconds
-    while time.time() < deadline:
+def wait_for_job_deletion(name, timeout_seconds=None):
+    while True:
         try:
             KUBE.get_job(name)
         except RuntimeError as exc:
             if "404" in str(exc):
                 return
         time.sleep(2)
-    raise RuntimeError(f"Timed out waiting for job deletion: {name}")
 
 
 def download_country_file(country):
@@ -1899,7 +1892,7 @@ def merge_library_files(country, records=None):
     if len(input_paths) == 1:
         shutil.copyfile(input_paths[0], tmp_path)
     else:
-        run_command(["osmium", "merge", "--overwrite", "-o", tmp_path, "-f", "pbf", *input_paths], timeout=7200)
+        run_command(["osmium", "merge", "--overwrite", "-o", tmp_path, "-f", "pbf", *input_paths], timeout=None)
     validate_pbf_file(tmp_path, label="Merged library extract")
     os.replace(tmp_path, MERGED_PBF)
 
@@ -2118,8 +2111,7 @@ def rebuild_valhalla(country):
     KUBE.create_job(build_valhalla_job_manifest())
 
     job_start = time.time()
-    deadline = job_start + 21600
-    while time.time() < deadline:
+    while True:
         try:
             job_data = KUBE.get_job("valhalla-import")
         except RuntimeError:
@@ -2185,7 +2177,6 @@ def rebuild_valhalla(country):
             error="",
         )
         time.sleep(5)
-    raise RuntimeError("Timed out waiting for the Valhalla import job to finish.")
 
 
 def rebuild_tileserver(country):
@@ -2203,8 +2194,7 @@ def rebuild_tileserver(country):
     KUBE.create_job(build_tileserver_job_manifest())
 
     job_start = time.time()
-    deadline = job_start + 21600
-    while time.time() < deadline:
+    while True:
         try:
             job_data = KUBE.get_job("tilemaker-import")
         except RuntimeError:
@@ -2262,16 +2252,14 @@ def rebuild_tileserver(country):
             error="",
         )
         time.sleep(10)
-    raise RuntimeError("Timed out waiting for the TileServer import job to finish.")
 
 
 def scale_nominatim(replicas):
     KUBE.scale_deployment("nominatim", replicas)
 
 
-def wait_for_nominatim_pods_to_stop(timeout_seconds=300):
-    deadline = time.time() + timeout_seconds
-    while time.time() < deadline:
+def wait_for_nominatim_pods_to_stop(timeout_seconds=None):
+    while True:
         try:
             pods = KUBE.list_pods("app=nominatim")
         except RuntimeError:
@@ -2280,7 +2268,6 @@ def wait_for_nominatim_pods_to_stop(timeout_seconds=300):
         if not pods.get("items"):
             return
         time.sleep(3)
-    raise RuntimeError("Timed out waiting for the Nominatim pod to stop.")
 
 
 def is_nominatim_import_running():
@@ -2295,15 +2282,9 @@ def is_nominatim_import_running():
 
 
 def wait_for_nominatim_ready(country):
-    deadline = _get_nominatim_wait_deadline()
     wait_start_time = time.monotonic()
     last_log_time = wait_start_time
     while True:
-        if deadline is not None and time.monotonic() >= deadline:
-            raise RuntimeError(
-                "Timed out waiting for Nominatim to become ready. "
-                "Increase NOMINATIM_MAX_WAIT_SECONDS to wait longer."
-            )
         try:
             deployment = KUBE.get_deployment("nominatim")
         except RuntimeError:
@@ -2341,42 +2322,13 @@ def wait_for_nominatim_ready(country):
 
 def wait_for_nominatim_import_if_running(country, timeout_seconds=None):
     """
-    Check if Nominatim import is already in progress (after scaling up from previous cycle).
-    If the pod is running, wait for it to become ready (via HTTP health check) before allowing
-    scale down. This prevents race condition where scale down/up aborts running imports.
-    When Nominatim responds to HTTP requests, the import/initialization is complete.
-    If NOMINATIM_MAX_WAIT_SECONDS is set to a positive value, the wait ends at the configured
-    deadline and raises RuntimeError if Nominatim is still not ready.
-    If NOMINATIM_MAX_WAIT_SECONDS is 0 or negative, the wait continues for the
-    default timeout (DEFAULT_NOMINATIM_WAIT_SECONDS) unless a different timeout_seconds
-    value is provided.
-
-    Args:
-        country: Dictionary containing country metadata, must have a 'name' key for workflow status updates
-        timeout_seconds: Retained for compatibility only; used only if NOMINATIM_MAX_WAIT_SECONDS
-            is unset or non-positive.
-
-    Raises:
-        RuntimeError: If the configured deadline is reached before Nominatim becomes ready.
+    Wait for Nominatim to finish any current import/initialization cycle before
+    the rebuild workflow scales the deployment down or promotes new data.
     """
-    warn_timeout_deprecated = timeout_seconds is not None
-    if timeout_seconds is None:
-        timeout_seconds = DEFAULT_NOMINATIM_WAIT_SECONDS
-    if warn_timeout_deprecated:
-        print(
-            "DEPRECATION WARNING: timeout_seconds is deprecated; NOMINATIM_MAX_WAIT_SECONDS takes precedence.",
-            flush=True,
-        )
-    deadline = _get_nominatim_wait_deadline(timeout_seconds)
     wait_start_time = time.monotonic()
     last_log_time = wait_start_time
 
     while True:
-        if deadline is not None and time.monotonic() >= deadline:
-            raise RuntimeError(
-                "Timed out waiting for Nominatim import to complete. "
-                "Increase NOMINATIM_MAX_WAIT_SECONDS to wait longer."
-            )
         try:
             pods = KUBE.list_pods("app=nominatim")
             pod_running = bool(pods.get("items", []))
@@ -2419,19 +2371,7 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=None):
 
 
 def rebuild_nominatim(country):
-    # If Nominatim is already importing, continue that import instead of wiping it.
-    if is_nominatim_import_running():
-        write_workflow_state(
-            running=True,
-            phase="search",
-            progress=NOMINATIM_REBUILD_PROGRESS,
-            message="Nominatim import already started - continuing ...",
-            detail="An existing import is still running, so the current data directory is kept.",
-            country=country["name"],
-            error="",
-        )
-        wait_for_nominatim_ready(country)
-        return
+    wait_for_nominatim_import_if_running(country)
 
     if _nominatim_import_finished():
         write_workflow_state(
@@ -2462,31 +2402,8 @@ def rebuild_nominatim(country):
 
 def run_parallel_build_steps(country, records=None):
     merge_library_files(country, records=records)
-    valhalla_err = [None]
-    tileserver_err = [None]
-
-    def _valhalla_thread():
-        try:
-            rebuild_valhalla(country)
-        except Exception as exc:  # noqa: BLE001
-            valhalla_err[0] = exc
-
-    def _tileserver_thread():
-        try:
-            rebuild_tileserver(country)
-        except Exception as exc:  # noqa: BLE001
-            tileserver_err[0] = exc
-
-    t_v = threading.Thread(target=_valhalla_thread, daemon=True)
-    t_t = threading.Thread(target=_tileserver_thread, daemon=True)
-    t_v.start()
-    t_t.start()
-    t_v.join()
-    t_t.join()
-    if valhalla_err[0]:
-        raise valhalla_err[0]
-    if tileserver_err[0]:
-        raise tileserver_err[0]
+    rebuild_valhalla(country)
+    rebuild_tileserver(country)
     rebuild_nominatim(country)
     mark_library_ready()
 

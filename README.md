@@ -52,6 +52,11 @@ bash scripts/deploy-osm.sh
 ```
 
 This creates the host directories, sets permissions, and installs the stack. Re-running it updates an existing installation.
+Use `--preserve-downloads` with `--clean` to keep downloaded extracts and retry the build without fetching them again.
+
+```bash
+bash scripts/deploy-osm.sh --clean --preserve-downloads
+```
 
 ### 2 – Load OSM data
 
@@ -60,6 +65,7 @@ bash scripts/run-import.sh --url https://download.geofabrik.de/europe/germany/be
 ```
 
 The script downloads the PBF file to `/mnt/data/OSM/import/planet.osm.pbf` with a live progress bar, then starts the Valhalla import job automatically.
+It also applies the Valhalla import ConfigMap before starting the job.
 
 Monitor the import:
 

@@ -6,6 +6,7 @@ NAMESPACE="osm"
 BASE_DIR="/mnt/data/OSM"
 DEPLOYMENTS=(postgres tileserver-gl nominatim valhalla status web)
 CLEAN=false
+PRESERVE_DOWNLOADS=false
 NODE_URL=""
 
 # ---------------------------------------------------------------------------
@@ -13,12 +14,13 @@ NODE_URL=""
 # ---------------------------------------------------------------------------
 usage() {
   cat <<EOF
-Usage: $0 [--clean] [--node-url <url>]
+Usage: $0 [--clean] [--preserve-downloads] [--node-url <url>]
 
 Options:
   --clean             Remove the existing Kubernetes namespace, all OSM data on
                       disk, and perform a clean install from scratch. You will
                       be prompted before any data is deleted.
+  --preserve-downloads Keep already downloaded import/cache files when cleaning.
   --node-url <url>    Set the node base URL used for service links in the
                       status dashboard (e.g. http://192.168.1.100). If omitted,
                       the IP is auto-detected from the first cluster node.
@@ -32,6 +34,7 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --clean) CLEAN=true ; shift ;;
+    --preserve-downloads) PRESERVE_DOWNLOADS=true ; shift ;;
     --node-url) NODE_URL="$2" ; shift 2 ;;
     -h|--help) usage ; exit 0 ;;
     *) echo "Unknown option: $1" >&2 ; usage >&2 ; exit 1 ;;
@@ -136,7 +139,11 @@ if [ "$CLEAN" = true ]; then
   echo ""
   echo "The following will be deleted:"
   echo "  • Kubernetes namespace '${NAMESPACE}' and ALL its resources (pods, services, …)"
-  echo "  • All OSM data under ${BASE_DIR}"
+  if [ "$PRESERVE_DOWNLOADS" = true ]; then
+    echo "  • All OSM data under ${BASE_DIR} except existing downloads/cache files"
+  else
+    echo "  • All OSM data under ${BASE_DIR}"
+  fi
   echo ""
   read -r -p "Type 'yes' to continue, anything else to abort: " confirm
   if [ "$confirm" != "yes" ]; then
@@ -174,7 +181,20 @@ if [ "$CLEAN" = true ]; then
   fi
 
   echo ">>> Deleting contents of data directory ${BASE_DIR} …"
-  ${SUDO} find "${BASE_DIR:?}" -mindepth 1 -delete
+  if [ "$PRESERVE_DOWNLOADS" = true ]; then
+    ${SUDO} bash -lc '
+      set -e
+      shopt -s dotglob nullglob
+      for entry in "${0}"/*; do
+        case "$entry" in
+          "${0}/import"|"${0}/library") continue ;;
+        esac
+        rm -rf -- "$entry"
+      done
+    ' "${BASE_DIR}"
+  else
+    ${SUDO} find "${BASE_DIR:?}" -mindepth 1 -delete
+  fi
   echo "    Data directory contents deleted."
   echo ""
 fi
@@ -249,6 +269,7 @@ kubectl apply -f "${REPO_ROOT}/k8s/namespace.yaml"
 kubectl apply -f "${REPO_ROOT}/k8s/postgres.yaml"
 kubectl apply -f "${REPO_ROOT}/k8s/tileserver.yaml"
 kubectl apply -f "${REPO_ROOT}/k8s/nominatim.yaml"
+kubectl apply -f "${REPO_ROOT}/k8s/valhalla-import-config.yaml"
 kubectl apply -f "${REPO_ROOT}/k8s/valhalla-config.yaml"
 kubectl apply -f "${REPO_ROOT}/k8s/valhalla.yaml"
 kubectl apply -f "${REPO_ROOT}/k8s/status.yaml"

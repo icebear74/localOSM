@@ -80,14 +80,32 @@ PY
 fi
 
 # Write metadata file next to the PBF
-python3 - <<PY "$URL" "$DEST" 2>/dev/null || python - <<PY "$URL" "$DEST"
-import sys, datetime
+if command -v python3 >/dev/null 2>&1; then
+  python3 - "$URL" "$DEST" <<'PY'
+import datetime
+import sys
+
 url, dest = sys.argv[1], sys.argv[2]
 with open(dest + ".meta", "w", encoding="utf-8") as fh:
     fh.write(f"downloaded_at={datetime.datetime.utcnow().isoformat()}Z\n")
     fh.write(f"source={url}\n")
     fh.write(f"path={dest}\n")
 PY
+elif command -v python >/dev/null 2>&1; then
+  python - "$URL" "$DEST" <<'PY'
+import datetime
+import sys
+
+url, dest = sys.argv[1], sys.argv[2]
+with open(dest + ".meta", "w", encoding="utf-8") as fh:
+    fh.write(f"downloaded_at={datetime.datetime.utcnow().isoformat()}Z\n")
+    fh.write(f"source={url}\n")
+    fh.write(f"path={dest}\n")
+PY
+else
+  echo "Neither python3 nor python found" >&2
+  exit 1
+fi
 
 PBF_SIZE=$(du -sh "$DEST" | cut -f1)
 echo "Downloaded ${PBF_SIZE} → ${DEST}"
@@ -95,6 +113,7 @@ echo "Downloaded ${PBF_SIZE} → ${DEST}"
 if command -v kubectl >/dev/null 2>&1 && kubectl cluster-info >/dev/null 2>&1; then
   echo ""
   echo "=== Starting Valhalla import job ==="
+  kubectl -n osm apply -f "${REPO_ROOT}/k8s/valhalla-import-config.yaml" >/dev/null
   kubectl -n osm delete job valhalla-import --ignore-not-found >/dev/null 2>&1 || true
   kubectl -n osm apply -f "${REPO_ROOT}/k8s/valhalla-import-job.yaml" >/dev/null
   echo "Import job started. Monitor progress with:"
@@ -107,6 +126,6 @@ else
   echo ""
   echo "kubectl not available or cluster unreachable."
   echo "Start the import job manually later with:"
+  echo "  kubectl -n osm apply -f ${REPO_ROOT}/k8s/valhalla-import-config.yaml"
   echo "  kubectl -n osm apply -f ${REPO_ROOT}/k8s/valhalla-import-job.yaml"
 fi
-
