@@ -80,32 +80,26 @@ PY
 fi
 
 # Write metadata file next to the PBF
+PYTHON_BIN=""
 if command -v python3 >/dev/null 2>&1; then
-  python3 - "$URL" "$DEST" <<'PY'
-import datetime
-import sys
-
-url, dest = sys.argv[1], sys.argv[2]
-with open(dest + ".meta", "w", encoding="utf-8") as fh:
-    fh.write(f"downloaded_at={datetime.datetime.utcnow().isoformat()}Z\n")
-    fh.write(f"source={url}\n")
-    fh.write(f"path={dest}\n")
-PY
+  PYTHON_BIN="python3"
 elif command -v python >/dev/null 2>&1; then
-  python - "$URL" "$DEST" <<'PY'
-import datetime
-import sys
-
-url, dest = sys.argv[1], sys.argv[2]
-with open(dest + ".meta", "w", encoding="utf-8") as fh:
-    fh.write(f"downloaded_at={datetime.datetime.utcnow().isoformat()}Z\n")
-    fh.write(f"source={url}\n")
-    fh.write(f"path={dest}\n")
-PY
+  PYTHON_BIN="python"
 else
   echo "Neither python3 nor python found" >&2
   exit 1
 fi
+
+"$PYTHON_BIN" - "$URL" "$DEST" <<'PY'
+import datetime
+import sys
+
+url, dest = sys.argv[1], sys.argv[2]
+with open(dest + ".meta", "w", encoding="utf-8") as fh:
+    fh.write(f"downloaded_at={datetime.datetime.utcnow().isoformat()}Z\n")
+    fh.write(f"source={url}\n")
+    fh.write(f"path={dest}\n")
+PY
 
 PBF_SIZE=$(du -sh "$DEST" | cut -f1)
 echo "Downloaded ${PBF_SIZE} → ${DEST}"

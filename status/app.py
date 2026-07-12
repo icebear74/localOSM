@@ -45,12 +45,6 @@ NOMINATIM_LOG_INTERVAL_SECONDS = 300
 NOMINATIM_REBUILD_PROGRESS = 82
 
 
-def _get_nominatim_wait_deadline(timeout_seconds=None):
-    # Keep waiting until the service is ready; hard deadlines are disabled for
-    # long-running offline builds on constrained hardware.
-    return None
-
-
 def _maybe_log_nominatim_wait(last_log_time, message):
     now = time.monotonic()
     if now - last_log_time >= NOMINATIM_LOG_INTERVAL_SECONDS:
@@ -1796,7 +1790,7 @@ def clear_directory(path):
             os.unlink(full_path)
 
 
-def wait_for_job_deletion(name, timeout_seconds=None):
+def wait_for_job_deletion(name):
     while True:
         try:
             KUBE.get_job(name)
@@ -2258,7 +2252,7 @@ def scale_nominatim(replicas):
     KUBE.scale_deployment("nominatim", replicas)
 
 
-def wait_for_nominatim_pods_to_stop(timeout_seconds=None):
+def wait_for_nominatim_pods_to_stop():
     while True:
         try:
             pods = KUBE.list_pods("app=nominatim")
@@ -2268,18 +2262,6 @@ def wait_for_nominatim_pods_to_stop(timeout_seconds=None):
         if not pods.get("items"):
             return
         time.sleep(3)
-
-
-def is_nominatim_import_running():
-    try:
-        pods = KUBE.list_pods("app=nominatim")
-    except RuntimeError:
-        return False
-    if not pods.get("items"):
-        return False
-    ok, _ = check_http("http://nominatim.osm.svc.cluster.local:8080/")
-    return not ok
-
 
 def wait_for_nominatim_ready(country):
     wait_start_time = time.monotonic()
@@ -2320,7 +2302,7 @@ def wait_for_nominatim_ready(country):
         time.sleep(10)
 
 
-def wait_for_nominatim_import_if_running(country, timeout_seconds=None):
+def wait_for_nominatim_import_if_running():
     """
     Wait for Nominatim to finish any current import/initialization cycle before
     the rebuild workflow scales the deployment down or promotes new data.
@@ -2333,45 +2315,26 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=None):
             pods = KUBE.list_pods("app=nominatim")
             pod_running = bool(pods.get("items", []))
         except RuntimeError:
-            # Kubernetes API temporarily unavailable, retry after delay
             time.sleep(5)
             continue
-        
+
         if pod_running:
-            # Pod is running - check if Nominatim service is ready (health check)
-            # When Nominatim responds to HTTP requests, import/initialization is complete
             ok, probe_detail = check_http("http://nominatim.osm.svc.cluster.local:8080/")
             if ok:
-                # Nominatim is ready, import is complete
-                print(f"Nominatim import/initialization complete - service is ready", flush=True)
+                print("Nominatim import/initialization complete - service is ready", flush=True)
                 return
-            
-            # Pod is running but not ready yet
-            elapsed_total = time.monotonic() - wait_start_time
-            write_workflow_state(
-                running=True,
-                phase="search",
-                progress=NOMINATIM_REBUILD_PROGRESS,
-                message="Refreshing Nominatim for address and POI search ...",
-                detail=f"Waiting for Nominatim to become ready (waiting {int(elapsed_total)}s)... {probe_detail}",
-                country=country["name"],
-                error="",
-            )
-            
-            # If pod has been running for a long time without becoming ready, log warning
+
             last_log_time = _maybe_log_nominatim_wait(
                 last_log_time,
-                f"Nominatim import still running after {int(elapsed_total)}s; last probe: {probe_detail}",
+                f"Nominatim import still running after {int(time.monotonic() - wait_start_time)}s; last probe: {probe_detail}",
             )
-
             time.sleep(10)
         else:
-            # Pod not running - safe to proceed (no import in progress)
             return
 
 
 def rebuild_nominatim(country):
-    wait_for_nominatim_import_if_running(country)
+    wait_for_nominatim_import_if_running()
 
     if _nominatim_import_finished():
         write_workflow_state(
