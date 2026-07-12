@@ -50,8 +50,9 @@ import datetime
 import sys
 
 url, dest = sys.argv[1], sys.argv[2]
+timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
 with open(dest + ".meta", "w", encoding="utf-8") as fh:
-    fh.write(f"downloaded_at={datetime.datetime.utcnow().isoformat()}Z\n")
+    fh.write(f"downloaded_at={timestamp}\n")
     fh.write(f"source={url}\n")
     fh.write(f"path={dest}\n")
 PY

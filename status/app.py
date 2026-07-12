@@ -2377,6 +2377,9 @@ def rebuild_nominatim(country):
 
 def run_parallel_build_steps(country, records=None):
     merge_library_files(country, records=records)
+    # Run the heavy import jobs one after another; this node does not have
+    # enough spare capacity to build Valhalla and TileServer reliably in
+    # parallel without slowing down or stalling the workflow.
     rebuild_valhalla(country)
     rebuild_tileserver(country)
     rebuild_nominatim(country)
