@@ -128,6 +128,23 @@ wait_for_namespace_deletion() {
   return 0
 }
 
+clean_data_directory() {
+  echo ">>> Deleting contents of data directory ${BASE_DIR} …"
+  if [ "$PRESERVE_DOWNLOADS" = true ]; then
+    shopt -s dotglob nullglob
+    for entry in "${BASE_DIR}"/*; do
+      case "$entry" in
+        "${BASE_DIR}/import"|"${BASE_DIR}/library") continue ;;
+      esac
+      ${SUDO} rm -rf -- "$entry"
+    done
+  else
+    ${SUDO} find "${BASE_DIR:?}" -mindepth 1 -delete
+  fi
+  echo "    Data directory contents deleted."
+  echo ""
+}
+
 # ---------------------------------------------------------------------------
 # Clean start (optional)
 # ---------------------------------------------------------------------------
@@ -180,23 +197,7 @@ if [ "$CLEAN" = true ]; then
     fi
   fi
 
-  echo ">>> Deleting contents of data directory ${BASE_DIR} …"
-  if [ "$PRESERVE_DOWNLOADS" = true ]; then
-    BASE_DIR_PATH="${BASE_DIR}" ${SUDO} bash -lc '
-      set -e
-      shopt -s dotglob nullglob
-      for entry in "${BASE_DIR_PATH}"/*; do
-        case "$entry" in
-          "${BASE_DIR_PATH}/import"|"${BASE_DIR_PATH}/library") continue ;;
-        esac
-        rm -rf -- "$entry"
-      done
-    '
-  else
-    ${SUDO} find "${BASE_DIR:?}" -mindepth 1 -delete
-  fi
-  echo "    Data directory contents deleted."
-  echo ""
+  clean_data_directory
 fi
 
 # ---------------------------------------------------------------------------
