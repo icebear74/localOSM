@@ -21,20 +21,20 @@ spec:
           imagePullPolicy: IfNotPresent
           resources:
             requests:
-              memory: "6Gi"   # Garantiert der DB diesen Speicher
+              memory: "8Gi"   # Garantiert der DB diesen Speicher
               cpu: "4"         # Garantiert 4 CPU-Kerne
             limits:
-              memory: "12Gi"   # Maximaler Puffer für Spitzen (z.B. Index-Erstellung)
+              memory: "16Gi"   # Maximaler Puffer für Spitzen (z.B. Index-Erstellung)
               cpu: "14"
           args:
             - "-c"
-            - "shared_buffers=2GB"               # ~25% deines RAMs
+            - "shared_buffers=8GB"               # ~25% deines RAMs
             - "-c"
-            - "maintenance_work_mem=4GB"         # Wichtig für Index-Erstellung beim Import
+            - "maintenance_work_mem=8GB"         # Wichtig für Index-Erstellung beim Import
             - "-c"
             - "work_mem=64MB"
             - "-c"
-            - "autovacuum_work_mem=1GB"
+            - "autovacuum_work_mem=2GB"
             - "-c"
             - "synchronous_commit=off"           # Riesiger Boost für Imports (Sicherheit egal beim Import)
             - "-c"

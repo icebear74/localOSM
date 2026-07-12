@@ -35,8 +35,37 @@ CONFIG_FILE = os.path.join(STATUS_DIR, "config.json")
 
 # PostgreSQL version used by mediagis/nominatim container
 NOMINATIM_POSTGRES_VERSION = "16"
+NOMINATIM_IMPORT_FINISHED_FILE = os.path.join(
+    NOMINATIM_DIR,
+    "import-finished",
+)
+# Optional safety cap for Nominatim waits; 0 means wait indefinitely.
+NOMINATIM_MAX_WAIT_SECONDS = int(os.environ.get("NOMINATIM_MAX_WAIT_SECONDS", "0"))
+DEFAULT_NOMINATIM_WAIT_SECONDS = 7200
+# Log long-running Nominatim waits every 5 minutes.
+NOMINATIM_LOG_INTERVAL_SECONDS = 300
 # Progress value for Nominatim rebuild workflow phase
 NOMINATIM_REBUILD_PROGRESS = 82
+
+
+def _get_nominatim_wait_deadline(timeout_seconds=DEFAULT_NOMINATIM_WAIT_SECONDS):
+    if NOMINATIM_MAX_WAIT_SECONDS > 0:
+        return time.monotonic() + NOMINATIM_MAX_WAIT_SECONDS
+    if timeout_seconds is not None and timeout_seconds > 0:
+        return time.monotonic() + timeout_seconds
+    return None
+
+
+def _maybe_log_nominatim_wait(last_log_time, message):
+    now = time.monotonic()
+    if now - last_log_time >= NOMINATIM_LOG_INTERVAL_SECONDS:
+        print(message, flush=True)
+        return now
+    return last_log_time
+
+
+def _nominatim_import_finished():
+    return os.path.isfile(NOMINATIM_IMPORT_FINISHED_FILE)
 
 CONFIG_DEFAULTS = {
     "node_url": "",
@@ -2254,9 +2283,27 @@ def wait_for_nominatim_pods_to_stop(timeout_seconds=300):
     raise RuntimeError("Timed out waiting for the Nominatim pod to stop.")
 
 
+def is_nominatim_import_running():
+    try:
+        pods = KUBE.list_pods("app=nominatim")
+    except RuntimeError:
+        return False
+    if not pods.get("items"):
+        return False
+    ok, _ = check_http("http://nominatim.osm.svc.cluster.local:8080/")
+    return not ok
+
+
 def wait_for_nominatim_ready(country):
-    deadline = time.time() + 7200
-    while time.time() < deadline:
+    deadline = _get_nominatim_wait_deadline()
+    wait_start_time = time.monotonic()
+    last_log_time = wait_start_time
+    while True:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise RuntimeError(
+                "Timed out waiting for Nominatim to become ready. "
+                "Increase NOMINATIM_MAX_WAIT_SECONDS to wait longer."
+            )
         try:
             deployment = KUBE.get_deployment("nominatim")
         except RuntimeError:
@@ -2264,14 +2311,14 @@ def wait_for_nominatim_ready(country):
             continue
         status = deployment.get("status", {})
         ready = status.get("readyReplicas", 0)
-        ok, detail = check_http("http://nominatim.osm.svc.cluster.local:8080/")
+        ok, probe_detail = check_http("http://nominatim.osm.svc.cluster.local:8080/")
         if ready >= 1 and ok:
             write_workflow_state(
                 running=True,
                 phase="search",
                 progress=95,
                 message="Nominatim address + POI search is ready.",
-                detail=detail,
+                detail=probe_detail,
                 country=country["name"],
                 error="",
             )
@@ -2281,32 +2328,55 @@ def wait_for_nominatim_ready(country):
             phase="search",
             progress=88,
             message="Nominatim is importing the merged dataset ...",
-            detail=f"Ready replicas: {ready}. Last probe: {detail}",
+            detail=f"Ready replicas: {ready}. Last probe: {probe_detail}",
             country=country["name"],
             error="",
         )
+        last_log_time = _maybe_log_nominatim_wait(
+            last_log_time,
+            f"Nominatim still importing after {int(time.monotonic() - wait_start_time)}s; last probe: {probe_detail}",
+        )
         time.sleep(10)
-    raise RuntimeError("Timed out waiting for Nominatim to become ready.")
 
 
-def wait_for_nominatim_import_if_running(country, timeout_seconds=7200):
+def wait_for_nominatim_import_if_running(country, timeout_seconds=None):
     """
     Check if Nominatim import is already in progress (after scaling up from previous cycle).
     If the pod is running, wait for it to become ready (via HTTP health check) before allowing
     scale down. This prevents race condition where scale down/up aborts running imports.
     When Nominatim responds to HTTP requests, the import/initialization is complete.
-    
+    If NOMINATIM_MAX_WAIT_SECONDS is set to a positive value, the wait ends at the configured
+    deadline and raises RuntimeError if Nominatim is still not ready.
+    If NOMINATIM_MAX_WAIT_SECONDS is 0 or negative, the wait continues for the
+    default timeout (DEFAULT_NOMINATIM_WAIT_SECONDS) unless a different timeout_seconds
+    value is provided.
+
     Args:
         country: Dictionary containing country metadata, must have a 'name' key for workflow status updates
-        timeout_seconds: Maximum time to wait for import to complete (default 2 hours = 7200 seconds)
-    
+        timeout_seconds: Retained for compatibility only; used only if NOMINATIM_MAX_WAIT_SECONDS
+            is unset or non-positive.
+
     Raises:
-        RuntimeError: If import does not complete within timeout_seconds
+        RuntimeError: If the configured deadline is reached before Nominatim becomes ready.
     """
-    deadline = time.monotonic() + timeout_seconds
+    warn_timeout_deprecated = timeout_seconds is not None
+    if timeout_seconds is None:
+        timeout_seconds = DEFAULT_NOMINATIM_WAIT_SECONDS
+    if warn_timeout_deprecated:
+        print(
+            "DEPRECATION WARNING: timeout_seconds is deprecated; NOMINATIM_MAX_WAIT_SECONDS takes precedence.",
+            flush=True,
+        )
+    deadline = _get_nominatim_wait_deadline(timeout_seconds)
     wait_start_time = time.monotonic()
-    
-    while time.monotonic() < deadline:
+    last_log_time = wait_start_time
+
+    while True:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise RuntimeError(
+                "Timed out waiting for Nominatim import to complete. "
+                "Increase NOMINATIM_MAX_WAIT_SECONDS to wait longer."
+            )
         try:
             pods = KUBE.list_pods("app=nominatim")
             pod_running = bool(pods.get("items", []))
@@ -2318,7 +2388,7 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=7200):
         if pod_running:
             # Pod is running - check if Nominatim service is ready (health check)
             # When Nominatim responds to HTTP requests, import/initialization is complete
-            ok, detail = check_http("http://nominatim.osm.svc.cluster.local:8080/")
+            ok, probe_detail = check_http("http://nominatim.osm.svc.cluster.local:8080/")
             if ok:
                 # Nominatim is ready, import is complete
                 print(f"Nominatim import/initialization complete - service is ready", flush=True)
@@ -2331,45 +2401,61 @@ def wait_for_nominatim_import_if_running(country, timeout_seconds=7200):
                 phase="search",
                 progress=NOMINATIM_REBUILD_PROGRESS,
                 message="Refreshing Nominatim for address and POI search ...",
-                detail=f"Waiting for Nominatim to become ready (waiting {int(elapsed_total)}s)... {detail}",
+                detail=f"Waiting for Nominatim to become ready (waiting {int(elapsed_total)}s)... {probe_detail}",
                 country=country["name"],
                 error="",
             )
             
             # If pod has been running for a long time without becoming ready, log warning
-            if elapsed_total > 3600:  # 1 hour
-                print(f"WARNING: Nominatim not responding after {int(elapsed_total)}s. Pod still running.", flush=True)
-            
+            last_log_time = _maybe_log_nominatim_wait(
+                last_log_time,
+                f"Nominatim import still running after {int(elapsed_total)}s; last probe: {probe_detail}",
+            )
+
             time.sleep(10)
         else:
             # Pod not running - safe to proceed (no import in progress)
             return
-    
-    # Timeout reached - provide more helpful error message
-    print(f"ERROR: Timed out waiting for Nominatim to become ready after {timeout_seconds}s", flush=True)
-    raise RuntimeError(
-        f"Timed out waiting for Nominatim import to complete after {timeout_seconds}s. "
-        "The service did not become ready. The import may be stuck. "
-        "You can manually clear this by restarting the pod or using the /api/library/reset-import endpoint."
-    )
 
 
 def rebuild_nominatim(country):
-    # First, wait for any running import to complete before scaling down
-    wait_for_nominatim_import_if_running(country)
-    
-    write_workflow_state(
-        running=True,
-        phase="search",
-        progress=NOMINATIM_REBUILD_PROGRESS,
-        message="Refreshing Nominatim for address and POI search ...",
-        detail="Scaling the Nominatim deployment down before reimport.",
-        country=country["name"],
-        error="",
-    )
-    scale_nominatim(0)
-    wait_for_nominatim_pods_to_stop()
-    clear_directory(NOMINATIM_DIR)
+    # If Nominatim is already importing, continue that import instead of wiping it.
+    if is_nominatim_import_running():
+        write_workflow_state(
+            running=True,
+            phase="search",
+            progress=NOMINATIM_REBUILD_PROGRESS,
+            message="Nominatim import already started - continuing ...",
+            detail="An existing import is still running, so the current data directory is kept.",
+            country=country["name"],
+            error="",
+        )
+        wait_for_nominatim_ready(country)
+        return
+
+    if _nominatim_import_finished():
+        write_workflow_state(
+            running=True,
+            phase="search",
+            progress=NOMINATIM_REBUILD_PROGRESS,
+            message="Nominatim is rebuilding from scratch for the new map ...",
+            detail="Previous import finished, so the existing data directory is cleared before the new map is installed.",
+            country=country["name"],
+            error="",
+        )
+        scale_nominatim(0)
+        wait_for_nominatim_pods_to_stop()
+        clear_directory(NOMINATIM_DIR)
+    else:
+        write_workflow_state(
+            running=True,
+            phase="search",
+            progress=NOMINATIM_REBUILD_PROGRESS,
+            message="Nominatim import was interrupted - continuing ...",
+            detail="Existing database files are kept so the import can resume instead of starting over.",
+            country=country["name"],
+            error="",
+        )
     scale_nominatim(1)
     wait_for_nominatim_ready(country)
 

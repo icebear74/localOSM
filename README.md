@@ -138,8 +138,9 @@ Optional flags:
 
 ## Notes
 
-- **Nominatim** uses its own internal PostgreSQL 15 instance. The `PBF_PATH` env var triggers data import on first start – this can take a long time for large extracts.
+- **Nominatim** uses its own internal PostgreSQL 16 instance. The `PBF_PATH` env var triggers data import on first start – this can take a long time for large extracts.
 - **TileServer GL** needs `.mbtiles` or `.pmtiles` files placed in `/mnt/data/OSM/tileserver/` and a `config.json` style definition to serve tiles.
+- The shared MapLibre style lives in `k8s/style.json` and is copied to `/mnt/data/OSM/tileserver/style.template.json` during deployment so Maputnik can import it directly.
 - The routing UI falls back to OSM tile CDN for the map background if no local TileServer tiles are configured.
 
 

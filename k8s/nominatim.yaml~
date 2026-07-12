@@ -61,7 +61,7 @@ spec:
             # Match requests to limits so the scheduler reserves the full import
             # footprint and the pod is less likely to be evicted mid-import.
             requests:
-              memory: "8Gi"
+              memory: "18Gi"
               cpu: "4"
             limits:
               memory: "18Gi"
