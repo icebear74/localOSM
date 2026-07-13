@@ -134,6 +134,12 @@ for dir in \
   ${SUDO} mkdir -p "$dir"
 done
 
+terminate_existing_pods() {
+  for deployment in "${DEPLOYMENTS[@]}"; do
+    kubectl -n "${NAMESPACE}" delete pod -l "app=${deployment}" --ignore-not-found --wait=true >/dev/null 2>&1 || true
+  done
+}
+
 ${SUDO} chown -R 999:999  "${BASE_DIR}/postgres"   2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${BASE_DIR}/tileserver" 2>/dev/null || true
 ${SUDO} chown -R 100:100   "${BASE_DIR}/nominatim"  2>/dev/null || true
@@ -211,12 +217,9 @@ PY
 fi
 
 echo ">>> Applying Kubernetes manifests …"
-for manifest in namespace.yaml postgres.yaml tileserver.yaml nominatim.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml valhalla-import-job.yaml status-config.yaml status.yaml nominatim-import-config.yaml tileserver-import-config.yaml import-orchestrator.yaml web.yaml; do
+terminate_existing_pods
+for manifest in namespace.yaml postgres.yaml tileserver.yaml nominatim.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml status-config.yaml status.yaml nominatim-import-config.yaml tileserver-import-config.yaml import-orchestrator.yaml web.yaml; do
   kubectl apply -f "${BASE_DIR}/manifests/${manifest}"
-done
-
-for deployment in "${DEPLOYMENTS[@]}"; do
-  kubectl -n "${NAMESPACE}" rollout restart "deployment/${deployment}" >/dev/null 2>&1 || true
 done
 
 echo ">>> Waiting for core services (postgres, status, web, import orchestrator) …"
