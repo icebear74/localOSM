@@ -55,7 +55,7 @@ spec:
       serviceAccountName: import-orchestrator
       containers:
         - name: import-orchestrator
-          image: bitnami/kubectl:1.30
+          image: alpine/k8s:1.30.0
           imagePullPolicy: IfNotPresent
           command: ["/bin/bash", "/scripts/import-orchestrator.sh"]
           env:

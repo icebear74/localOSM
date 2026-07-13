@@ -74,4 +74,4 @@ Each step uses a dedicated Kubernetes Job and only promotes staged data after th
 - The routing web UI remains unchanged.
 - The orchestrator exits with code 0 when watched config maps change so Kubernetes restarts it with fresh state.
 
-- The orchestrator uses `bitnami/kubectl:1.30`; keep it aligned with the cluster Kubernetes minor version.
+- The orchestrator uses `alpine/k8s:1.30.0`; keep it aligned with the cluster Kubernetes minor version.

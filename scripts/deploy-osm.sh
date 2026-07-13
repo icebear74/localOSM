@@ -211,7 +211,7 @@ PY
 fi
 
 echo ">>> Applying Kubernetes manifests …"
-for manifest in namespace.yaml postgres.yaml tileserver.yaml nominatim.yaml valhalla-config.yaml valhalla.yaml status-config.yaml status.yaml nominatim-import-config.yaml tileserver-import-config.yaml import-orchestrator.yaml web.yaml; do
+for manifest in namespace.yaml postgres.yaml tileserver.yaml nominatim.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml valhalla-import-job.yaml status-config.yaml status.yaml nominatim-import-config.yaml tileserver-import-config.yaml import-orchestrator.yaml web.yaml; do
   kubectl apply -f "${BASE_DIR}/manifests/${manifest}"
 done
 
