@@ -34,7 +34,7 @@ payload = {
     'progress': int(progress),
     'message': message,
     'detail': detail,
-    'updated_at': datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z'),
+    'updated_at': datetime.utcnow().replace(microsecond=0).isoformat() + 'Z',
 }
 with open(path, 'w', encoding='utf-8') as handle:
     json.dump(payload, handle, indent=2, sort_keys=True)
@@ -63,7 +63,7 @@ check_config_change() {
   fi
   if [ -n "${previous}" ] && [ "${previous}" != "${current}" ]; then
     echo "${current}" > "${HASH_FILE}"
-    log "Detected config change; exiting so Kubernetes restarts the orchestrator pod."
+    log "Detected config change in ${CONFIG_DIR}; exiting so Kubernetes restarts the orchestrator pod."
     write_state false "idle" 0 "Konfiguration geändert." "Import-Orchestrator beendet sich selbst und wird von k3s neu gestartet."
     exit 0
   fi
@@ -80,13 +80,15 @@ wait_for_job() {
     if kubectl -n "${NAMESPACE}" wait --for=condition=complete "job/${job_name}" --timeout=30s >/dev/null 2>&1; then
       return 0
     fi
+    local elapsed
+    elapsed="$(($(date +%s) - start))"
     if kubectl -n "${NAMESPACE}" get "job/${job_name}" >/dev/null 2>&1; then
       if kubectl -n "${NAMESPACE}" get "job/${job_name}" -o jsonpath='{.status.failed}' 2>/dev/null | grep -q '^[1-9]'; then
         kubectl -n "${NAMESPACE}" logs "job/${job_name}" --tail=200 >&2 || true
         return 1
       fi
     fi
-    if [ $(($(date +%s) - start)) -gt "${deadline_seconds}" ]; then
+    if [ "${elapsed}" -gt "${deadline_seconds}" ]; then
       log "Timed out waiting for ${job_name} after ${deadline_seconds}s."
       return 1
     fi
@@ -160,8 +162,15 @@ spec:
               if len(paths) == 1:
                   shutil.copyfile(paths[0], temp_merged)
               else:
-                  subprocess.run(['osmium', 'merge', '--overwrite', '-o', str(temp_merged), '-f', 'pbf', *paths], check=True)
-              subprocess.run(['osmium', 'fileinfo', '-F', 'pbf', str(temp_merged)], check=True)
+                  try:
+                      subprocess.run(['osmium', 'merge', '--overwrite', '-o', str(temp_merged), '-f', 'pbf', *paths], check=True)
+                  except subprocess.CalledProcessError as exc:
+                      joined = ', '.join(country['slug'] for country in countries)
+                      raise RuntimeError(f'Could not merge selected countries: {joined}') from exc
+              try:
+                  subprocess.run(['osmium', 'fileinfo', '-F', 'pbf', str(temp_merged)], check=True)
+              except subprocess.CalledProcessError as exc:
+                  raise RuntimeError(f'Invalid merged PBF: {temp_merged}') from exc
               os.replace(temp_merged, merged)
 
               countries_path = data_dir / 'status' / 'countries.json'
@@ -218,7 +227,7 @@ import sys
 path = sys.argv[1]
 with open(path, 'r', encoding='utf-8') as handle:
     request = json.load(handle)
-print(1 if request.get('countries') else 0)
+sys.exit(0 if request.get('countries') else 1)
 PY
 }
 
@@ -268,7 +277,7 @@ main() {
     log "Detected import request at ${REQUEST_FILE}."
     write_state true "queued" 5 "Import request received." "Running Nominatim, Valhalla and TileServer sequentially."
 
-    if [ "$(request_has_countries)" = "1" ]; then
+    if request_has_countries; then
       if ! prepare_import_data; then
         continue
       fi
