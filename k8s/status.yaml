@@ -21,6 +21,7 @@ data:
     from datetime import datetime, timezone
 
     def parse_int_env(name, default):
+        """Return an integer env var or a fallback when unset or invalid."""
         value = os.environ.get(name)
         if value is None:
             return default
