@@ -13,8 +13,22 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
+
+def parse_int_env(name, default):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    value = value.strip()
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
 HOST = os.environ.get('STATUS_HOST', '0.0.0.0')
-PORT = int(os.environ.get('STATUS_PORT', '8080'))
+PORT = parse_int_env('STATUS_PORT', 8080)
 DATA_DIR = os.environ.get('OSM_DATA_DIR', '/mnt/data/OSM')
 NAMESPACE = os.environ.get('OSM_NAMESPACE', 'osm')
 

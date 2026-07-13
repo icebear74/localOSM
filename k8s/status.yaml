@@ -19,9 +19,21 @@ data:
     import urllib.parse
     import urllib.request
     from datetime import datetime, timezone
-    
+
+    def parse_int_env(name, default):
+        value = os.environ.get(name)
+        if value is None:
+            return default
+        value = value.strip()
+        if not value:
+            return default
+        try:
+            return int(value)
+        except ValueError:
+            return default
+
     HOST = os.environ.get('STATUS_HOST', '0.0.0.0')
-    PORT = int(os.environ.get('STATUS_PORT', '8080'))
+    PORT = parse_int_env('STATUS_PORT', 8080)
     DATA_DIR = os.environ.get('OSM_DATA_DIR', '/mnt/data/OSM')
     NAMESPACE = os.environ.get('OSM_NAMESPACE', 'osm')
     
@@ -83,8 +95,8 @@ data:
     
     def clone_default(value):
         return json.loads(json.dumps(value))
-    
-    
+
+
     def ensure_dirs():
         for path in (STATUS_DIR, LIBRARY_DIR, IMPORT_DIR, VALHALLA_DIR, VALHALLA_TILE_DIR, NOMINATIM_DIR, TILESERVER_DIR):
             os.makedirs(path, exist_ok=True)
