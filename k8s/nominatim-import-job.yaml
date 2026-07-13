@@ -29,7 +29,7 @@ spec:
             limits:
               memory: "18Gi"
               cpu: "4"
-          command: ["import"]
+          command: ["/app/init.sh"]
           volumeMounts:
             - name: import-data
               mountPath: /nominatim/data/import
