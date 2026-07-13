@@ -67,6 +67,8 @@ spec:
               value: /state
             - name: OSM_CONFIG_DIR
               value: /config
+            - name: OSM_DATA_DIR
+              value: /mnt/data/OSM
           resources:
             requests:
               cpu: "100m"
@@ -89,6 +91,8 @@ spec:
               mountPath: /config/valhalla
             - name: tileserver-config
               mountPath: /config/tileserver
+            - name: data
+              mountPath: /mnt/data/OSM
       volumes:
         - name: orchestrator-script
           hostPath:
@@ -114,3 +118,7 @@ spec:
         - name: tileserver-config
           configMap:
             name: osm-tileserver-import-config
+        - name: data
+          hostPath:
+            path: /mnt/data/OSM
+            type: DirectoryOrCreate

@@ -94,6 +94,134 @@ wait_for_job() {
   done
 }
 
+prepare_import_data() {
+  local job_name="import-prep"
+  log "Starting import preparation job."
+  write_state true "download" 20 "Preparing map downloads ..." "Downloading selected extract(s) and merging them."
+  kubectl -n "${NAMESPACE}" delete job "${job_name}" --ignore-not-found >/dev/null 2>&1 || true
+  kubectl -n "${NAMESPACE}" apply -f - <<EOF >/dev/null
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: import-prep
+  namespace: ${NAMESPACE}
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: import-prep
+          image: python:3.12-slim
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update >/dev/null
+              apt-get install -y --no-install-recommends osmium-tool >/dev/null
+              python3 - <<'PY'
+              import json
+              import os
+              import shutil
+              import subprocess
+              import urllib.request
+              from pathlib import Path
+
+              data_dir = Path('/data')
+              request_file = data_dir / 'status' / 'import-request.json'
+              with request_file.open('r', encoding='utf-8') as handle:
+                  request = json.load(handle)
+              countries = request.get('countries') or []
+              if not countries:
+                  raise SystemExit('No countries requested')
+
+              library_dir = data_dir / 'library'
+              import_dir = data_dir / 'import'
+              library_dir.mkdir(parents=True, exist_ok=True)
+              import_dir.mkdir(parents=True, exist_ok=True)
+
+              paths = []
+              for country in countries:
+                  slug = country['slug']
+                  url = country['url']
+                  dest = library_dir / f'{slug}.osm.pbf'
+                  temp = library_dir / f'{slug}.osm.pbf.part'
+                  if not dest.exists() or dest.stat().st_size <= 0:
+                      req = urllib.request.Request(url, headers={'User-Agent': 'localosm-import-orchestrator/1.0'})
+                      with urllib.request.urlopen(req, timeout=300) as response, temp.open('wb') as handle:
+                          shutil.copyfileobj(response, handle)
+                      os.replace(temp, dest)
+                  paths.append(str(dest))
+
+              merged = import_dir / 'planet.osm.pbf'
+              temp_merged = import_dir / 'planet.osm.pbf.tmp'
+              if len(paths) == 1:
+                  shutil.copyfile(paths[0], temp_merged)
+              else:
+                  subprocess.run(['osmium', 'merge', '--overwrite', '-o', str(temp_merged), '-f', 'pbf', *paths], check=True)
+              subprocess.run(['osmium', 'fileinfo', '-F', 'pbf', str(temp_merged)], check=True)
+              os.replace(temp_merged, merged)
+
+              countries_path = data_dir / 'status' / 'countries.json'
+              try:
+                  with countries_path.open('r', encoding='utf-8') as handle:
+                      records = json.load(handle)
+              except Exception:
+                  records = []
+              if isinstance(records, list):
+                  slug_set = {country['slug'] for country in countries if country.get('slug')}
+                  changed = False
+                  for record in records:
+                      slug = record.get('slug')
+                      if slug in slug_set:
+                          dest = library_dir / f'{slug}.osm.pbf'
+                          record['status'] = 'ready'
+                          record['imported_at'] = request.get('requested_at', '')
+                          record['pbf_path'] = str(dest)
+                          record['pbf_size_mb'] = round(dest.stat().st_size / (1024 * 1024), 1) if dest.exists() else None
+                          record['last_error'] = ''
+                          changed = True
+                  if changed:
+                      with countries_path.open('w', encoding='utf-8') as handle:
+                          json.dump(records, handle, indent=2, sort_keys=True)
+
+              meta = import_dir / 'planet.osm.pbf.meta'
+              with meta.open('w', encoding='utf-8') as handle:
+                  handle.write(f"requested_at={request.get('requested_at', '')}\\n")
+                  handle.write(f"countries={','.join(country['slug'] for country in countries)}\\n")
+                  handle.write(f"count={len(countries)}\\n")
+              PY
+          volumeMounts:
+            - name: osm-data
+              mountPath: /data
+      volumes:
+        - name: osm-data
+          hostPath:
+            path: /mnt/data/OSM
+            type: DirectoryOrCreate
+EOF
+  if ! wait_for_job "${job_name}"; then
+    write_state false "failed" 0 "Map download failed." "See job logs for details."
+    return 1
+  fi
+  write_state true "download" 55 "Map downloads completed." "Selected country extract(s) were downloaded and merged."
+  return 0
+}
+
+request_has_countries() {
+  python3 - "${REQUEST_FILE}" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, 'r', encoding='utf-8') as handle:
+    request = json.load(handle)
+print(1 if request.get('countries') else 0)
+PY
+}
+
 swap_stage() {
   local service="$1"
   local active_dir="$2"
@@ -139,6 +267,12 @@ main() {
 
     log "Detected import request at ${REQUEST_FILE}."
     write_state true "queued" 5 "Import request received." "Running Nominatim, Valhalla and TileServer sequentially."
+
+    if [ "$(request_has_countries)" = "1" ]; then
+      if ! prepare_import_data; then
+        continue
+      fi
+    fi
 
     run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${DATA_DIR}/nominatim/staging" "nominatim"
     run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${DATA_DIR}/valhalla/staging" "valhalla"
