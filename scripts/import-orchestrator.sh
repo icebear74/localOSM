@@ -17,7 +17,9 @@ mkdir -p "${STATE_DIR}"
 
 log() {
   local message="$1"
-  printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$message" | tee -a "${LOG_FILE}"
+  local timestamp
+  timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  printf '%s %s\n' "$timestamp" "$message" | tee -a "${LOG_FILE}"
 }
 
 write_state() {
@@ -34,11 +36,84 @@ payload = {
     'progress': int(progress),
     'message': message,
     'detail': detail,
-    'updated_at': datetime.utcnow().replace(microsecond=0).isoformat() + 'Z',
+    'updated_at': datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z'),
 }
 with open(path, 'w', encoding='utf-8') as handle:
     json.dump(payload, handle, indent=2, sort_keys=True)
 PY
+}
+
+nominatim_pod_diagnostics() {
+  local pod_name status_lines message
+  pod_name="$(kubectl -n "${NAMESPACE}" get pod -l app=nominatim -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null || true)"
+  if [ -z "${pod_name}" ]; then
+    return 1
+  fi
+
+  status_lines="$(kubectl -n "${NAMESPACE}" get pod "${pod_name}" -o jsonpath='{range .status.containerStatuses[*]}{.name}{"|"}{.state.waiting.reason}{"|"}{.state.waiting.message}{"|"}{.state.terminated.reason}{"|"}{.state.terminated.message}{"|"}{.lastState.terminated.reason}{"|"}{.lastState.terminated.message}{"|"}{.restartCount}{"\n"}{end}' 2>/dev/null || true)"
+  if [ -z "${status_lines}" ]; then
+    return 1
+  fi
+
+  while IFS='|' read -r container waiting waiting_msg terminated terminated_msg last_reason last_msg restart_count; do
+    case "${waiting}" in
+      CrashLoopBackOff|ImagePullBackOff|ErrImagePull|CreateContainerConfigError|RunContainerError)
+        message="${waiting_msg:-No additional message.}"
+        printf 'pod %s: container %s is %s after %s restart(s). %s\n' \
+          "${pod_name}" "${container:-nominatim}" "${waiting}" "${restart_count:-0}" "${message}"
+        return 0
+        ;;
+    esac
+
+    if [ "${terminated}" = "Error" ] || [ "${terminated}" = "OOMKilled" ] || [ "${last_reason}" = "Error" ] || [ "${last_reason}" = "OOMKilled" ]; then
+      if [[ "${restart_count:-}" =~ ^[0-9]+$ ]] && [ "${restart_count}" -gt 0 ]; then
+        message="${terminated_msg:-}"
+        if [ -z "${message}" ]; then
+          message="${last_msg:-}"
+        fi
+        if [ -z "${message}" ]; then
+          message="No additional message."
+        fi
+        printf 'pod %s: container %s terminated with %s after %s restart(s). %s\n' \
+          "${pod_name}" "${container:-nominatim}" "${terminated:-$last_reason}" "${restart_count:-0}" "${message}"
+        return 0
+      fi
+    fi
+  done <<EOF
+${status_lines}
+EOF
+
+  return 1
+}
+
+wait_for_nominatim_rollout() {
+  local deadline_seconds="${1:-600}"
+  local start elapsed crash_detail
+  start="$(date +%s)"
+  while true; do
+    check_config_change
+    if crash_detail="$(nominatim_pod_diagnostics)"; then
+      log "Detected a Nominatim startup crash: ${crash_detail}"
+      write_state false "failed" 0 "Nominatim failed to start." "The imported database appears to be crash-looping. ${crash_detail}"
+      return 1
+    fi
+    if kubectl -n "${NAMESPACE}" wait --for=condition=available "deployment/nominatim" --timeout=30s >/dev/null 2>&1; then
+      return 0
+    fi
+    elapsed="$(( $(date +%s) - start ))"
+    if [ "${elapsed}" -gt "${deadline_seconds}" ]; then
+      crash_detail="$(nominatim_pod_diagnostics || true)"
+      if [ -n "${crash_detail}" ]; then
+        log "Timed out waiting for Nominatim after ${deadline_seconds}s. Latest diagnostics: ${crash_detail}"
+        write_state false "failed" 0 "Nominatim failed to start." "${crash_detail}"
+      else
+        log "Timed out waiting for Nominatim after ${deadline_seconds}s."
+        write_state false "failed" 0 "Nominatim failed to start." "Timed out waiting for deployment/nominatim to become available."
+      fi
+      return 1
+    fi
+    sleep 10
+  done
 }
 
 config_hash() {
@@ -243,7 +318,13 @@ swap_stage() {
   mv "${staging_dir}" "${active_dir}"
   rm -rf "${active_dir}.old" 2>/dev/null || true
   kubectl -n "${NAMESPACE}" rollout restart "deployment/${deployment}" >/dev/null
-  kubectl -n "${NAMESPACE}" rollout status "deployment/${deployment}" --timeout=600s >/dev/null
+  if [ "${deployment}" = "nominatim" ]; then
+    if ! wait_for_nominatim_rollout 600; then
+      return 1
+    fi
+  else
+    kubectl -n "${NAMESPACE}" rollout status "deployment/${deployment}" --timeout=600s >/dev/null
+  fi
   log "Swapped ${service} staging data into production."
 }
 

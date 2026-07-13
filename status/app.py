@@ -629,6 +629,18 @@ class KubeClient:
         except urllib.error.HTTPError:
             return ""
 
+    def get_pod_logs(self, name, tail_lines=80):
+        url = self._base + f"/api/v1/namespaces/{self.namespace}/pods/{name}/log?tailLines={tail_lines}"
+        headers = {}
+        if self._token:
+            headers["Authorization"] = "Bearer " + self._token
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, context=self._ssl, timeout=self.timeout) as resp:
+                return resp.read().decode(errors="replace")
+        except urllib.error.HTTPError:
+            return ""
+
     def get_deployment(self, name):
         return self._request("GET", f"/apis/apps/v1/namespaces/{self.namespace}/deployments/{name}")
 
@@ -678,7 +690,70 @@ class KubeClient:
             return []
 
 
+
 KUBE = KubeClient(NAMESPACE)
+
+NOMINATIM_CRASH_REASONS = {
+    "CrashLoopBackOff",
+    "ImagePullBackOff",
+    "ErrImagePull",
+    "CreateContainerConfigError",
+    "RunContainerError",
+}
+
+def describe_nominatim_crash():
+    try:
+        pods = KUBE.list_pods("app=nominatim")
+    except RuntimeError as exc:
+        return f"Could not inspect the Nominatim pod: {exc}"
+
+    items = pods.get("items", [])
+    if not items:
+        return None
+
+    pod = items[-1]
+    pod_name = pod.get("metadata", {}).get("name", "nominatim")
+    status = pod.get("status", {})
+    phase = status.get("phase", "Unknown")
+    if phase == "Failed":
+        return f"pod {pod_name} entered the Failed phase (reason: {status.get('reason') or 'unknown'})"
+
+    for container_status in status.get("containerStatuses", []):
+        container_name = container_status.get("name", "nominatim")
+        state = container_status.get("state", {})
+        waiting = state.get("waiting") or {}
+        terminated = state.get("terminated") or {}
+        last_terminated = (container_status.get("lastState") or {}).get("terminated") or {}
+        restart_count = container_status.get("restartCount", 0) or 0
+
+        for current_reason, source, current_message in (
+            (waiting.get("reason"), "waiting", waiting.get("message")),
+            (terminated.get("reason"), "terminated", terminated.get("message")),
+            (last_terminated.get("reason"), "last terminated", last_terminated.get("message")),
+        ):
+            if not current_reason:
+                continue
+            if current_reason not in NOMINATIM_CRASH_REASONS and not (
+                current_reason in {"Error", "OOMKilled"} and restart_count > 0
+            ):
+                continue
+            log_tail = ""
+            try:
+                log_tail = KUBE.get_pod_logs(pod_name, tail_lines=20).strip()
+            except Exception as exc:  # noqa: BLE001
+                log_tail = f"Pod logs unavailable ({exc.__class__.__name__}): {exc}"
+
+            details = [
+                f"pod {pod_name} is in phase {phase}",
+                f"container {container_name} {source} reason: {current_reason}",
+            ]
+            if current_message:
+                details.append(current_message)
+            if log_tail:
+                details.append(f"Last logs:\n{log_tail}")
+            return " | ".join(details)
+
+    return None
 
 _detected_node_url_cache: "str | None" = None
 _detected_node_url_cache_time: float = 0.0
@@ -2060,6 +2135,7 @@ def wait_for_nominatim_pods_to_stop(timeout_seconds=300):
     raise RuntimeError("Timed out waiting for the Nominatim pod to stop.")
 
 
+
 def wait_for_nominatim_ready(country):
     deadline = time.time() + 7200
     while time.time() < deadline:
@@ -2068,6 +2144,9 @@ def wait_for_nominatim_ready(country):
         except RuntimeError:
             time.sleep(10)
             continue
+        crash_detail = describe_nominatim_crash()
+        if crash_detail:
+            raise RuntimeError(f"Nominatim failed to start: {crash_detail}")
         status = deployment.get("status", {})
         ready = status.get("readyReplicas", 0)
         ok, detail = check_http("http://nominatim.osm.svc.cluster.local:8080/")
@@ -2094,7 +2173,6 @@ def wait_for_nominatim_ready(country):
         time.sleep(10)
     raise RuntimeError("Timed out waiting for Nominatim to become ready.")
 
-
 def rebuild_nominatim(country):
     write_workflow_state(
         running=True,
@@ -2105,13 +2183,23 @@ def rebuild_nominatim(country):
         country=country["name"],
         error="",
     )
-    scale_nominatim(0)
-    wait_for_nominatim_pods_to_stop()
-    clear_directory(NOMINATIM_DIR)
-    scale_nominatim(1)
-    wait_for_nominatim_ready(country)
-
-
+    try:
+        scale_nominatim(0)
+        wait_for_nominatim_pods_to_stop()
+        clear_directory(NOMINATIM_DIR)
+        scale_nominatim(1)
+        wait_for_nominatim_ready(country)
+    except Exception as exc:  # noqa: BLE001
+        write_workflow_state(
+            running=False,
+            phase="error",
+            progress=100,
+            message="Nominatim failed to start after the rebuild.",
+            detail="Check the Nominatim pod logs and status for the crash reason.",
+            country=country["name"],
+            error=str(exc),
+        )
+        raise
 def run_parallel_build_steps(country, records=None):
     merge_library_files(country, records=records)
     valhalla_err = [None]
