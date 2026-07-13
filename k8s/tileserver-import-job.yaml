@@ -1,0 +1,84 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tileserver-import
+  namespace: osm
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: preflight
+          image: busybox:1.36
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo '=== Planetiler Tile Generation ==='
+              test -f /data/import/planet.osm.pbf
+              mkdir -p /data
+              mkdir -p /data/sources
+          volumeMounts:
+            - name: osm-data
+              mountPath: /data
+            - name: import-data
+              mountPath: /data/import
+        - name: fetch-sources
+          image: alpine:3.20
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              if [ ! -s /data/sources/lake_centerline.shp.zip ]; then
+                wget -q -O /data/sources/lake_centerline.shp.zip https://github.com/acalcutt/osm-lakelines/releases/latest/download/lake_centerline.shp.zip
+              fi
+              if [ ! -s /data/sources/water-polygons-split-3857.zip ]; then
+                wget -q -O /data/sources/water-polygons-split-3857.zip https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip
+              fi
+              if [ ! -s /data/sources/natural_earth_vector.sqlite.zip ]; then
+                wget -q -O /data/sources/natural_earth_vector.sqlite.zip https://naciscdn.org/naturalearth/packages/natural_earth_vector.sqlite.zip
+              fi
+          volumeMounts:
+            - name: osm-data
+              mountPath: /data
+            - name: import-data
+              mountPath: /data/import
+      containers:
+        - name: tileserver-import
+          image: ghcr.io/onthegomap/planetiler:latest
+          imagePullPolicy: Always
+          resources:
+            requests:
+              memory: "13Gi"
+              cpu: "6"
+            limits:
+              memory: "13Gi"
+              cpu: "6"
+          env:
+            - name: JAVA_OPTS
+              value: "-Xms11g -Xmx11g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+          args:
+            - --osm-path=/data/import/planet.osm.pbf
+            - --output=/data/map.mbtiles
+            - --force
+            - --threads=6
+            - --lake_centerlines_path=/data/sources/lake_centerline.shp.zip
+            - --water_polygons_path=/data/sources/water-polygons-split-3857.zip
+            - --natural_earth_path=/data/sources/natural_earth_vector.sqlite.zip
+            - --minzoom=0
+            - --maxzoom=16
+          volumeMounts:
+            - name: osm-data
+              mountPath: /data
+            - name: import-data
+              mountPath: /data/import
+      volumes:
+        - name: osm-data
+          hostPath:
+            path: /mnt/data/OSM/tileserver/staging
+            type: DirectoryOrCreate
+        - name: import-data
+          hostPath:
+            path: /mnt/data/OSM/import
+            type: DirectoryOrCreate

@@ -1,0 +1,46 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nominatim-import
+  namespace: osm
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        fsGroup: 100
+      containers:
+        - name: nominatim-import
+          image: mediagis/nominatim:4.5
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PBF_PATH
+              value: /nominatim/data/import/planet.osm.pbf
+            - name: NOMINATIM_PASSWORD
+              value: nominatim
+            - name: THREADS
+              value: "4"
+          resources:
+            requests:
+              memory: "12Gi"
+              cpu: "4"
+            limits:
+              memory: "18Gi"
+              cpu: "4"
+          command: ["import"]
+          volumeMounts:
+            - name: import-data
+              mountPath: /nominatim/data/import
+            - name: nominatim-data
+              mountPath: /var/lib/postgresql/16/main
+      volumes:
+        - name: import-data
+          hostPath:
+            path: /mnt/data/OSM/import
+            type: DirectoryOrCreate
+        - name: nominatim-data
+          hostPath:
+            path: /mnt/data/OSM/nominatim/staging
+            type: DirectoryOrCreate

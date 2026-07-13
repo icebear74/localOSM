@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>localOSM Status</title>
+  <style>
+    body{font-family:system-ui,sans-serif;margin:0;background:#f6f7f8;color:#222}
+    header{padding:1rem 1.25rem;background:#1f2937;color:#fff}
+    main{display:grid;gap:1rem;padding:1rem;grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+    .card{background:#fff;border:1px solid #d8dde3;border-radius:12px;padding:1rem;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+    .row{display:flex;justify-content:space-between;gap:.75rem;padding:.35rem 0;border-bottom:1px solid #eef1f4}
+    .row:last-child{border-bottom:none}
+    .ok{color:#15803d}.bad{color:#b91c1c}.muted{color:#6b7280}
+    input,button,textarea{font:inherit;padding:.55rem .7rem;border:1px solid #cbd5e1;border-radius:8px}
+    button{background:#111827;color:#fff;cursor:pointer}
+    textarea{width:100%;min-height:88px}
+    pre{white-space:pre-wrap;word-break:break-word;background:#0f172a;color:#e2e8f0;padding:.75rem;border-radius:8px;overflow:auto}
+  </style>
+</head>
+<body>
+<header>
+  <h1 style="margin:0">localOSM Status</h1>
+  <div class="muted" style="color:#cbd5e1">Sequentieller Import-Orchestrator + Service Health</div>
+</header>
+<main>
+  <section class="card">
+    <h2>Services</h2>
+    <div id="services">Lade …</div>
+  </section>
+  <section class="card">
+    <h2>Import/Storage</h2>
+    <div id="storage">Lade …</div>
+  </section>
+  <section class="card">
+    <h2>Orchestrator</h2>
+    <div id="orchestrator">Lade …</div>
+  </section>
+  <section class="card">
+    <h2>Routing</h2>
+    <form id="route-form">
+      <textarea id="waypoints" placeholder="52.5200,13.4050\n48.1372,11.5756"></textarea>
+      <div style="display:flex;gap:.5rem;margin-top:.5rem;align-items:center">
+        <input id="costing" value="auto" placeholder="auto|car|foot|bicycle">
+        <button type="submit">Berechnen</button>
+      </div>
+    </form>
+    <pre id="route-result">–</pre>
+  </section>
+  <section class="card">
+    <h2>Konfiguration</h2>
+    <pre id="config">Lade …</pre>
+  </section>
+</main>
+<script>
+async function loadAll(){
+  const status = await (await fetch('/api/status')).json();
+  const config = await (await fetch('/api/config')).json();
+  document.getElementById('services').innerHTML = status.services.map(s =>
+    '<div class="row"><span>'+s.name+'</span><span class="'+(s.ok?'ok':'bad')+'">'+(s.ok?'OK':'DOWN')+'</span></div>'+
+    '<div class="muted" style="margin:-.25rem 0 .5rem">'+s.detail+'</div>'
+  ).join('');
+  document.getElementById('storage').innerHTML =
+    '<div class="row"><span>Import-Dateien</span><span>'+status.import_files.length+'</span></div>'+
+    '<div class="row"><span>Valhalla Tiles</span><span>'+status.valhalla_tiles_mb+' MB</span></div>'+
+    '<div class="row"><span>Status</span><span>'+status.orchestrator.phase+'</span></div>';
+  document.getElementById('orchestrator').innerHTML =
+    '<div class="row"><span>Progress</span><span>'+status.orchestrator.progress+'%</span></div>'+
+    '<div class="row"><span>Message</span><span>'+status.orchestrator.message+'</span></div>'+
+    '<div class="muted">'+status.orchestrator.detail+'</div>';
+  document.getElementById('config').textContent = JSON.stringify(config, null, 2);
+}
+document.getElementById('route-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const waypoints = document.getElementById('waypoints').value.split(/\n+/).map(x => x.trim()).filter(Boolean);
+  const costing = document.getElementById('costing').value.trim() || 'auto';
+  const res = await fetch('/api/routing/calculate', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({waypoints, costing})
+  });
+  document.getElementById('route-result').textContent = JSON.stringify(await res.json(), null, 2);
+});
+loadAll();
+setInterval(loadAll, 5000);
+</script>
+</body>
+</html>

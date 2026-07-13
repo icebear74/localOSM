@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: osm-nominatim-import-config
+  namespace: osm
+data:
+  import_mode: import
+  import_threads: "4"
+  import_password: nominatim
