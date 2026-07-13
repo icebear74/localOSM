@@ -323,7 +323,9 @@ swap_stage() {
       return 1
     fi
   else
-    kubectl -n "${NAMESPACE}" rollout status "deployment/${deployment}" --timeout=600s >/dev/null
+    if ! kubectl -n "${NAMESPACE}" rollout status "deployment/${deployment}" --timeout=600s >/dev/null; then
+      return 1
+    fi
   fi
   log "Swapped ${service} staging data into production."
 }
@@ -340,7 +342,10 @@ run_step() {
     return 1
   fi
   write_state true "${service}" 90 "${service} import completed." "Promoting staged data."
-  swap_stage "${service}" "${active_dir}" "${staging_dir}" "${deployment}"
+  if ! swap_stage "${service}" "${active_dir}" "${staging_dir}" "${deployment}"; then
+    write_state false "failed" 0 "${service} promotion failed." "Rollout of deployment/${deployment} did not become ready."
+    return 1
+  fi
   write_state false "${service}" 100 "${service} import promoted." "${service} is serving the newly imported data."
 }
 
@@ -364,9 +369,15 @@ main() {
       fi
     fi
 
-    run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${DATA_DIR}/nominatim/staging" "nominatim"
-    run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${DATA_DIR}/valhalla/staging" "valhalla"
-    run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${DATA_DIR}/tileserver/staging" "tileserver-gl"
+    if ! run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${DATA_DIR}/nominatim/staging" "nominatim"; then
+      continue
+    fi
+    if ! run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${DATA_DIR}/valhalla/staging" "valhalla"; then
+      continue
+    fi
+    if ! run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${DATA_DIR}/tileserver/staging" "tileserver-gl"; then
+      continue
+    fi
 
     rm -f "${REQUEST_FILE}"
     write_state false "done" 100 "Import erfolgreich abgeschlossen." "Alle Daten wurden sequentiell verarbeitet und aktiviert."

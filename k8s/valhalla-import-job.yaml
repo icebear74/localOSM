@@ -34,7 +34,7 @@ spec:
             limits:
               memory: "18Gi"
               cpu: "6"
-          command: ["/bin/sh", "-c"]
+          command: ["/bin/bash", "-c"]
           args:
             - |
               set -euo pipefail
