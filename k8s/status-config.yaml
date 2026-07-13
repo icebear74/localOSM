@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: osm-status-config
+  namespace: osm
+data:
+  config.json: |
+    {
+      "node_url": "",
+      "auto_update_enabled": false,
+      "auto_update_time": "03:00",
+      "routing_costing_models": {
+        "car": {"enabled": true},
+        "foot": {"enabled": true},
+        "bicycle": {"enabled": true}
+      },
+      "routing_speeds": {
+        "car": 120,
+        "foot": 5,
+        "bicycle": 25
+      },
+      "routing_advanced": {
+        "car": {"toll_factor": 1.0, "unpaved_factor": 1.0, "ferry_factor": 1.0},
+        "foot": {"hill_factor": 1.0, "unpaved_factor": 1.0},
+        "bicycle": {"hill_factor": 1.0, "unpaved_factor": 1.0}
+      }
+    }

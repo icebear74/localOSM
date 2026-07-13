@@ -5,6 +5,7 @@ metadata:
   namespace: osm
 spec:
   backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
   template:
     spec:
       restartPolicy: Never
@@ -16,7 +17,6 @@ spec:
             runAsUser: 0
             runAsGroup: 0
           env:
-            # Build tiles from PBF, do not serve after building
             - name: serve_tiles
               value: "False"
             - name: force_rebuild
@@ -29,21 +29,40 @@ spec:
               value: "True"
           resources:
             requests:
-              memory: "6Gi"
-              cpu: "2"
-            limits:
-              memory: "12Gi"
+              memory: "18Gi"
               cpu: "4"
+            limits:
+              memory: "18Gi"
+              cpu: "6"
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              echo '=== Valhalla Import Job ==='
+              test -f /data/import/planet.osm.pbf || { echo 'ERROR: /data/import/planet.osm.pbf not found'; exit 1; }
+              PBF_SIZE=$(du -sh /data/import/planet.osm.pbf | cut -f1)
+              echo "Found PBF file (${PBF_SIZE}). Building routing graph ..."
+              mkdir -p /data/tiles
+              valhalla_build_tiles -c /config/valhalla.json /data/import/planet.osm.pbf
+              echo '=== Tile build complete. Creating tile extract archive ...'
+              valhalla_build_extract -c /config/valhalla.json -e /data/valhalla_tiles.tar -O
+              echo '=== Import complete. Routing graph and tile extract stored at /data ==='
           volumeMounts:
+            - name: import-data
+              mountPath: /data/import
             - name: valhalla-data
-              mountPath: /custom_files
-            - name: valhalla-import-config
+              mountPath: /data
+            - name: valhalla-config
               mountPath: /config
       volumes:
+        - name: import-data
+          hostPath:
+            path: /mnt/data/OSM/import
+            type: DirectoryOrCreate
         - name: valhalla-data
           hostPath:
-            path: /mnt/data/OSM/valhalla
+            path: /mnt/data/OSM/valhalla/staging
             type: DirectoryOrCreate
-        - name: valhalla-import-config
+        - name: valhalla-config
           configMap:
             name: osm-valhalla-import-config

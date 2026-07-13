@@ -1,0 +1,124 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: import-orchestrator
+  namespace: osm
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: import-orchestrator
+  namespace: osm
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["get", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: import-orchestrator
+  namespace: osm
+subjects:
+  - kind: ServiceAccount
+    name: import-orchestrator
+    namespace: osm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: import-orchestrator
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: import-orchestrator
+  namespace: osm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: import-orchestrator
+  template:
+    metadata:
+      labels:
+        app: import-orchestrator
+    spec:
+      serviceAccountName: import-orchestrator
+      containers:
+        - name: import-orchestrator
+          image: alpine/k8s:1.30.0
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "/scripts/import-orchestrator.sh"]
+          env:
+            - name: OSM_NAMESPACE
+              value: osm
+            - name: OSM_MANIFEST_DIR
+              value: /manifests
+            - name: OSM_STATE_DIR
+              value: /state
+            - name: OSM_CONFIG_DIR
+              value: /config
+            - name: OSM_DATA_DIR
+              value: /mnt/data/OSM
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: orchestrator-script
+              mountPath: /scripts
+            - name: manifests
+              mountPath: /manifests
+            - name: state
+              mountPath: /state
+            - name: status-config
+              mountPath: /config/status
+            - name: nominatim-config
+              mountPath: /config/nominatim
+            - name: valhalla-config
+              mountPath: /config/valhalla
+            - name: tileserver-config
+              mountPath: /config/tileserver
+            - name: data
+              mountPath: /mnt/data/OSM
+      volumes:
+        - name: orchestrator-script
+          hostPath:
+            path: /mnt/data/OSM/scripts
+            type: DirectoryOrCreate
+        - name: manifests
+          hostPath:
+            path: /mnt/data/OSM/manifests
+            type: DirectoryOrCreate
+        - name: state
+          hostPath:
+            path: /mnt/data/OSM/status
+            type: DirectoryOrCreate
+        - name: status-config
+          configMap:
+            name: osm-status-config
+        - name: nominatim-config
+          configMap:
+            name: osm-nominatim-import-config
+        - name: valhalla-config
+          configMap:
+            name: osm-valhalla-import-config
+        - name: tileserver-config
+          configMap:
+            name: osm-tileserver-import-config
+        - name: data
+          hostPath:
+            path: /mnt/data/OSM
+            type: DirectoryOrCreate

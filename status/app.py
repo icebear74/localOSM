@@ -14,8 +14,22 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
+
+def parse_int_env(name, default):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    value = value.strip()
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
 HOST = os.environ.get("STATUS_HOST", "0.0.0.0")
-PORT = int(os.environ.get("STATUS_PORT", "8080"))
+PORT = parse_int_env("STATUS_PORT", 8080)
 DATA_DIR = os.environ.get("OSM_DATA_DIR", "/mnt/data/OSM")
 NAMESPACE = os.environ.get("OSM_NAMESPACE", "osm")
 OSM_NODE_URL = os.environ.get("OSM_NODE_URL", "").strip()
@@ -32,60 +46,12 @@ MERGED_PBF = os.path.join(IMPORT_DIR, "planet.osm.pbf")
 COUNTRIES_FILE = os.path.join(STATUS_DIR, "countries.json")
 STATE_FILE = os.path.join(STATUS_DIR, "library-state.json")
 CONFIG_FILE = os.path.join(STATUS_DIR, "config.json")
-
-# PostgreSQL version used by mediagis/nominatim container
-NOMINATIM_POSTGRES_VERSION = "16"
-NOMINATIM_IMPORT_FINISHED_FILE = os.path.join(
-    NOMINATIM_DIR,
-    "import-finished",
-)
-# Optional safety cap for Nominatim waits; 0 means wait indefinitely.
-NOMINATIM_MAX_WAIT_SECONDS = int(os.environ.get("NOMINATIM_MAX_WAIT_SECONDS", "0"))
-DEFAULT_NOMINATIM_WAIT_SECONDS = 7200
-# Log long-running Nominatim waits every 5 minutes.
-NOMINATIM_LOG_INTERVAL_SECONDS = 300
-# Progress value for Nominatim rebuild workflow phase
-NOMINATIM_REBUILD_PROGRESS = 82
-
-
-def _get_nominatim_wait_deadline(timeout_seconds=DEFAULT_NOMINATIM_WAIT_SECONDS):
-    if NOMINATIM_MAX_WAIT_SECONDS > 0:
-        return time.monotonic() + NOMINATIM_MAX_WAIT_SECONDS
-    if timeout_seconds is not None and timeout_seconds > 0:
-        return time.monotonic() + timeout_seconds
-    return None
-
-
-def _maybe_log_nominatim_wait(last_log_time, message):
-    now = time.monotonic()
-    if now - last_log_time >= NOMINATIM_LOG_INTERVAL_SECONDS:
-        print(message, flush=True)
-        return now
-    return last_log_time
-
-
-def _nominatim_import_finished():
-    return os.path.isfile(NOMINATIM_IMPORT_FINISHED_FILE)
+IMPORT_REQUEST_FILE = os.path.join(STATUS_DIR, "import-request.json")
 
 CONFIG_DEFAULTS = {
     "node_url": "",
     "auto_update_enabled": False,
     "auto_update_time": "03:00",
-    "routing_costing_models": {
-        "car": {"enabled": True},
-        "foot": {"enabled": True},
-        "bicycle": {"enabled": True},
-    },
-    "routing_speeds": {
-        "car": 120,
-        "foot": 5,
-        "bicycle": 25,
-    },
-    "routing_advanced": {
-        "car": {"toll_factor": 1.0, "unpaved_factor": 1.0, "ferry_factor": 1.0},
-        "foot": {"hill_factor": 1.0, "unpaved_factor": 1.0},
-        "bicycle": {"hill_factor": 1.0, "unpaved_factor": 1.0},
-    },
 }
 
 SERVICES = [
@@ -511,9 +477,6 @@ COUNTRY_BBOX = {
 }
 
 # MapLibre GL base style – kept in sync with k8s/tileserver.yaml init container.
-# The status service writes this to /mnt/data/OSM/tileserver/style.json after every
-# successful tile build, injecting the geographic center of all imported regions so
-# that the map opens centred on the downloaded area.
 _STYLE_JSON = (
     '{"version":8,"name":"LocalOSM","sources":{"openmaptiles":{"type":"vector","url":"mbtiles://{v3}"}},'
     '"glyphs":"http://localhost/fonts/{fontstack}/{range}.pbf","layers":['
@@ -545,7 +508,6 @@ _STYLE_JSON = (
     "]}"
 )
 
-
 def compute_map_center(records):
     """Return (center_lon, center_lat, zoom) from the bounding union of all non-error country records."""
     slugs = [r.get("slug", "") for r in records if r.get("status") != "error"]
@@ -573,7 +535,6 @@ def compute_map_center(records):
         zoom = 8
     return round(center_lon, 4), round(center_lat, 4), zoom
 
-
 def build_style_json(center_lon=None, center_lat=None, zoom=6):
     """Return the MapLibre GL style dict, optionally with initial center and zoom."""
     style = json.loads(_STYLE_JSON)
@@ -581,7 +542,6 @@ def build_style_json(center_lon=None, center_lat=None, zoom=6):
         style["center"] = [center_lon, center_lat]
         style["zoom"] = zoom
     return style
-
 
 WORKFLOW_LOCK = threading.Lock()
 ACTIVE_WORKFLOW = {"thread": None}
@@ -669,6 +629,18 @@ class KubeClient:
         except urllib.error.HTTPError:
             return ""
 
+    def get_pod_logs(self, name, tail_lines=80):
+        url = self._base + f"/api/v1/namespaces/{self.namespace}/pods/{name}/log?tailLines={tail_lines}"
+        headers = {}
+        if self._token:
+            headers["Authorization"] = "Bearer " + self._token
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, context=self._ssl, timeout=self.timeout) as resp:
+                return resp.read().decode(errors="replace")
+        except urllib.error.HTTPError:
+            return ""
+
     def get_deployment(self, name):
         return self._request("GET", f"/apis/apps/v1/namespaces/{self.namespace}/deployments/{name}")
 
@@ -718,7 +690,70 @@ class KubeClient:
             return []
 
 
+
 KUBE = KubeClient(NAMESPACE)
+
+NOMINATIM_CRASH_REASONS = {
+    "CrashLoopBackOff",
+    "ImagePullBackOff",
+    "ErrImagePull",
+    "CreateContainerConfigError",
+    "RunContainerError",
+}
+
+def describe_nominatim_crash():
+    try:
+        pods = KUBE.list_pods("app=nominatim")
+    except RuntimeError as exc:
+        return f"Could not inspect the Nominatim pod: {exc}"
+
+    items = pods.get("items", [])
+    if not items:
+        return None
+
+    pod = items[-1]
+    pod_name = pod.get("metadata", {}).get("name", "nominatim")
+    status = pod.get("status", {})
+    phase = status.get("phase", "Unknown")
+    if phase == "Failed":
+        return f"pod {pod_name} entered the Failed phase (reason: {status.get('reason') or 'unknown'})"
+
+    for container_status in status.get("containerStatuses", []):
+        container_name = container_status.get("name", "nominatim")
+        state = container_status.get("state", {})
+        waiting = state.get("waiting") or {}
+        terminated = state.get("terminated") or {}
+        last_terminated = (container_status.get("lastState") or {}).get("terminated") or {}
+        restart_count = container_status.get("restartCount", 0) or 0
+
+        for current_reason, source, current_message in (
+            (waiting.get("reason"), "waiting", waiting.get("message")),
+            (terminated.get("reason"), "terminated", terminated.get("message")),
+            (last_terminated.get("reason"), "last terminated", last_terminated.get("message")),
+        ):
+            if not current_reason:
+                continue
+            if current_reason not in NOMINATIM_CRASH_REASONS and not (
+                current_reason in {"Error", "OOMKilled"} and restart_count > 0
+            ):
+                continue
+            log_tail = ""
+            try:
+                log_tail = KUBE.get_pod_logs(pod_name, tail_lines=20).strip()
+            except Exception as exc:  # noqa: BLE001
+                log_tail = f"Pod logs unavailable ({exc.__class__.__name__}): {exc}"
+
+            details = [
+                f"pod {pod_name} is in phase {phase}",
+                f"container {container_name} {source} reason: {current_reason}",
+            ]
+            if current_message:
+                details.append(current_message)
+            if log_tail:
+                details.append(f"Last logs:\n{log_tail}")
+            return " | ".join(details)
+
+    return None
 
 _detected_node_url_cache: "str | None" = None
 _detected_node_url_cache_time: float = 0.0
@@ -857,93 +892,9 @@ INDEX_HTML = """<!doctype html>
           <button id="build-btn" class="subtle" onclick="startBuild()">Build starten</button>
         </div>
         <div id="queue-count" class="hint">Keine Länder in der Queue.</div>
-        <div class="hint">Wählt ein Land aus, lädt den Geofabrik-Extrakt herunter und stellt es in die Queue. Der Build merged alle gewählten Länder und baut Routing, Tiles sowie Adress-/POI-Suche neu auf.</div>
+        <div class="hint">Wählt ein Land aus. Der Hinzufügen-Button prüft nur die Verfügbarkeit; der Build-Button schreibt den Auftrag an den Import-Orchestrator.</div>
       </div>
     </div>
-
-    <div class="card">
-      <h2>Routing Konfiguration</h2>
-      <div class="controls">
-        <div>
-          <label style="margin-bottom: 0.5rem; display: block;">Costing Modelle (Verkehrsmittel)</label>
-          <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer" title="Aktiviert Auto-Routing für PKW und Motorräder">
-            <input type="checkbox" id="routing-car-enabled" style="width:auto">
-            Auto
-          </label>
-          <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer" title="Aktiviert Fußgänger-Routing für Fußwege">
-            <input type="checkbox" id="routing-foot-enabled" style="width:auto">
-            Fußgänger
-          </label>
-          <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer" title="Aktiviert Fahrrad-Routing optimiert für Radwege">
-            <input type="checkbox" id="routing-bicycle-enabled" style="width:auto">
-            Fahrrad
-          </label>
-        </div>
-        <div>
-          <label>Geschwindigkeiten (km/h) - für Fahrtzeit-Berechnung</label>
-          <div class="row2">
-            <input type="number" id="routing-car-speed" placeholder="Auto (z.B. 120)" min="1" max="200" title="Durchschnittsgeschwindigkeit für Autos: typisch 80-130 km/h">
-            <input type="number" id="routing-foot-speed" placeholder="Fußgänger (z.B. 5)" min="1" max="10" title="Fußgänger-Geschwindigkeit: typisch 3-6 km/h">
-          </div>
-          <input type="number" id="routing-bicycle-speed" placeholder="Fahrrad (z.B. 25)" min="1" max="50" title="Fahrrad-Geschwindigkeit: typisch 15-30 km/h">
-        </div>
-        <details style="font-size: 0.82rem; margin-top: 0.5rem;">
-          <summary style="cursor: pointer; color: #2c7ab5; font-weight: 600;">Erweiterte Parameter</summary>
-          <div style="margin-top: 0.5rem; padding: 0.5rem; background: #f9f9f9; border-radius: 4px;">
-            <label style="margin-bottom: 0.3rem; display: block;">Auto-Parameter (Faktoren: 1.0 = normal, >1 = meiden, <1 = bevorzugen)</label>
-            <div class="row2" style="margin-bottom: 0.5rem;">
-              <input type="number" id="routing-car-toll" placeholder="Mautfaktor (z.B. 1.0)" step="0.1" min="0" max="10" title="1.0=neutral, 2.0=doppelt so teuer meiden, 0.5=bevorzugen">
-              <input type="number" id="routing-car-unpaved" placeholder="Unbef. Faktor (z.B. 1.0)" step="0.1" min="0" max="10" title="Unbefestigte Straßen: 1.0=neutral, >1.0=meiden">
-            </div>
-            <input type="number" id="routing-car-ferry" placeholder="Fähren-Faktor (z.B. 1.0)" step="0.1" min="0" max="10" title="Fährverbindungen: 1.0=neutral, >1.0=meiden">
-            <label style="margin-top: 0.5rem; margin-bottom: 0.3rem; display: block;">Fußgänger & Fahrrad-Parameter</label>
-            <div class="row2">
-              <input type="number" id="routing-ped-hill" placeholder="Hügel-Faktor Fußg. (z.B. 1.0)" step="0.1" min="0" max="10" title="Steigungen für Fußgänger: 1.0=neutral, >1.0=Hügel meiden">
-              <input type="number" id="routing-bike-hill" placeholder="Hügel-Faktor Bike (z.B. 1.0)" step="0.1" min="0" max="10" title="Steigungen für Fahrräder: 1.0=neutral, >1.0=Hügel meiden">
-            </div>
-          </div>
-        </details>
-        <button onclick="saveRoutingConfig()">Speichern</button>
-        <div id="routing-status" class="hint"></div>
-        <div class="hint">
-          Konfiguriert die Valhalla-Routing-Parameter. Geschwindigkeiten beeinflussen Fahrtzeit-Berechnung. 
-          Faktoren (erweitert): 1.0=neutral, >1.0=Route meiden, &lt;1.0=Route bevorzugen.
-        </div>
-      </div>
-     </div>
-
-     <div class="card">
-      <h2>Multi-Destinationen Routenplaner</h2>
-      <div class="controls">
-        <div>
-          <label style="margin-bottom: 0.5rem; display: block;">Wegpunkte hinzufügen</label>
-          <div id="route-waypoints">
-            <div class="waypoint-item" style="display:flex;gap:0.5rem;margin-bottom:0.5rem;">
-              <input type="text" class="waypoint-input" placeholder="Start (Adresse/Koordinaten)" style="flex:1" title="Adresse (z.B. 'Berlin') oder Koordinaten (z.B. '52.52,13.40')">
-              <button type="button" onclick="addWaypoint()" style="flex:0 0 auto; width: 100px;">+ Punkt</button>
-            </div>
-            <div class="waypoint-item" style="display:flex;gap:0.5rem;">
-              <input type="text" class="waypoint-input" placeholder="Ziel (Adresse/Koordinaten)" style="flex:1" title="Adresse oder Koordinaten des Ziels">
-              <button type="button" onclick="clearWaypoints()" style="flex:0 0 auto; width: 100px; background:#999;">Löschen</button>
-            </div>
-          </div>
-        </div>
-        <div class="row2">
-          <select id="route-costing" title="Wählen Sie das Verkehrsmittel für die Routenberechnung">
-            <option value="auto">Auto</option>
-            <option value="foot">Fußgänger</option>
-            <option value="bicycle">Fahrrad</option>
-          </select>
-          <button onclick="calculateRoute()">Route berechnen</button>
-        </div>
-        <div id="route-result" class="hint" style="margin-top: 0.5rem; display: none;"></div>
-        <div class="hint">
-          Geben Sie Start und Ziel ein, optional Zwischenpunkte mit "+ Punkt". 
-          Adressen werden automatisch geocodiert (Nominatim), Koordinaten im Format Lat,Lon (z.B. 52.5,13.4). 
-          Die Route wird über Valhalla mit den konfigurierten Routing-Parametern berechnet.
-        </div>
-      </div>
-     </div>
 
     <div class="card">
       <h2>Workflow Fortschritt</h2>
@@ -1243,121 +1194,6 @@ INDEX_HTML = """<!doctype html>
     }
   }
 
-  async function saveRoutingConfig() {
-    var config = {
-      routing_costing_models: {
-        car: {enabled: document.getElementById('routing-car-enabled').checked},
-        foot: {enabled: document.getElementById('routing-foot-enabled').checked},
-        bicycle: {enabled: document.getElementById('routing-bicycle-enabled').checked}
-      },
-      routing_speeds: {
-        car: parseInt(document.getElementById('routing-car-speed').value || 120),
-        foot: parseInt(document.getElementById('routing-foot-speed').value || 5),
-        bicycle: parseInt(document.getElementById('routing-bicycle-speed').value || 25)
-      },
-      routing_advanced: {
-        car: {
-          toll_factor: parseFloat(document.getElementById('routing-car-toll').value || 1.0),
-          unpaved_factor: parseFloat(document.getElementById('routing-car-unpaved').value || 1.0),
-          ferry_factor: parseFloat(document.getElementById('routing-car-ferry').value || 1.0)
-        },
-        foot: {
-          hill_factor: parseFloat(document.getElementById('routing-ped-hill').value || 1.0),
-          unpaved_factor: 1.0
-        },
-        bicycle: {
-          hill_factor: parseFloat(document.getElementById('routing-bike-hill').value || 1.0),
-          unpaved_factor: 1.0
-        }
-      }
-    };
-    var resp = await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(config)});
-    var statusDiv = document.getElementById('routing-status');
-    if (resp.ok) {
-      statusDiv.textContent = '✓ Routing-Konfiguration gespeichert.';
-      statusDiv.style.color = '#2ecc71';
-      setTimeout(function() { statusDiv.textContent = ''; }, 3000);
-    } else {
-      statusDiv.textContent = '✗ Fehler beim Speichern.';
-      statusDiv.style.color = '#e74c3c';
-    }
-  }
-
-  function addWaypoint() {
-    var container = document.getElementById('route-waypoints');
-    var item = document.createElement('div');
-    item.className = 'waypoint-item';
-    item.style.cssText = 'display:flex;gap:0.5rem;margin-bottom:0.5rem;';
-    item.innerHTML = '<input type="text" class="waypoint-input" placeholder="Zwischenpunkt (Adresse/Koordinaten)" style="flex:1"> <button type="button" onclick="this.parentElement.remove()" style="flex:0 0 auto; width: 100px; background:#999;">Entf.</button>';
-    container.insertBefore(item, container.lastElementChild);
-  }
-
-  function clearWaypoints() {
-    var container = document.getElementById('route-waypoints');
-    while (container.children.length > 2) {
-      container.children[1].remove();
-    }
-    container.querySelectorAll('.waypoint-input').forEach(function(inp) { inp.value = ''; });
-  }
-
-  async function calculateRoute() {
-    var waypoints = [];
-    document.querySelectorAll('.waypoint-input').forEach(function(inp) {
-      if (inp.value.trim()) waypoints.push(inp.value.trim());
-    });
-    if (waypoints.length < 2) {
-      alert('Mindestens 2 Wegpunkte erforderlich (Start und Ziel)');
-      return;
-    }
-    var costing = document.getElementById('route-costing').value;
-    var resultDiv = document.getElementById('route-result');
-    resultDiv.style.display = 'block';
-    resultDiv.textContent = 'Berechne Route...';
-    try {
-      var resp = await fetch('/api/routing/calculate', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({waypoints: waypoints, costing: costing})
-      });
-      if (resp.ok) {
-        var result = await resp.json();
-        var distance = (result.distance / 1000).toFixed(2);
-        var time = Math.round(result.time / 60);
-        resultDiv.textContent = '✓ Route: ' + distance + ' km, ca. ' + time + ' Minuten';
-        resultDiv.style.color = '#2ecc71';
-      } else {
-        var err = await resp.json();
-        resultDiv.textContent = '✗ ' + (err.error || 'Fehler bei Routenberechnung');
-        resultDiv.style.color = '#e74c3c';
-      }
-    } catch (e) {
-      resultDiv.textContent = '✗ Fehler: ' + e.message;
-      resultDiv.style.color = '#e74c3c';
-    }
-  }
-
-  function loadRoutingConfig() {
-    fetch('/api/config').then(function(r) { return r.json(); }).then(function(cfg) {
-      if (cfg.routing_costing_models) {
-        document.getElementById('routing-car-enabled').checked = cfg.routing_costing_models.car?.enabled ?? true;
-        document.getElementById('routing-foot-enabled').checked = cfg.routing_costing_models.foot?.enabled ?? true;
-        document.getElementById('routing-bicycle-enabled').checked = cfg.routing_costing_models.bicycle?.enabled ?? true;
-      }
-      if (cfg.routing_speeds) {
-        document.getElementById('routing-car-speed').value = cfg.routing_speeds.car || 120;
-        document.getElementById('routing-foot-speed').value = cfg.routing_speeds.foot || 5;
-        document.getElementById('routing-bicycle-speed').value = cfg.routing_speeds.bicycle || 25;
-      }
-      if (cfg.routing_advanced) {
-        document.getElementById('routing-car-toll').value = cfg.routing_advanced.car?.toll_factor || 1.0;
-        document.getElementById('routing-car-unpaved').value = cfg.routing_advanced.car?.unpaved_factor || 1.0;
-        document.getElementById('routing-car-ferry').value = cfg.routing_advanced.car?.ferry_factor || 1.0;
-        document.getElementById('routing-ped-hill').value = cfg.routing_advanced.foot?.hill_factor || 1.0;
-        document.getElementById('routing-bike-hill').value = cfg.routing_advanced.bicycle?.hill_factor || 1.0;
-      }
-    }).catch(function(e) { console.error('Fehler beim Laden der Routing-Konfiguration:', e); });
-  }
-
   async function refresh() {
     try {
       var resp = await fetch('/api/status');
@@ -1423,7 +1259,6 @@ INDEX_HTML = """<!doctype html>
   }
 
   loadConfig();
-  loadRoutingConfig();
   refresh();
   </script>
 </body>
@@ -1503,12 +1338,6 @@ def apply_config_update(payload):
         if not valid_time_value(time_value):
             raise ValueError("auto_update_time must use HH:MM format.")
         config["auto_update_time"] = time_value
-    if "routing_costing_models" in payload:
-        config["routing_costing_models"] = payload["routing_costing_models"]
-    if "routing_speeds" in payload:
-        config["routing_speeds"] = payload["routing_speeds"]
-    if "routing_advanced" in payload:
-        config["routing_advanced"] = payload["routing_advanced"]
     return save_config(config)
 
 
@@ -1689,6 +1518,21 @@ def resolve_country_request(payload):
     raise ValueError("Choose a country or provide custom country details.")
 
 
+def verify_country_url(country):
+    request = urllib.request.Request(
+        country["url"],
+        headers={"User-Agent": "localosm-status/1.0"},
+        method="HEAD",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return 200 <= response.status < 400
+    except urllib.error.HTTPError as exc:
+        return exc.code in {200, 301, 302, 303, 307, 308}
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"Could not verify {country['name']} ({country['url']}): {exc}")
+
+
 def collect_status():
     try:
         ensure_dirs()
@@ -1749,6 +1593,25 @@ def collect_status():
     }
 
 
+def write_import_request(records):
+    payload = {
+        "requested_at": now_iso(),
+        "countries": [
+            {
+                "slug": record.get("slug", ""),
+                "name": record.get("name", ""),
+                "url": record.get("url", ""),
+                "continent": record.get("continent", ""),
+            }
+            for record in records
+            if record.get("slug") and record.get("url")
+        ],
+        "count": len([record for record in records if record.get("slug") and record.get("url")]),
+    }
+    save_json(IMPORT_REQUEST_FILE, payload)
+    return payload
+
+
 def run_command(args, *, input_text=None, check=True, timeout=60):
     try:
         result = subprocess.run(
@@ -1774,21 +1637,7 @@ def validate_pbf_file(path, *, label="OSM extract"):
         raise RuntimeError(f"{label} not found: {path}")
     if os.path.getsize(path) <= 0:
         raise RuntimeError(f"{label} is empty: {path}")
-    try:
-        run_command(["osmium", "fileinfo", "-F", "pbf", path], timeout=120)
-    except RuntimeError as e:
-        error_msg = str(e)
-        # Some PBF files have larger blob headers than osmium fileinfo's strict limit.
-        # When this occurs, try osmium cat as a more lenient fallback validation.
-        if "blobheader" not in error_msg.lower().replace(" ", ""):
-            # Not a BlobHeader error, re-raise the original error
-            raise
-        # Try the fallback validation with osmium cat
-        try:
-            run_command(["osmium", "cat", "-o", "/dev/null", path], timeout=120)
-        except RuntimeError:
-            # If osmium cat also fails, report the original fileinfo error
-            raise e
+    run_command(["osmium", "fileinfo", "-F", "pbf", path], timeout=120)
 
 
 def clear_directory(path):
@@ -1927,7 +1776,10 @@ def build_valhalla_job_manifest():
                             "name": "valhalla-import",
                             "image": "ghcr.io/gis-ops/docker-valhalla/valhalla:latest",
                             "imagePullPolicy": "Always",
-                            "resources": {"requests": {"memory": "18Gi", "cpu": "6"}, "limits": {"memory": "18Gi", "cpu": "6"}},
+                            "resources": {
+                                "requests": {"memory": "14Gi", "cpu": "4"},
+                                "limits": {"memory": "14Gi", "cpu": "6"},
+                            },
                             "securityContext": {"runAsUser": 0, "runAsGroup": 0},
                             "command": ["/bin/sh", "-c"],
                             "args": [
@@ -2118,7 +1970,7 @@ def rebuild_valhalla(country):
     KUBE.create_job(build_valhalla_job_manifest())
 
     job_start = time.time()
-    deadline = job_start + 21600
+    deadline = job_start + 7200
     while time.time() < deadline:
         try:
             job_data = KUBE.get_job("valhalla-import")
@@ -2203,7 +2055,7 @@ def rebuild_tileserver(country):
     KUBE.create_job(build_tileserver_job_manifest())
 
     job_start = time.time()
-    deadline = job_start + 21600
+    deadline = job_start + 7200
     while time.time() < deadline:
         try:
             job_data = KUBE.get_job("tilemaker-import")
@@ -2283,42 +2135,28 @@ def wait_for_nominatim_pods_to_stop(timeout_seconds=300):
     raise RuntimeError("Timed out waiting for the Nominatim pod to stop.")
 
 
-def is_nominatim_import_running():
-    try:
-        pods = KUBE.list_pods("app=nominatim")
-    except RuntimeError:
-        return False
-    if not pods.get("items"):
-        return False
-    ok, _ = check_http("http://nominatim.osm.svc.cluster.local:8080/")
-    return not ok
-
 
 def wait_for_nominatim_ready(country):
-    deadline = _get_nominatim_wait_deadline()
-    wait_start_time = time.monotonic()
-    last_log_time = wait_start_time
-    while True:
-        if deadline is not None and time.monotonic() >= deadline:
-            raise RuntimeError(
-                "Timed out waiting for Nominatim to become ready. "
-                "Increase NOMINATIM_MAX_WAIT_SECONDS to wait longer."
-            )
+    deadline = time.time() + 7200
+    while time.time() < deadline:
         try:
             deployment = KUBE.get_deployment("nominatim")
         except RuntimeError:
             time.sleep(10)
             continue
+        crash_detail = describe_nominatim_crash()
+        if crash_detail:
+            raise RuntimeError(f"Nominatim failed to start: {crash_detail}")
         status = deployment.get("status", {})
         ready = status.get("readyReplicas", 0)
-        ok, probe_detail = check_http("http://nominatim.osm.svc.cluster.local:8080/")
+        ok, detail = check_http("http://nominatim.osm.svc.cluster.local:8080/")
         if ready >= 1 and ok:
             write_workflow_state(
                 running=True,
                 phase="search",
                 progress=95,
                 message="Nominatim address + POI search is ready.",
-                detail=probe_detail,
+                detail=detail,
                 country=country["name"],
                 error="",
             )
@@ -2328,138 +2166,40 @@ def wait_for_nominatim_ready(country):
             phase="search",
             progress=88,
             message="Nominatim is importing the merged dataset ...",
-            detail=f"Ready replicas: {ready}. Last probe: {probe_detail}",
+            detail=f"Ready replicas: {ready}. Last probe: {detail}",
             country=country["name"],
             error="",
-        )
-        last_log_time = _maybe_log_nominatim_wait(
-            last_log_time,
-            f"Nominatim still importing after {int(time.monotonic() - wait_start_time)}s; last probe: {probe_detail}",
         )
         time.sleep(10)
-
-
-def wait_for_nominatim_import_if_running(country, timeout_seconds=None):
-    """
-    Check if Nominatim import is already in progress (after scaling up from previous cycle).
-    If the pod is running, wait for it to become ready (via HTTP health check) before allowing
-    scale down. This prevents race condition where scale down/up aborts running imports.
-    When Nominatim responds to HTTP requests, the import/initialization is complete.
-    If NOMINATIM_MAX_WAIT_SECONDS is set to a positive value, the wait ends at the configured
-    deadline and raises RuntimeError if Nominatim is still not ready.
-    If NOMINATIM_MAX_WAIT_SECONDS is 0 or negative, the wait continues for the
-    default timeout (DEFAULT_NOMINATIM_WAIT_SECONDS) unless a different timeout_seconds
-    value is provided.
-
-    Args:
-        country: Dictionary containing country metadata, must have a 'name' key for workflow status updates
-        timeout_seconds: Retained for compatibility only; used only if NOMINATIM_MAX_WAIT_SECONDS
-            is unset or non-positive.
-
-    Raises:
-        RuntimeError: If the configured deadline is reached before Nominatim becomes ready.
-    """
-    warn_timeout_deprecated = timeout_seconds is not None
-    if timeout_seconds is None:
-        timeout_seconds = DEFAULT_NOMINATIM_WAIT_SECONDS
-    if warn_timeout_deprecated:
-        print(
-            "DEPRECATION WARNING: timeout_seconds is deprecated; NOMINATIM_MAX_WAIT_SECONDS takes precedence.",
-            flush=True,
-        )
-    deadline = _get_nominatim_wait_deadline(timeout_seconds)
-    wait_start_time = time.monotonic()
-    last_log_time = wait_start_time
-
-    while True:
-        if deadline is not None and time.monotonic() >= deadline:
-            raise RuntimeError(
-                "Timed out waiting for Nominatim import to complete. "
-                "Increase NOMINATIM_MAX_WAIT_SECONDS to wait longer."
-            )
-        try:
-            pods = KUBE.list_pods("app=nominatim")
-            pod_running = bool(pods.get("items", []))
-        except RuntimeError:
-            # Kubernetes API temporarily unavailable, retry after delay
-            time.sleep(5)
-            continue
-        
-        if pod_running:
-            # Pod is running - check if Nominatim service is ready (health check)
-            # When Nominatim responds to HTTP requests, import/initialization is complete
-            ok, probe_detail = check_http("http://nominatim.osm.svc.cluster.local:8080/")
-            if ok:
-                # Nominatim is ready, import is complete
-                print(f"Nominatim import/initialization complete - service is ready", flush=True)
-                return
-            
-            # Pod is running but not ready yet
-            elapsed_total = time.monotonic() - wait_start_time
-            write_workflow_state(
-                running=True,
-                phase="search",
-                progress=NOMINATIM_REBUILD_PROGRESS,
-                message="Refreshing Nominatim for address and POI search ...",
-                detail=f"Waiting for Nominatim to become ready (waiting {int(elapsed_total)}s)... {probe_detail}",
-                country=country["name"],
-                error="",
-            )
-            
-            # If pod has been running for a long time without becoming ready, log warning
-            last_log_time = _maybe_log_nominatim_wait(
-                last_log_time,
-                f"Nominatim import still running after {int(elapsed_total)}s; last probe: {probe_detail}",
-            )
-
-            time.sleep(10)
-        else:
-            # Pod not running - safe to proceed (no import in progress)
-            return
-
+    raise RuntimeError("Timed out waiting for Nominatim to become ready.")
 
 def rebuild_nominatim(country):
-    # If Nominatim is already importing, continue that import instead of wiping it.
-    if is_nominatim_import_running():
-        write_workflow_state(
-            running=True,
-            phase="search",
-            progress=NOMINATIM_REBUILD_PROGRESS,
-            message="Nominatim import already started - continuing ...",
-            detail="An existing import is still running, so the current data directory is kept.",
-            country=country["name"],
-            error="",
-        )
-        wait_for_nominatim_ready(country)
-        return
-
-    if _nominatim_import_finished():
-        write_workflow_state(
-            running=True,
-            phase="search",
-            progress=NOMINATIM_REBUILD_PROGRESS,
-            message="Nominatim is rebuilding from scratch for the new map ...",
-            detail="Previous import finished, so the existing data directory is cleared before the new map is installed.",
-            country=country["name"],
-            error="",
-        )
+    write_workflow_state(
+        running=True,
+        phase="search",
+        progress=82,
+        message="Refreshing Nominatim for address and POI search ...",
+        detail="Scaling the Nominatim deployment down before reimport.",
+        country=country["name"],
+        error="",
+    )
+    try:
         scale_nominatim(0)
         wait_for_nominatim_pods_to_stop()
         clear_directory(NOMINATIM_DIR)
-    else:
+        scale_nominatim(1)
+        wait_for_nominatim_ready(country)
+    except Exception as exc:  # noqa: BLE001
         write_workflow_state(
-            running=True,
-            phase="search",
-            progress=NOMINATIM_REBUILD_PROGRESS,
-            message="Nominatim import was interrupted - continuing ...",
-            detail="Existing database files are kept so the import can resume instead of starting over.",
+            running=False,
+            phase="error",
+            progress=100,
+            message="Nominatim failed to start after the rebuild.",
+            detail="Check the Nominatim pod logs and status for the crash reason.",
             country=country["name"],
-            error="",
+            error=str(exc),
         )
-    scale_nominatim(1)
-    wait_for_nominatim_ready(country)
-
-
+        raise
 def run_parallel_build_steps(country, records=None):
     merge_library_files(country, records=records)
     valhalla_err = [None]
@@ -2505,20 +2245,21 @@ def run_queue_workflow(country):
             running=True,
             phase="queued",
             progress=2,
-            message=f"Preparing queue download for {country['name']}.",
-            detail="Preparing directories and state files.",
+            message=f"Checking {country['name']} extract availability.",
+            detail="Verifying that the selected map still exists on the download server.",
             country=country["name"],
             error="",
         )
-        download_country_file(country)
+        if not verify_country_url(country):
+            raise RuntimeError(f"{country['name']} is not available anymore.")
         upsert_country_record(country, status="queued", last_error="")
         queued_count = len([record for record in list_library_records() if record.get("status") == "queued"])
         write_workflow_state(
             running=False,
             phase="queued",
             progress=45,
-            message=f"{country['name']} downloaded and queued.",
-            detail=f"{queued_count} country/countries waiting for the next build.",
+            message=f"{country['name']} added to the build queue.",
+            detail=f"{queued_count} country/countries are waiting for the next Build step.",
             country=country["name"],
             error="",
         )
@@ -2544,26 +2285,17 @@ def run_build_workflow(country=None):
         records = [
             record
             for record in list_library_records()
-            if record.get("pbf_path") and record.get("status") in {"queued", "ready"}
+            if record.get("status") in {"queued", "ready"}
         ]
         if not records:
             raise RuntimeError("No queued or ready countries available for a build.")
-        write_workflow_state(
-            running=True,
-            phase="building",
-            progress=40,
-            message="Starting library build ...",
-            detail=f"Preparing {len(records)} queued/ready country extract(s) for the shared build pipeline.",
-            country=country["name"],
-            error="",
-        )
-        run_parallel_build_steps(country, records=records)
+        request = write_import_request(records)
         write_workflow_state(
             running=False,
-            phase="done",
-            progress=100,
-            message="Library build completed.",
-            detail="Merged extract, local tiles, routing and search data are ready.",
+            phase="queued",
+            progress=50,
+            message="Build request handed to the import orchestrator.",
+            detail=f"{request['count']} country/countries queued for download and processing.",
             country=country["name"],
             error="",
         )
@@ -2582,42 +2314,7 @@ def run_build_workflow(country=None):
 
 
 def run_country_workflow(country):
-    try:
-        ensure_dirs()
-        upsert_country_record(country, status="pending", added_at=now_iso(), last_error="")
-        write_workflow_state(
-            running=True,
-            phase="queued",
-            progress=2,
-            message=f"Starting library update for {country['name']}.",
-            detail="Preparing directories and state files.",
-            country=country["name"],
-            error="",
-        )
-        download_country_file(country)
-        run_parallel_build_steps(country)
-        write_workflow_state(
-            running=False,
-            phase="done",
-            progress=100,
-            message=f"{country['name']} added to the library.",
-            detail="Merged extract, local tiles, routing and address search are ready.",
-            country=country["name"],
-            error="",
-        )
-    except Exception as exc:  # noqa: BLE001
-        upsert_country_record(country, status="error", last_error=str(exc))
-        write_workflow_state(
-            running=False,
-            phase="error",
-            progress=100,
-            message=f"Library update failed for {country['name']}.",
-            detail="See the captured error below.",
-            country=country["name"],
-            error=str(exc),
-        )
-    finally:
-        finish_workflow_thread()
+    run_queue_workflow(country)
 
 
 def start_country_workflow(payload):
@@ -2648,7 +2345,7 @@ def start_build_workflow():
     thread.start()
     return {
         "count": len(
-            [record for record in list_library_records() if record.get("pbf_path") and record.get("status") in {"queued", "ready"}]
+            [record for record in list_library_records() if record.get("status") in {"queued", "ready"}]
         )
     }
 
@@ -2678,92 +2375,6 @@ def run_scheduler_loop():
             print(f"Auto-update scheduler error: {exc}", flush=True)
         finally:
             SCHEDULER_LOCK.release()
-
-
-def calculate_multi_leg_route(payload):
-    """Calculate a multi-leg route via Valhalla API."""
-    waypoints = payload.get("waypoints", [])
-    costing = payload.get("costing", "auto")
-    
-    if not waypoints or len(waypoints) < 2:
-        raise ValueError("At least 2 waypoints (start and destination) required.")
-    
-    # Parse waypoints - they can be "lat,lon" or address-like strings
-    # For now, we'll assume format is "lat,lon" or try to geocode via nominatim
-    locations = []
-    for wp in waypoints:
-        parts = wp.strip().split(",")
-        if len(parts) != 2:
-            raise ValueError(f"Invalid waypoint format: {wp}. Expected 'lat,lon' format (e.g., '52.5200,13.4050'). For addresses, use a comma-separated format that Nominatim can parse (e.g., 'city, country' or 'street, city').")
-         
-        try:
-            lat = float(parts[0].strip())
-            lon = float(parts[1].strip())
-            locations.append({"lat": lat, "lon": lon})
-        except ValueError:
-            # Try geocoding via nominatim as fallback
-            try:
-                resp = urllib.request.urlopen(
-                    f"http://nominatim.osm.svc.cluster.local:8080/search?"
-                    f"q={urllib.parse.quote(wp.strip())}&format=json&limit=1",
-                    timeout=5
-                )
-                data = json.loads(resp.read().decode("utf-8"))
-                if data:
-                    locations.append({"lat": float(data[0]["lat"]), "lon": float(data[0]["lon"])})
-                else:
-                    raise ValueError(f"Could not geocode address '{wp}' (no results from Nominatim)")
-            except Exception as e:
-                raise ValueError(f"Invalid waypoint '{wp}': not in 'lat,lon' format and geocoding failed: {e}")
-    
-    # Map costing model
-    costing_map = {
-        "auto": "auto",
-        "car": "auto",
-        "foot": "pedestrian",
-        "pedestrian": "pedestrian",
-        "bicycle": "bicycle",
-        "bike": "bicycle",
-    }
-    valhalla_costing = costing_map.get(costing.lower(), "auto")
-    
-    # Build Valhalla request
-    valhalla_request = {
-        "locations": locations,
-        "costing": valhalla_costing,
-        "directions_options": {"language": "en"},
-    }
-    
-    # Call Valhalla API
-    try:
-        valhalla_url = "http://valhalla.osm.svc.cluster.local:8002/route"
-        req = urllib.request.Request(
-            valhalla_url,
-            data=json.dumps(valhalla_request).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=10) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except Exception as e:
-        raise RuntimeError(f"Valhalla routing failed: {e}")
-    
-    # Extract summary info
-    if "trip" not in result or not result["trip"].get("legs"):
-        raise ValueError("No route found for the given waypoints.")
-    
-    trip = result["trip"]
-    total_distance = sum(leg.get("distance", 0) for leg in trip.get("legs", []))
-    total_time = sum(leg.get("time", 0) for leg in trip.get("legs", []))
-    
-    return {
-        "distance": total_distance,
-        "time": total_time,
-        "distance_km": round(total_distance / 1000, 2),
-        "time_minutes": int(round(total_time / 60)),
-        "waypoints_count": len(waypoints),
-        "costing": costing,
-    }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -2880,21 +2491,6 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"status": "started", "build": build})
             return
 
-        if self.path == "/api/library/reset-import":
-            # Manual endpoint to reset stuck import status when Nominatim import is actually complete
-            # but the system thinks it's still running
-            write_workflow_state(
-                running=False,
-                phase="done",
-                progress=100,
-                message="Nominatim import status manually reset.",
-                detail="The import status was manually cleared. You can now add new countries.",
-                country="",
-                error="",
-            )
-            self._send_json({"status": "reset", "message": "Import status cleared. You can now add new countries."})
-            return
-
         if self.path == "/api/config":
             try:
                 config = apply_config_update(payload)
@@ -2902,18 +2498,6 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(exc)}, 400)
                 return
             self._send_json(config)
-            return
-
-        if self.path == "/api/routing/calculate":
-            try:
-                result = calculate_multi_leg_route(payload)
-                self._send_json(result)
-            except ValueError as exc:
-                self._send_json({"error": str(exc)}, 400)
-                return
-            except RuntimeError as exc:
-                self._send_json({"error": str(exc)}, 503)
-                return
             return
 
         self._send_json({"error": "not found"}, 404)
