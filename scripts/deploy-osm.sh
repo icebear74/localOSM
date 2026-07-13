@@ -136,7 +136,16 @@ done
 
 terminate_existing_pods() {
   for deployment in "${DEPLOYMENTS[@]}"; do
-    kubectl -n "${NAMESPACE}" delete pod -l "app=${deployment}" --ignore-not-found --wait=true >/dev/null 2>&1 || true
+    kubectl -n "${NAMESPACE}" scale "deployment/${deployment}" --replicas=0 >/dev/null 2>&1 || true
+  done
+
+  for deployment in "${DEPLOYMENTS[@]}"; do
+    for _ in $(seq 1 60); do
+      if ! kubectl -n "${NAMESPACE}" get pods -l "app=${deployment}" --no-headers 2>/dev/null | grep -q .; then
+        break
+      fi
+      sleep 2
+    done
   done
 }
 
