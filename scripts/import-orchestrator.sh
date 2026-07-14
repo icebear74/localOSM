@@ -200,6 +200,7 @@ spec:
               apt-get update >/dev/null
               apt-get install -y --no-install-recommends osmium-tool >/dev/null
               echo "osmium-tool installed."
+              # -u: unbuffered stdout so progress prints show up live in kubectl logs.
               python3 -u - <<'PY'
               import json
               import os
