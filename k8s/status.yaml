@@ -1760,7 +1760,7 @@ data:
             # cached/downloaded files were relative to each other.
             run_command(["osmium", "merge", "--overwrite", "-o", tmp_path, "-f", "pbf", *input_paths], timeout=7200)
             dedup_output_path = f"{MERGED_PBF}.dedup"
-            run_command(["osmium", "time-filter", "--overwrite", "-o", dedup_output_path, "-f", "pbf", tmp_path], timeout=7200)
+            run_command(["osmium", "time-filter", "--overwrite", "-o", dedup_output_path, "-f", "pbf", "-F", "pbf", tmp_path], timeout=7200)
             os.replace(dedup_output_path, tmp_path)
         validate_pbf_file(tmp_path, label="Merged library extract")
         os.replace(tmp_path, MERGED_PBF)

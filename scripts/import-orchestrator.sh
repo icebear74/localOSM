@@ -196,9 +196,11 @@ spec:
             - |
               set -euo pipefail
               export DEBIAN_FRONTEND=noninteractive
+              echo "Installing osmium-tool ..."
               apt-get update >/dev/null
               apt-get install -y --no-install-recommends osmium-tool >/dev/null
-              python3 - <<'PY'
+              echo "osmium-tool installed."
+              python3 -u - <<'PY'
               import json
               import os
               import shutil
@@ -226,17 +228,23 @@ spec:
                   dest = library_dir / f'{slug}.osm.pbf'
                   temp = library_dir / f'{slug}.osm.pbf.part'
                   if not dest.exists() or dest.stat().st_size <= 0:
+                      print(f'Downloading {slug} from {url} ...')
                       req = urllib.request.Request(url, headers={'User-Agent': 'localosm-import-orchestrator/1.0'})
                       with urllib.request.urlopen(req, timeout=300) as response, temp.open('wb') as handle:
                           shutil.copyfileobj(response, handle)
                       os.replace(temp, dest)
+                      print(f'Downloaded {slug}.')
+                  else:
+                      print(f'Using cached extract for {slug}.')
                   paths.append(str(dest))
 
               merged = import_dir / 'planet.osm.pbf'
               temp_merged = import_dir / 'planet.osm.pbf.tmp'
               if len(paths) == 1:
+                  print('Only one extract selected; copying it directly.')
                   shutil.copyfile(paths[0], temp_merged)
               else:
+                  print(f'Merging {len(paths)} extracts ...')
                   try:
                       subprocess.run(['osmium', 'merge', '--overwrite', '-o', str(temp_merged), '-f', 'pbf', *paths], check=True)
                   except subprocess.CalledProcessError as exc:
@@ -259,17 +267,20 @@ spec:
                   # individual cached/downloaded files were relative to each
                   # other.
                   dedup_output_path = import_dir / 'planet.osm.pbf.dedup'
+                  print('Deduplicating merged extract ...')
                   try:
-                      subprocess.run(['osmium', 'time-filter', '--overwrite', '-o', str(dedup_output_path), '-f', 'pbf', str(temp_merged)], check=True)
+                      subprocess.run(['osmium', 'time-filter', '--overwrite', '-o', str(dedup_output_path), '-f', 'pbf', '-F', 'pbf', str(temp_merged)], check=True)
                   except subprocess.CalledProcessError as exc:
                       joined = ', '.join(country['slug'] for country in countries)
                       raise RuntimeError(f'Could not deduplicate merged extract for: {joined}') from exc
                   os.replace(dedup_output_path, temp_merged)
+              print('Validating merged extract ...')
               try:
                   subprocess.run(['osmium', 'fileinfo', '-F', 'pbf', str(temp_merged)], check=True)
               except subprocess.CalledProcessError as exc:
                   raise RuntimeError(f'Invalid merged PBF: {temp_merged}') from exc
               os.replace(temp_merged, merged)
+              print('Merged extract ready.')
 
               countries_path = data_dir / 'status' / 'countries.json'
               try:
@@ -388,17 +399,25 @@ main() {
 
     if request_has_countries; then
       if ! prepare_import_data; then
+        log "Import preparation failed; discarding import request to avoid retrying the same failing request in a loop."
+        rm -f "${REQUEST_FILE}"
         continue
       fi
     fi
 
     if ! run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${DATA_DIR}/tileserver/staging" "tileserver-gl"; then
+      log "TileServer import failed; discarding import request to avoid retrying the same failing request in a loop."
+      rm -f "${REQUEST_FILE}"
       continue
     fi
     if ! run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${DATA_DIR}/nominatim/staging" "nominatim"; then
+      log "Nominatim import failed; discarding import request to avoid retrying the same failing request in a loop."
+      rm -f "${REQUEST_FILE}"
       continue
     fi
     if ! run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${DATA_DIR}/valhalla/staging" "valhalla"; then
+      log "Valhalla import failed; discarding import request to avoid retrying the same failing request in a loop."
+      rm -f "${REQUEST_FILE}"
       continue
     fi
 
