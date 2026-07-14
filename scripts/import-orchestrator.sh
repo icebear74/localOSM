@@ -258,13 +258,13 @@ spec:
                   # duplicate-free extract regardless of how stale the
                   # individual cached/downloaded files were relative to each
                   # other.
-                  dedup_merged = import_dir / 'planet.osm.pbf.dedup'
+                  dedup_output_path = import_dir / 'planet.osm.pbf.dedup'
                   try:
-                      subprocess.run(['osmium', 'time-filter', '--overwrite', '-o', str(dedup_merged), '-f', 'pbf', str(temp_merged)], check=True)
+                      subprocess.run(['osmium', 'time-filter', '--overwrite', '-o', str(dedup_output_path), '-f', 'pbf', str(temp_merged)], check=True)
                   except subprocess.CalledProcessError as exc:
                       joined = ', '.join(country['slug'] for country in countries)
                       raise RuntimeError(f'Could not deduplicate merged extract for: {joined}') from exc
-                  os.replace(dedup_merged, temp_merged)
+                  os.replace(dedup_output_path, temp_merged)
               try:
                   subprocess.run(['osmium', 'fileinfo', '-F', 'pbf', str(temp_merged)], check=True)
               except subprocess.CalledProcessError as exc:
