@@ -76,9 +76,9 @@ spec:
       volumes:
         - name: osm-data
           hostPath:
-            path: /mnt/data/OSM/tileserver/staging
+            path: /mnt/data/OSMTemp/tileserver/staging
             type: DirectoryOrCreate
         - name: import-data
           hostPath:
-            path: /mnt/data/OSM/import
+            path: /mnt/data/OSMTemp/import
             type: DirectoryOrCreate

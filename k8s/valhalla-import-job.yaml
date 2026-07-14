@@ -57,11 +57,11 @@ spec:
       volumes:
         - name: import-data
           hostPath:
-            path: /mnt/data/OSM/import
+            path: /mnt/data/OSMTemp/import
             type: DirectoryOrCreate
         - name: valhalla-data
           hostPath:
-            path: /mnt/data/OSM/valhalla/staging
+            path: /mnt/data/OSMTemp/valhalla/staging
             type: DirectoryOrCreate
         - name: valhalla-config
           configMap:

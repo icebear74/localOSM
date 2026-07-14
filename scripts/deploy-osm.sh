@@ -4,15 +4,16 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NAMESPACE="osm"
 BASE_DIR="/mnt/data/OSM"
+TEMP_BASE_DIR="${OSM_TEMP_DIR:-/mnt/data/OSMTemp}"
 DEPLOYMENTS=(postgres tileserver-gl nominatim valhalla import-orchestrator status web)
-PRESERVE_PATHS=("${BASE_DIR}/import" "${BASE_DIR}/library" "${BASE_DIR}/status")
+PRESERVE_PATHS=("${BASE_DIR}/library" "${BASE_DIR}/status")
 CLEAN=false
 PRESERVE_DOWNLOADS=false
 NODE_URL=""
 
 usage() {
   cat <<EOF
-Usage: $0 [--clean] [--preserve-downloads] [--node-url <url>]
+Usage: $0 [--clean] [--preserve-downloads] [--node-url <url>] [--temp-dir <path>]
 EOF
 }
 
@@ -21,6 +22,7 @@ while [[ $# -gt 0 ]]; do
     --clean) CLEAN=true; shift ;;
     --preserve-downloads) PRESERVE_DOWNLOADS=true; shift ;;
     --node-url) NODE_URL="$2"; shift 2 ;;
+    --temp-dir) TEMP_BASE_DIR="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -59,6 +61,11 @@ if ! is_safe_basedir "${BASE_DIR}"; then
   exit 1
 fi
 
+if ! is_safe_basedir "${TEMP_BASE_DIR}"; then
+  echo "ERROR: TEMP_BASE_DIR='${TEMP_BASE_DIR}' does not look like a safe data directory." >&2
+  exit 1
+fi
+
 namespace_exists() {
   kubectl get namespace "${NAMESPACE}" >/dev/null 2>&1
 }
@@ -94,6 +101,17 @@ clean_data_directory() {
   fi
 }
 
+# OSMTemp only ever holds scratch/staging data for an in-progress import, so
+# on a clean start its contents can always be discarded outright. Only the
+# contents are removed — the directory (mount point) itself, which the user
+# creates and mounts, is left untouched.
+clean_temp_directory() {
+  echo ">>> Deleting contents of temporary scratch directory ${TEMP_BASE_DIR} …"
+  if [ -d "${TEMP_BASE_DIR}" ]; then
+    ${SUDO} find "${TEMP_BASE_DIR:?}" -mindepth 1 -maxdepth 10 -delete
+  fi
+}
+
 if [ "$CLEAN" = true ]; then
   echo "========================================"
   echo "  CLEAN START — all existing data will"
@@ -113,6 +131,7 @@ if [ "$CLEAN" = true ]; then
     kubectl get namespace "${NAMESPACE}" -o json 2>/dev/null | python3 -c 'import json,sys; o=json.load(sys.stdin); o.setdefault("spec",{}); o["spec"]["finalizers"]=[]; print(json.dumps(o))' | kubectl replace --raw "/api/v1/namespaces/${NAMESPACE}/finalize" -f - >/dev/null 2>&1 || true
   fi
   clean_data_directory
+  clean_temp_directory
 fi
 
 echo ">>> Creating host directories under ${BASE_DIR} …"
@@ -120,17 +139,22 @@ for dir in \
   "${BASE_DIR}/postgres/data" \
   "${BASE_DIR}/library" \
   "${BASE_DIR}/tileserver/active" \
-  "${BASE_DIR}/tileserver/staging" \
   "${BASE_DIR}/tileserver/fonts" \
   "${BASE_DIR}/nominatim/active" \
-  "${BASE_DIR}/nominatim/staging" \
   "${BASE_DIR}/valhalla/active" \
-  "${BASE_DIR}/valhalla/staging" \
-  "${BASE_DIR}/import" \
   "${BASE_DIR}/cache" \
   "${BASE_DIR}/status" \
   "${BASE_DIR}/manifests" \
   "${BASE_DIR}/scripts"; do
+  ${SUDO} mkdir -p "$dir"
+done
+
+echo ">>> Creating temporary scratch directories under ${TEMP_BASE_DIR} …"
+for dir in \
+  "${TEMP_BASE_DIR}/import" \
+  "${TEMP_BASE_DIR}/tileserver/staging" \
+  "${TEMP_BASE_DIR}/nominatim/staging" \
+  "${TEMP_BASE_DIR}/valhalla/staging"; do
   ${SUDO} mkdir -p "$dir"
 done
 
@@ -153,11 +177,15 @@ ${SUDO} chown -R 999:999  "${BASE_DIR}/postgres"   2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${BASE_DIR}/tileserver" 2>/dev/null || true
 ${SUDO} chown -R 100:100   "${BASE_DIR}/nominatim"  2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${BASE_DIR}/valhalla"   2>/dev/null || true
-${SUDO} chown -R 1000:1000 "${BASE_DIR}/import"     2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${BASE_DIR}/cache"      2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${BASE_DIR}/status"     2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${BASE_DIR}/manifests"  2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${BASE_DIR}/scripts"     2>/dev/null || true
+
+${SUDO} chown -R 1000:1000 "${TEMP_BASE_DIR}/import"              2>/dev/null || true
+${SUDO} chown -R 1000:1000 "${TEMP_BASE_DIR}/tileserver"          2>/dev/null || true
+${SUDO} chown -R 100:100   "${TEMP_BASE_DIR}/nominatim"           2>/dev/null || true
+${SUDO} chown -R 1000:1000 "${TEMP_BASE_DIR}/valhalla"            2>/dev/null || true
 
 echo ">>> Copying static manifests and orchestrator script …"
 for manifest in \

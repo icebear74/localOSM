@@ -99,12 +99,13 @@ data:
     HOST = os.environ.get("STATUS_HOST", "0.0.0.0")
     PORT = parse_int_env("STATUS_PORT", 8080)
     DATA_DIR = os.environ.get("OSM_DATA_DIR", "/mnt/data/OSM")
+    TEMP_DIR = os.environ.get("OSM_TEMP_DIR", "/mnt/data/OSMTemp")
     NAMESPACE = os.environ.get("OSM_NAMESPACE", "osm")
     OSM_NODE_URL = os.environ.get("OSM_NODE_URL", "").strip()
 
     STATUS_DIR = os.path.join(DATA_DIR, "status")
     LIBRARY_DIR = os.path.join(DATA_DIR, "library")
-    IMPORT_DIR = os.path.join(DATA_DIR, "import")
+    IMPORT_DIR = os.path.join(TEMP_DIR, "import")
     VALHALLA_TILE_DIR = os.path.join(DATA_DIR, "valhalla", "tiles")
     MERGED_PBF = os.path.join(IMPORT_DIR, "planet.osm.pbf")
     COUNTRIES_FILE = os.path.join(STATUS_DIR, "countries.json")
@@ -2112,6 +2113,8 @@ spec:
               value: "8080"
             - name: OSM_DATA_DIR
               value: "/mnt/data/OSM"
+            - name: OSM_TEMP_DIR
+              value: "/mnt/data/OSMTemp"
             - name: OSM_NAMESPACE
               value: "osm"
             - name: OSM_NODE_URL
@@ -2123,6 +2126,8 @@ spec:
               mountPath: /config
             - name: osm-data
               mountPath: /mnt/data/OSM
+            - name: osm-temp
+              mountPath: /mnt/data/OSMTemp
       volumes:
         - name: app-code
           configMap:
@@ -2130,6 +2135,10 @@ spec:
         - name: osm-data
           hostPath:
             path: /mnt/data/OSM
+            type: DirectoryOrCreate
+        - name: osm-temp
+          hostPath:
+            path: /mnt/data/OSMTemp
             type: DirectoryOrCreate
 ---
 apiVersion: v1

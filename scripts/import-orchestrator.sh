@@ -3,6 +3,7 @@ set -euo pipefail
 
 NAMESPACE="${OSM_NAMESPACE:-osm}"
 DATA_DIR="${OSM_DATA_DIR:-/mnt/data/OSM}"
+TEMP_DIR="${OSM_TEMP_DIR:-/mnt/data/OSMTemp}"
 MANIFEST_DIR="${OSM_MANIFEST_DIR:-/manifests}"
 STATE_DIR="${OSM_STATE_DIR:-/state}"
 CONFIG_DIR="${OSM_CONFIG_DIR:-/config}"
@@ -14,6 +15,15 @@ LAST_CONFIG_CHECK=0
 CONFIG_CHECK_INTERVAL=60
 
 mkdir -p "${STATE_DIR}"
+
+# Removes everything *inside* a scratch directory on the (user-provided,
+# fast/SSD-backed) OSMTemp mount without ever removing the directory (mount
+# point) itself, so temporary import data never lingers once a step is done.
+cleanup_temp_dir() {
+  local dir="$1"
+  [ -d "${dir}" ] || return 0
+  find "${dir}" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+}
 
 log() {
   local message="$1"
@@ -315,10 +325,16 @@ spec:
           volumeMounts:
             - name: osm-data
               mountPath: /data
+            - name: temp-data
+              mountPath: /data/import
       volumes:
         - name: osm-data
           hostPath:
-            path: /mnt/data/OSM
+            path: ${DATA_DIR}
+            type: DirectoryOrCreate
+        - name: temp-data
+          hostPath:
+            path: ${TEMP_DIR}/import
             type: DirectoryOrCreate
 EOF
   if ! wait_for_job "${job_name}"; then
@@ -352,6 +368,9 @@ swap_stage() {
   fi
   mv "${staging_dir}" "${active_dir}"
   rm -rf "${active_dir}.old" 2>/dev/null || true
+  # OSMTemp is scratch space only; once the promoted data has been moved into
+  # OSM/<service>/active, nothing must remain behind on the temp mount.
+  cleanup_temp_dir "$(dirname "${staging_dir}")"
   kubectl -n "${NAMESPACE}" rollout restart "deployment/${deployment}" >/dev/null
   if [ "${deployment}" = "nominatim" ]; then
     if ! wait_for_nominatim_rollout 600; then
@@ -368,12 +387,16 @@ swap_stage() {
 run_step() {
   local service="$1" job_name="$2" manifest="$3" active_dir="$4" staging_dir="$5" deployment="$6"
   check_config_change
+  # Start from a clean OSMTemp scratch area in case a previous run crashed
+  # before it could clean up after itself.
+  cleanup_temp_dir "$(dirname "${staging_dir}")"
   log "Starting ${service} import job."
   write_state true "${service}" 10 "${service} import started." "Submitting ${job_name}."
   kubectl -n "${NAMESPACE}" delete job "${job_name}" --ignore-not-found >/dev/null 2>&1 || true
   kubectl -n "${NAMESPACE}" apply -f "${MANIFEST_DIR}/${manifest}" >/dev/null
   if ! wait_for_job "${job_name}"; then
     write_state false "failed" 0 "${service} import failed." "See job logs for details."
+    cleanup_temp_dir "$(dirname "${staging_dir}")"
     return 1
   fi
   write_state true "${service}" 90 "${service} import completed." "Promoting staged data."
@@ -401,27 +424,35 @@ main() {
     if request_has_countries; then
       if ! prepare_import_data; then
         log "Import preparation failed; discarding import request to avoid retrying the same failing request in a loop."
+        cleanup_temp_dir "${TEMP_DIR}/import"
         rm -f "${REQUEST_FILE}"
         continue
       fi
     fi
 
-    if ! run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${DATA_DIR}/tileserver/staging" "tileserver-gl"; then
+    if ! run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${TEMP_DIR}/tileserver/staging" "tileserver-gl"; then
       log "TileServer import failed; discarding import request to avoid retrying the same failing request in a loop."
+      cleanup_temp_dir "${TEMP_DIR}/import"
       rm -f "${REQUEST_FILE}"
       continue
     fi
-    if ! run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${DATA_DIR}/nominatim/staging" "nominatim"; then
+    if ! run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${TEMP_DIR}/nominatim/staging" "nominatim"; then
       log "Nominatim import failed; discarding import request to avoid retrying the same failing request in a loop."
+      cleanup_temp_dir "${TEMP_DIR}/import"
       rm -f "${REQUEST_FILE}"
       continue
     fi
-    if ! run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${DATA_DIR}/valhalla/staging" "valhalla"; then
+    if ! run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${TEMP_DIR}/valhalla/staging" "valhalla"; then
       log "Valhalla import failed; discarding import request to avoid retrying the same failing request in a loop."
+      cleanup_temp_dir "${TEMP_DIR}/import"
       rm -f "${REQUEST_FILE}"
       continue
     fi
 
+    # The shared merged-extract scratch data is only needed while the three
+    # import steps run; once TileServer, Nominatim and Valhalla have all
+    # consumed it, OSMTemp must be cleared again.
+    cleanup_temp_dir "${TEMP_DIR}/import"
     rm -f "${REQUEST_FILE}"
     write_state false "done" 100 "Import erfolgreich abgeschlossen." "Alle Daten wurden sequentiell verarbeitet und aktiviert."
     log "Import request completed successfully."

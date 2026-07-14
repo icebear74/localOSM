@@ -49,9 +49,9 @@ spec:
       volumes:
         - name: import-data
           hostPath:
-            path: /mnt/data/OSM/import
+            path: /mnt/data/OSMTemp/import
             type: DirectoryOrCreate
         - name: nominatim-data
           hostPath:
-            path: /mnt/data/OSM/nominatim/staging
+            path: /mnt/data/OSMTemp/nominatim/staging
             type: DirectoryOrCreate

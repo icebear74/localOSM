@@ -28,17 +28,30 @@ A self-hosted OSM stack on K3s with a read-only status dashboard, a routing web 
 
 ## Host data
 
-Persistent data lives under `/mnt/data/OSM`.
+Persistent (final) data lives under `/mnt/data/OSM`. All temporary/scratch
+data produced while an import is running lives under a separate directory,
+`/mnt/data/OSMTemp` (override with `OSM_TEMP_DIR`). Create and mount
+`OSMTemp` on fast storage (e.g. an SSD) yourself — the scripts only manage
+its *contents*, never the directory/mount point itself, and they clear those
+contents as soon as an import step has finished (successfully or not) so
+nothing lingers on the fast disk.
 
-Important subdirectories:
+Important subdirectories under `/mnt/data/OSM` (final data only):
 
-- `import/` – downloaded `.osm.pbf` files
-- `nominatim/active` / `nominatim/staging`
-- `valhalla/active` / `valhalla/staging`
-- `tileserver/active` / `tileserver/staging`
+- `library/` – downloaded/cached `.osm.pbf` country extracts, reused across imports
+- `nominatim/active`
+- `valhalla/active`
+- `tileserver/active`
 - `manifests/` – static YAML copies used by the orchestrator pod
 - `scripts/` – mounted orchestration script
 - `status/` – dashboard and orchestrator state files
+
+Important subdirectories under `/mnt/data/OSMTemp` (scratch data only, cleared after each import step):
+
+- `import/` – merged/downloaded `planet.osm.pbf` used as the shared input for the TileServer, Nominatim and Valhalla import jobs
+- `nominatim/staging` – osm2pgsql/PostgreSQL working data while Nominatim import runs
+- `valhalla/staging` – routing graph/tile build working data
+- `tileserver/staging` – Planetiler working data (mbtiles output, downloaded source files)
 
 ## Deploy
 
