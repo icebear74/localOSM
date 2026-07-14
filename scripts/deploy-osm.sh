@@ -108,7 +108,7 @@ clean_data_directory() {
 clean_temp_directory() {
   echo ">>> Deleting contents of temporary scratch directory ${TEMP_BASE_DIR} …"
   if [ -d "${TEMP_BASE_DIR}" ]; then
-    ${SUDO} find "${TEMP_BASE_DIR:?}" -mindepth 1 -maxdepth 10 -delete
+    ${SUDO} find "${TEMP_BASE_DIR:?}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
   fi
 }
 
