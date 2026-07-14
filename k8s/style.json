@@ -200,7 +200,7 @@
       "minzoom": 14,
       "filter": ["!=", "class", "housenumber"],
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "text-size": 11,
         "text-padding": 5
@@ -216,7 +216,7 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "housenumber",
-      "minzoom": 17,
+      "minzoom": 16,
       "layout": {
         "text-field": ["get", "housenumber"],
         "text-font": ["NotoSansRegular"],
@@ -234,7 +234,7 @@
       "source": "openmaptiles",
       "source-layer": "water_name",
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "text-size": {
           "stops": [[4, 10], [10, 14]]
@@ -255,7 +255,7 @@
       "filter": ["in", "class", "minor", "service", "track"],
       "minzoom": 15,
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "symbol-placement": "line",
         "text-size": 10,
@@ -276,7 +276,7 @@
       "filter": ["in", "class", "secondary", "tertiary"],
       "minzoom": 13,
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "symbol-placement": "line",
         "text-size": 11,
@@ -296,7 +296,7 @@
       "filter": ["in", "class", "primary", "trunk", "motorway"],
       "minzoom": 10,
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "symbol-placement": "line",
         "text-size": 12,
@@ -315,7 +315,7 @@
       "source-layer": "place",
       "filter": ["==", "class", "country"],
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "text-size": {
           "stops": [[2, 10], [6, 16], [8, 18]]
@@ -336,7 +336,7 @@
       "minzoom": 5,
       "maxzoom": 12,
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "text-size": {
           "stops": [[5, 10], [10, 14]]
@@ -355,7 +355,7 @@
       "source-layer": "place",
       "filter": ["in", "class", "city"],
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "text-size": {
           "stops": [[6, 11], [10, 15], [14, 18]]
@@ -375,7 +375,7 @@
       "filter": ["==", "class", "town"],
       "minzoom": 8,
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "text-size": {
           "stops": [[8, 10], [12, 14], [16, 17]]
@@ -395,7 +395,7 @@
       "filter": ["==", "class", "village"],
       "minzoom": 10,
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "text-size": {
           "stops": [[10, 10], [14, 13]]
@@ -415,7 +415,7 @@
       "filter": ["in", "class", "suburb", "quarter", "neighbourhood"],
       "minzoom": 12,
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "text-size": 11
       },
@@ -433,7 +433,7 @@
       "filter": ["in", "class", "hamlet", "isolated_dwelling"],
       "minzoom": 13,
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "text-size": 10
       },

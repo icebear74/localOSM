@@ -1745,7 +1745,23 @@ data:
         if len(input_paths) == 1:
             shutil.copyfile(input_paths[0], tmp_path)
         else:
+            # Country extracts are downloaded/cached independently and at different
+            # times, so shared border nodes/ways can end up with different edit
+            # versions in each file. "osmium merge" (the correct tool for combining
+            # several extracts, as opposed to "osmium cat") keeps every distinct
+            # version it finds instead of silently dropping one, which means the
+            # merged file can still contain the same node/way/relation ID more than
+            # once. osm2pgsql (used by the Nominatim import) is not history-aware
+            # and aborts with "Input data is not ordered: ... appears more than
+            # once" in that case. Collapsing the merged file with "osmium
+            # time-filter" (no explicit timestamp = current point in time) keeps
+            # only the latest version of each object, guaranteeing a clean,
+            # duplicate-free extract regardless of how stale the individual
+            # cached/downloaded files were relative to each other.
             run_command(["osmium", "merge", "--overwrite", "-o", tmp_path, "-f", "pbf", *input_paths], timeout=7200)
+            dedup_path = f"{MERGED_PBF}.dedup"
+            run_command(["osmium", "time-filter", "--overwrite", "-o", dedup_path, "-f", "pbf", tmp_path], timeout=7200)
+            os.replace(dedup_path, tmp_path)
         validate_pbf_file(tmp_path, label="Merged library extract")
         os.replace(tmp_path, MERGED_PBF)
 

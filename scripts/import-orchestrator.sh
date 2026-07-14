@@ -242,6 +242,29 @@ spec:
                   except subprocess.CalledProcessError as exc:
                       joined = ', '.join(country['slug'] for country in countries)
                       raise RuntimeError(f'Could not merge selected countries: {joined}') from exc
+                  # Country extracts are downloaded independently and can be
+                  # generated/cached at different times, so shared border
+                  # nodes/ways can end up with different edit versions in each
+                  # file. "osmium merge" (the correct tool for this, as
+                  # opposed to "osmium cat") keeps every distinct version it
+                  # finds instead of dropping one, so the merged file can
+                  # still contain the same node/way/relation ID more than
+                  # once. osm2pgsql (used by the Nominatim import) is not
+                  # history-aware and aborts with "Input data is not ordered:
+                  # ... appears more than once" in that case. Collapsing the
+                  # merged file with "osmium time-filter" (no explicit
+                  # timestamp = current point in time) keeps only the latest
+                  # version of each object, guaranteeing a clean,
+                  # duplicate-free extract regardless of how stale the
+                  # individual cached/downloaded files were relative to each
+                  # other.
+                  dedup_merged = import_dir / 'planet.osm.pbf.dedup'
+                  try:
+                      subprocess.run(['osmium', 'time-filter', '--overwrite', '-o', str(dedup_merged), '-f', 'pbf', str(temp_merged)], check=True)
+                  except subprocess.CalledProcessError as exc:
+                      joined = ', '.join(country['slug'] for country in countries)
+                      raise RuntimeError(f'Could not deduplicate merged extract for: {joined}') from exc
+                  os.replace(dedup_merged, temp_merged)
               try:
                   subprocess.run(['osmium', 'fileinfo', '-F', 'pbf', str(temp_merged)], check=True)
               except subprocess.CalledProcessError as exc:
@@ -361,7 +384,7 @@ main() {
     fi
 
     log "Detected import request at ${REQUEST_FILE}."
-    write_state true "queued" 5 "Import request received." "Running Nominatim, Valhalla and TileServer sequentially."
+    write_state true "queued" 5 "Import request received." "Running TileServer, Nominatim and Valhalla sequentially."
 
     if request_has_countries; then
       if ! prepare_import_data; then
@@ -369,13 +392,13 @@ main() {
       fi
     fi
 
+    if ! run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${DATA_DIR}/tileserver/staging" "tileserver-gl"; then
+      continue
+    fi
     if ! run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${DATA_DIR}/nominatim/staging" "nominatim"; then
       continue
     fi
     if ! run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${DATA_DIR}/valhalla/staging" "valhalla"; then
-      continue
-    fi
-    if ! run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${DATA_DIR}/tileserver/staging" "tileserver-gl"; then
       continue
     fi
 
