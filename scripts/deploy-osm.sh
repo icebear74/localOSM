@@ -182,11 +182,6 @@ done
 ${SUDO} cp "${REPO_ROOT}/scripts/import-orchestrator.sh" "${BASE_DIR}/scripts/import-orchestrator.sh"
 ${SUDO} chmod +x "${BASE_DIR}/scripts/import-orchestrator.sh"
 
-if [ -f "${REPO_ROOT}/k8s/style.json" ]; then
-  ${SUDO} cp "${REPO_ROOT}/k8s/style.json" "${BASE_DIR}/tileserver/style.template.json"
-  ${SUDO} chown 1000:1000 "${BASE_DIR}/tileserver/style.template.json" 2>/dev/null || true
-fi
-
 CONFIG_PATH="${BASE_DIR}/status/config.json"
 if [ ! -f "${CONFIG_PATH}" ]; then
   cat > "${CONFIG_PATH}" <<'EOF'
@@ -227,7 +222,15 @@ fi
 
 echo ">>> Applying Kubernetes manifests …"
 terminate_existing_pods
-for manifest in namespace.yaml postgres.yaml tileserver.yaml nominatim.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml status-config.yaml status.yaml nominatim-import-config.yaml tileserver-import-config.yaml import-orchestrator.yaml web.yaml; do
+kubectl apply -f "${BASE_DIR}/manifests/namespace.yaml"
+
+if [ -f "${REPO_ROOT}/k8s/style.json" ]; then
+  kubectl -n "${NAMESPACE}" create configmap tileserver-style \
+    --from-file=style.json="${REPO_ROOT}/k8s/style.json" \
+    --dry-run=client -o yaml | kubectl apply -f -
+fi
+
+for manifest in postgres.yaml tileserver.yaml nominatim.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml status-config.yaml status.yaml nominatim-import-config.yaml tileserver-import-config.yaml import-orchestrator.yaml web.yaml; do
   kubectl apply -f "${BASE_DIR}/manifests/${manifest}"
 done
 

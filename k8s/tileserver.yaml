@@ -38,9 +38,9 @@ spec:
                 echo "[!] WARNING: No fonts found. Map will render WITHOUT text labels."
               fi
 
-              if [ -f /data/style.template.json ] && [ ! -f /data/style.json ]; then
-                cp /data/style.template.json /data/style.json
-                echo "[INFO] TileServer: installed style.json from style.template.json"
+              if [ -f /style-source/style.json ] && [ ! -f /data/style.json ]; then
+                cp /style-source/style.json /data/style.json
+                echo "[INFO] TileServer: installed style.json from ConfigMap tileserver-style"
               fi
 
               if [ -f /data/map.mbtiles ]; then
@@ -54,6 +54,9 @@ spec:
           volumeMounts:
             - name: tileserver-data
               mountPath: /data
+            - name: tileserver-style
+              mountPath: /style-source
+              readOnly: true
       containers:
         - name: tileserver-gl
           image: maptiler/tileserver-gl:latest
@@ -72,6 +75,10 @@ spec:
           hostPath:
             path: /mnt/data/OSM/tileserver/active
             type: DirectoryOrCreate
+        - name: tileserver-style
+          configMap:
+            name: tileserver-style
+            optional: true
 ---
 apiVersion: v1
 kind: Service

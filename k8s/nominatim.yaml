@@ -42,6 +42,12 @@ spec:
               value: nominatim
             - name: THREADS
               value: "4"
+            # config.sh (invoked by the image's start.sh) unconditionally requires either
+            # PBF_URL or PBF_PATH to be set, even though the actual import already ran via
+            # nominatim-import-job.yaml and start.sh only uses this file when the
+            # import-finished marker is missing. Without it the container crash-loops.
+            - name: PBF_PATH
+              value: /nominatim/data/import/planet.osm.pbf
           ports:
             - containerPort: 8080
           resources:
