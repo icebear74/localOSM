@@ -784,7 +784,7 @@ INDEX_HTML = """<!doctype html>
     <a href="#" id="valhalla-link" data-port="30082">Valhalla API</a>
     <a href="#" id="nominatim-link" data-port="30081">Nominatim</a>
     <a href="#" id="tileserver-link" data-port="30085">TileServer GL</a>
-    <a href="#" id="style-editor-link" data-port="30086" target="_blank" rel="noopener">&#127912; Style-Editor</a>
+    <a href="#" id="style-editor-link" data-port="30086" target="_blank" rel="noopener" aria-label="Style-Editor">&#127912; Style-Editor</a>
   </div>
 
   <div class="grid">
@@ -860,7 +860,7 @@ INDEX_HTML = """<!doctype html>
     </div>
 
     <div class="card">
-      <h2>&#127912; Style-Editor</h2>
+      <h2><span aria-hidden="true">&#127912;</span> Style-Editor</h2>
       <div class="controls">
         <div class="message">
           1. <a href="#" id="style-editor-link-2" data-port="30086" target="_blank" rel="noopener">Style-Editor öffnen</a> (lädt automatisch den aktiven Kartenstil).<br>
@@ -1361,14 +1361,18 @@ def read_tileserver_style():
 def write_tileserver_style(raw_body):
     """Validate and atomically persist a new style.json, then restart TileServer-GL.
 
-    Returns (ok, message, restarted).
+    Returns a tuple (ok: bool, message: str (user-facing, German), restarted: bool).
     """
     try:
         style = json.loads(raw_body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         return False, f"Ungueltiges JSON: {exc}", False
-    if not isinstance(style, dict) or "layers" not in style or "version" not in style:
-        return False, "Kein gueltiger MapLibre-Style (version/layers fehlen).", False
+    if (
+        not isinstance(style, dict)
+        or not isinstance(style.get("layers"), list)
+        or not isinstance(style.get("version"), (int, float))
+    ):
+        return False, "Kein gueltiger MapLibre-Style (version/layers fehlen oder ungueltig).", False
 
     os.makedirs(os.path.dirname(TILESERVER_STYLE_PATH), exist_ok=True)
     tmp_path = TILESERVER_STYLE_PATH + ".tmp"
