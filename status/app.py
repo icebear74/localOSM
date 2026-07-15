@@ -1366,13 +1366,13 @@ def write_tileserver_style(raw_body):
     try:
         style = json.loads(raw_body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        return False, f"Ungueltiges JSON: {exc}", False
+        return False, f"Ungültiges JSON: {exc}", False
     if (
         not isinstance(style, dict)
         or not isinstance(style.get("layers"), list)
         or not isinstance(style.get("version"), (int, float))
     ):
-        return False, "Kein gueltiger MapLibre-Style (version/layers fehlen oder ungueltig).", False
+        return False, "Kein gültiger MapLibre-Style (version/layers fehlen oder ungültig).", False
 
     os.makedirs(os.path.dirname(TILESERVER_STYLE_PATH), exist_ok=True)
     tmp_path = TILESERVER_STYLE_PATH + ".tmp"
