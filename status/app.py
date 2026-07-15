@@ -43,6 +43,8 @@ MERGED_PBF = os.path.join(IMPORT_DIR, "planet.osm.pbf")
 COUNTRIES_FILE = os.path.join(STATUS_DIR, "countries.json")
 STATE_FILE = os.path.join(STATUS_DIR, "library-state.json")
 CONFIG_FILE = os.path.join(STATUS_DIR, "config.json")
+# Live style used by TileServer-GL (k8s/tileserver.yaml mounts the same hostPath).
+TILESERVER_STYLE_PATH = os.path.join(DATA_DIR, "tileserver", "active", "style.json")
 IMPORT_REQUEST_FILE = os.path.join(STATUS_DIR, "import-request.json")
 
 CONFIG_DEFAULTS = {
@@ -782,6 +784,7 @@ INDEX_HTML = """<!doctype html>
     <a href="#" id="valhalla-link" data-port="30082">Valhalla API</a>
     <a href="#" id="nominatim-link" data-port="30081">Nominatim</a>
     <a href="#" id="tileserver-link" data-port="30085">TileServer GL</a>
+    <a href="#" id="style-editor-link" data-port="30086" target="_blank" rel="noopener">&#127912; Style-Editor</a>
   </div>
 
   <div class="grid">
@@ -855,6 +858,20 @@ INDEX_HTML = """<!doctype html>
       <h2>Valhalla Tiles</h2>
       <div id="tiles-info">Lade ...</div>
     </div>
+
+    <div class="card">
+      <h2>&#127912; Style-Editor</h2>
+      <div class="controls">
+        <div class="message">
+          1. <a href="#" id="style-editor-link-2" data-port="30086" target="_blank" rel="noopener">Style-Editor öffnen</a> (lädt automatisch den aktiven Kartenstil).<br>
+          2. Im Editor bearbeiten und über Menü ▸ Exportieren ▸ "style.json" herunterladen.<br>
+          3. Exportierte Datei unten hochladen, um sie sofort zu aktivieren (TileServer GL startet automatisch neu).
+        </div>
+        <input type="file" id="style-upload-input" accept="application/json,.json">
+        <button onclick="activateStyle()">Style aktivieren</button>
+        <div id="style-upload-status" class="hint"></div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -868,6 +885,13 @@ INDEX_HTML = """<!doctype html>
     ['web-link','valhalla-link','nominatim-link','tileserver-link'].forEach(function(id) {
       var a = document.getElementById(id);
       if (a && a.dataset.port) a.href = baseUrl + ':' + a.dataset.port + '/';
+    });
+    var styleApiUrl = baseUrl + ':30083/api/style';
+    ['style-editor-link', 'style-editor-link-2'].forEach(function(id) {
+      var styleLink = document.getElementById(id);
+      if (styleLink) {
+        styleLink.href = baseUrl + ':' + styleLink.dataset.port + '/?style=' + encodeURIComponent(styleApiUrl);
+      }
     });
   }
   updateLinks();
@@ -1129,6 +1153,24 @@ INDEX_HTML = """<!doctype html>
     }
   }
 
+  async function activateStyle() {
+    var input = document.getElementById('style-upload-input');
+    var statusEl = document.getElementById('style-upload-status');
+    if (!input.files || !input.files.length) {
+      statusEl.textContent = 'Bitte zuerst eine exportierte style.json auswählen.';
+      return;
+    }
+    statusEl.textContent = 'Aktiviere Style ...';
+    try {
+      var text = await input.files[0].text();
+      var resp = await fetch('/api/style', {method:'POST', headers:{'Content-Type':'application/json'}, body: text});
+      var result = await resp.json();
+      statusEl.textContent = result.message || (resp.ok ? 'Style aktiviert.' : 'Fehler beim Aktivieren.');
+    } catch (err) {
+      statusEl.textContent = 'Fehler: ' + err;
+    }
+  }
+
   async function refresh() {
     try {
       var resp = await fetch('/api/status');
@@ -1305,6 +1347,50 @@ def dir_size_mb(path):
     except OSError:
         pass
     return round(total / (1024 * 1024), 1)
+
+
+def read_tileserver_style():
+    """Return the raw bytes of the live style.json, or None if it does not exist yet."""
+    try:
+        with open(TILESERVER_STYLE_PATH, "rb") as handle:
+            return handle.read()
+    except OSError:
+        return None
+
+
+def write_tileserver_style(raw_body):
+    """Validate and atomically persist a new style.json, then restart TileServer-GL.
+
+    Returns (ok, message, restarted).
+    """
+    try:
+        style = json.loads(raw_body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return False, f"Ungueltiges JSON: {exc}", False
+    if not isinstance(style, dict) or "layers" not in style or "version" not in style:
+        return False, "Kein gueltiger MapLibre-Style (version/layers fehlen).", False
+
+    os.makedirs(os.path.dirname(TILESERVER_STYLE_PATH), exist_ok=True)
+    tmp_path = TILESERVER_STYLE_PATH + ".tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            json.dump(style, handle, indent=2)
+        os.replace(tmp_path, TILESERVER_STYLE_PATH)
+    except OSError as exc:
+        return False, f"Schreiben fehlgeschlagen: {exc}", False
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+    try:
+        KUBE.rollout_restart("tileserver-gl")
+        restarted = True
+    except Exception as exc:  # noqa: BLE001
+        return True, f"Style gespeichert, TileServer-GL Neustart fehlgeschlagen: {exc}", False
+    return True, "Style gespeichert, TileServer-GL wird neu gestartet.", restarted
 
 
 def check_tcp(host, port, timeout=2):
@@ -1889,6 +1975,20 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(load_config())
             return
 
+        if self.path == "/api/style":
+            raw = read_tileserver_style()
+            if raw is None:
+                self._send_json({"error": "style.json not found"}, 404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            # Maputnik (separate NodePort/origin) loads this via ?style=, so allow CORS.
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(raw)
+            return
+
         if self.path.startswith("/test/"):
             name = self.path.split("/", 2)[-1]
             if name == "postgres":
@@ -1912,6 +2012,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         content_length = int(self.headers.get("Content-Length", "0"))
         raw_body = self.rfile.read(content_length) if content_length else b"{}"
+
+        if self.path == "/api/style":
+            ok, message, restarted = write_tileserver_style(raw_body)
+            self._send_json({"ok": ok, "message": message, "restarted": restarted}, 200 if ok else 400)
+            return
+
         try:
             payload = json.loads(raw_body.decode("utf-8"))
         except Exception:  # noqa: BLE001

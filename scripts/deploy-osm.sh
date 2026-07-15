@@ -204,7 +204,8 @@ for manifest in \
   tileserver-import-config.yaml \
   tileserver-import-job.yaml \
   import-orchestrator.yaml \
-  web.yaml; do
+  web.yaml \
+  style-editor.yaml; do
   ${SUDO} cp "${REPO_ROOT}/k8s/${manifest}" "${BASE_DIR}/manifests/${manifest}"
 done
 ${SUDO} cp "${REPO_ROOT}/scripts/import-orchestrator.sh" "${BASE_DIR}/scripts/import-orchestrator.sh"
@@ -258,7 +259,7 @@ if [ -f "${REPO_ROOT}/k8s/style.json" ]; then
     --dry-run=client -o yaml | kubectl apply -f -
 fi
 
-for manifest in postgres.yaml tileserver.yaml nominatim.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml status-config.yaml status.yaml nominatim-import-config.yaml tileserver-import-config.yaml import-orchestrator.yaml web.yaml; do
+for manifest in postgres.yaml tileserver.yaml nominatim.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml status-config.yaml status.yaml nominatim-import-config.yaml tileserver-import-config.yaml import-orchestrator.yaml web.yaml style-editor.yaml; do
   kubectl apply -f "${BASE_DIR}/manifests/${manifest}"
 done
 
@@ -275,4 +276,5 @@ Web / Routing UI : ${NODE_DISPLAY}:30084
 Nominatim        : ${NODE_DISPLAY}:30081
 Valhalla         : ${NODE_DISPLAY}:30082
 TileServer GL    : ${NODE_DISPLAY}:30085
+Style-Editor     : ${NODE_DISPLAY}:30086
 EOF

@@ -10,6 +10,7 @@ A self-hosted OSM stack on K3s with a read-only status dashboard, a routing web 
 - TileServer GL
 - Status dashboard
 - Routing web UI
+- Style-Editor (Maputnik)
 - Import orchestrator pod
 
 ## Layout
@@ -22,6 +23,7 @@ A self-hosted OSM stack on K3s with a read-only status dashboard, a routing web 
 | `k8s/tileserver-import-job.yaml` | TileServer/Planetiler import job |
 | `k8s/status.yaml` | Read-only status dashboard |
 | `k8s/web.yaml` | Browser routing UI |
+| `k8s/style-editor.yaml` | Maputnik style editor (edits the live TileServer-GL style.json via the status dashboard API) |
 | `scripts/deploy-osm.sh` | Installs manifests and stages static files on the host |
 | `scripts/run-import.sh` | Downloads a `.osm.pbf` and creates an import request |
 | `scripts/import-orchestrator.sh` | Sequential import workflow executed inside the orchestrator pod |
@@ -80,10 +82,20 @@ Each step uses a dedicated Kubernetes Job and only promotes staged data after th
 - Nominatim: `http://<node-ip>:30081/`
 - Valhalla: `http://<node-ip>:30082/`
 - TileServer GL: `http://<node-ip>:30085/`
+- Style-Editor (Maputnik): `http://<node-ip>:30086/`
+
+## Style-Editor
+
+The status dashboard's **Style-Editor** card opens Maputnik (pre-loaded with the currently active
+TileServer-GL style via `GET /api/style` on the status dashboard). After editing visually, export the
+style in Maputnik (Menu ▸ Export style ▸ Download) and upload the exported `style.json` back through
+the "Style aktivieren" button on the status dashboard. The status app validates the style, writes it
+to the same host path TileServer-GL serves from, and restarts the `tileserver-gl` deployment so the
+new style becomes active within seconds — without any manual `scp`/`kubectl` steps.
 
 ## Notes
 
-- The status dashboard is read-only and only reports service health, data files, and orchestrator progress.
+- The status dashboard mainly reports service health, data files, and orchestrator progress; the Style-Editor card is the one place it accepts a write (activating an edited style.json).
 - The routing web UI remains unchanged.
 - The orchestrator exits with code 0 when watched config maps change so Kubernetes restarts it with fresh state.
 
