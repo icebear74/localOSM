@@ -50,19 +50,23 @@ spec:
           imagePullPolicy: Always
           resources:
             requests:
-              memory: "13Gi"
-              cpu: "6"
+              memory: "16Gi"
+              cpu: "5"
             limits:
-              memory: "13Gi"
-              cpu: "6"
+              memory: "20Gi"
+              cpu: "8"
           env:
             - name: JAVA_OPTS
-              value: "-Xms11g -Xmx11g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+#              value: "-Xms6g -Xmx8g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+              value: "-Xms10g -Xmx10g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"
+ 
           args:
             - --osm-path=/data/import/planet.osm.pbf
             - --output=/data/map.mbtiles
             - --force
-            - --threads=6
+            - --fetch-wikidata
+            - --nodemap-type=sparsearray
+            - --threads=8
             - --lake_centerlines_path=/data/sources/lake_centerline.shp.zip
             - --water_polygons_path=/data/sources/water-polygons-split-3857.zip
             - --natural_earth_path=/data/sources/natural_earth_vector.sqlite.zip

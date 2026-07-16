@@ -5,5 +5,5 @@ metadata:
   namespace: osm
 data:
   import_mode: import
-  import_threads: "4"
+  import_threads: "6"
   import_password: nominatim
