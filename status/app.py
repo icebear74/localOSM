@@ -478,7 +478,7 @@ COUNTRY_BBOX = {
 # MapLibre GL base style – kept in sync with k8s/tileserver.yaml init container.
 _STYLE_JSON = (
     '{"version":8,"name":"LocalOSM","sources":{"openmaptiles":{"type":"vector","url":"mbtiles://{v3}"}},'
-    '"glyphs":"http://localhost/fonts/{fontstack}/{range}.pbf","layers":['
+    '"glyphs":"{fontstack}/{range}.pbf","layers":['
     '{"id":"background","type":"background","paint":{"background-color":"#f2efe9"}},'
     '{"id":"landcover-wood","type":"fill","source":"openmaptiles","source-layer":"landcover","filter":["in","class","wood","forest"],"paint":{"fill-color":"#d0e8c0","fill-opacity":0.6}},'
     '{"id":"landcover-grass","type":"fill","source":"openmaptiles","source-layer":"landcover","filter":["in","class","grass","farmland","agriculture"],"paint":{"fill-color":"#e8f0d0","fill-opacity":0.5}},'

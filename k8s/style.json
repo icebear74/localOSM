@@ -7,7 +7,7 @@
       "url": "mbtiles://{v3}"
     }
   },
-  "glyphs": "/fonts/{fontstack}/{range}.pbf",
+  "glyphs": "{fontstack}/{range}.pbf",
   "layers": [
     {
       "id": "background",
