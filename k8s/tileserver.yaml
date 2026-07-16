@@ -70,6 +70,8 @@ spec:
           volumeMounts:
             - name: tileserver-data
               mountPath: /data
+            - name: dshm
+              mountPath: /dev/shm
       volumes:
         - name: tileserver-data
           hostPath:
@@ -79,6 +81,16 @@ spec:
           configMap:
             name: tileserver-style
             optional: true
+        # TileServer-GL renders raster tiles server-side via MapLibre GL Native's
+        # headless GL backend, which needs shared memory to allocate its GL
+        # context/framebuffers. Kubernetes containers default to a tiny 64Mi
+        # /dev/shm, which is enough for vector (.pbf) tile serving (no rendering
+        # involved) but too small for raster rendering, causing raster tiles to
+        # fail/return blank while vector tiles keep working fine.
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi
 ---
 apiVersion: v1
 kind: Service
