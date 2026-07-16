@@ -32,7 +32,7 @@ spec:
               memory: "18Gi"
               cpu: "4"
             limits:
-              memory: "18Gi"
+              memory: "24Gi"
               cpu: "8"
           command: ["/bin/bash", "-c"]
           args:
@@ -43,7 +43,7 @@ spec:
               PBF_SIZE=$(du -sh /data/import/planet.osm.pbf | cut -f1)
               echo "Found PBF file (${PBF_SIZE}). Building routing graph ..."
               mkdir -p /data/tiles
-              valhalla_build_tiles -c /config/valhalla.json /data/import/planet.osm.pbf
+              valhalla_build_tiles -c /config/valhalla.json /data/import/planet.osm.pbf -j 8
               echo '=== Tile build complete. Creating tile extract archive ...'
               valhalla_build_extract -c /config/valhalla.json -e /data/valhalla_tiles.tar -O
               echo '=== Import complete. Routing graph and tile extract stored at /data ==='
