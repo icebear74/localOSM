@@ -73,8 +73,8 @@ data:
           </div>
         </div>
         <div class="row2">
-          <div><label>Breitengrad</label><input id="startLat" value="35.1732" step="any"></div>
-          <div><label>Längengrad</label><input id="startLon" value="33.3736" step="any"></div>
+          <div><label>Breitengrad</label><input id="startLat" placeholder="wird per Klick/Suche gesetzt" step="any"></div>
+          <div><label>Längengrad</label><input id="startLon" placeholder="wird per Klick/Suche gesetzt" step="any"></div>
         </div>
 
         <div class="section-title">Ziel</div>
@@ -86,8 +86,8 @@ data:
           </div>
         </div>
         <div class="row2">
-          <div><label>Breitengrad</label><input id="endLat" value="34.6857" step="any"></div>
-          <div><label>Längengrad</label><input id="endLon" value="33.0372" step="any"></div>
+          <div><label>Breitengrad</label><input id="endLat" placeholder="wird per Klick/Suche gesetzt" step="any"></div>
+          <div><label>Längengrad</label><input id="endLon" placeholder="wird per Klick/Suche gesetzt" step="any"></div>
         </div>
 
         <div class="section-title">Optionen</div>
@@ -176,10 +176,42 @@ data:
           {id:'place-hamlet',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['in','class','hamlet','isolated_dwelling'],minzoom:13,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'text-size':10},paint:{'text-color':'#666','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}}
         ]
       },
-      center: [33.3736, 35.1732],
-      zoom: 9,
+      center: [10, 50],
+      zoom: 2,
       attributionControl: true
     });
+
+    // Firefox sometimes computes a 0-size WebGL canvas when the map is created
+    // inside a flexbox layout before the surrounding layout has settled, leaving
+    // a blank map until the window is manually resized (Chromium/Edge are more
+    // forgiving here). Force a resize once the container has its final size,
+    // and keep the map in sync with later container size changes.
+    if (window.ResizeObserver) {
+      new ResizeObserver(function() { map.resize(); }).observe(document.getElementById('map-container'));
+    }
+    window.addEventListener('resize', function() { map.resize(); });
+
+    // The map is interactive (pan/zoom/click) from the moment it is created,
+    // even before any address has been searched -- users can already explore
+    // the imported area and click to set start/end points.
+    map.on('load', function() {
+      map.resize();
+      fitToDataBounds();
+    });
+
+    // Zoom/center on the actual extent of the imported map data instead of a
+    // hardcoded location, so e.g. an import that only contains Luxembourg
+    // opens centered on Luxembourg rather than on an unrelated default.
+    async function fitToDataBounds() {
+      try {
+        var resp = await fetch('/api/bounds');
+        var data = await resp.json();
+        var b = data.bounds;
+        if (Array.isArray(b) && b.length === 4 && b.every(function(v) { return typeof v === 'number' && isFinite(v); })) {
+          map.fitBounds([[b[0], b[1]], [b[2], b[3]]], {padding: 40, animate: false});
+        }
+      } catch (e) { /* keep the default world view if bounds are unavailable */ }
+    }
 
     var markers = { start: null, end: null };
     var clickState = 0; // 0=start, 1=end
@@ -288,13 +320,23 @@ data:
       };
     }
 
+    function hasValidPoints(payload) {
+      return isFinite(payload.start.lat) && isFinite(payload.start.lon) &&
+             isFinite(payload.end.lat) && isFinite(payload.end.lon);
+    }
+
     async function doRoute() {
       var box = document.getElementById('result-box');
+      var payload = getPayload();
+      if (!hasValidPoints(payload)) {
+        box.innerHTML = '<span class="err">Bitte Start und Ziel setzen (Adresse suchen oder auf die Karte klicken).</span>';
+        return;
+      }
       box.innerHTML = '&#8987; Route wird berechnet ...';
       try {
         var resp = await fetch('/api/route', {
           method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(getPayload())
+          body: JSON.stringify(payload)
         });
         var data = await resp.json();
         if (data.error) {
@@ -307,9 +349,8 @@ data:
         box.innerHTML = '<span class="ok">&#10003; Route gefunden</span><br>' +
           'Distanz: <b>' + dist + '</b><br>Fahrzeit: <b>' + time + '</b>';
         if (data.trip) drawRoute(data.trip);
-        var s = getPayload().start, e = getPayload().end;
-        setMarker('start', s.lat, s.lon);
-        setMarker('end', e.lat, e.lon);
+        setMarker('start', payload.start.lat, payload.start.lon);
+        setMarker('end', payload.end.lat, payload.end.lon);
       } catch(err) {
         box.innerHTML = '<span class="err">Netzwerkfehler: ' + err + '</span>';
       }
@@ -317,11 +358,16 @@ data:
 
     async function doDistance() {
       var box = document.getElementById('result-box');
+      var payload = getPayload();
+      if (!hasValidPoints(payload)) {
+        box.innerHTML = '<span class="err">Bitte Start und Ziel setzen (Adresse suchen oder auf die Karte klicken).</span>';
+        return;
+      }
       box.innerHTML = '&#8987; Distanz wird berechnet ...';
       try {
         var resp = await fetch('/api/distance', {
           method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(getPayload())
+          body: JSON.stringify(payload)
         });
         var data = await resp.json();
         if (data.error) {
@@ -542,6 +588,26 @@ data:
 
             if self.path == "/api/status":
                 self._send_json({"status": "ok", "valhalla": VALHALLA_URL, "nominatim": NOMINATIM_URL})
+                return
+
+            if self.path == "/api/bounds":
+                # Report the actual extent of the imported map data (from TileServer-GL's
+                # TileJSON) so the client can zoom/center on the real data instead of a
+                # hardcoded location that may not match what was imported (e.g. Luxembourg).
+                try:
+                    req = urllib.request.Request(
+                        f"{TILESERVER_URL}/data/v3.json",
+                        headers={"User-Agent": "localosm-web/1.0"}
+                    )
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        data = json.loads(response.read().decode("utf-8"))
+                    bounds = data.get("bounds")
+                    if not (isinstance(bounds, list) and len(bounds) == 4):
+                        self._send_json({"bounds": None})
+                        return
+                    self._send_json({"bounds": bounds})
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"bounds": None, "error": self._friendly_error(exc, "TileServer GL")})
                 return
 
             if self.path.startswith("/api/geocode"):

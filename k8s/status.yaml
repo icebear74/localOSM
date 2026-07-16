@@ -954,7 +954,15 @@ data:
           var a = document.getElementById(id);
           if (a && a.dataset.port) a.href = baseUrl + ':' + a.dataset.port + '/';
         });
-        var styleApiUrl = baseUrl + ':30083/api/style';
+        // Point Maputnik at TileServer-GL's own resolved style endpoint, not the raw
+        // stored style.json (served via /api/style): the stored file's source uses
+        // the TileServer-GL-internal "mbtiles://{v3}" placeholder, which TileServer-GL
+        // itself rewrites into real tile/TileJSON URLs when serving /styles/<id>/style.json.
+        // Loading the raw file directly left Maputnik with an unresolvable source, so
+        // no basemap was drawn and the source inspector showed empty/localhost fields.
+        var tileserverLink = document.getElementById('tileserver-link');
+        var tileserverPort = (tileserverLink && tileserverLink.dataset.port) || '30085';
+        var styleApiUrl = baseUrl + ':' + tileserverPort + '/styles/osm/style.json';
         ['style-editor-link', 'style-editor-link-2'].forEach(function(id) {
           var styleLink = document.getElementById(id);
           if (styleLink) {
