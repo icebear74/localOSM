@@ -19,13 +19,24 @@ spec:
             - name: PBF_PATH
               value: /nominatim/data/import/planet.osm.pbf
             - name: NOMINATIM_PASSWORD
-              value: nominatim
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-nominatim-import-config
+                  key: import_password
+            # osm2pgsql's initial import step ("nominatim import") maps its
+            # --number-processes / worker thread count directly to THREADS, so
+            # this must be sized to the node's available CPUs (see
+            # k8s/nominatim-import-config.yaml) rather than left at a small,
+            # hardcoded value that leaves most cores idle during import.
             - name: THREADS
-              value: "4"
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-nominatim-import-config
+                  key: import_threads
           resources:
             requests:
               memory: "12Gi"
-              cpu: "4"
+              cpu: "6"
             limits:
               memory: "18Gi"
               cpu: "8"

@@ -39,9 +39,15 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - name: NOMINATIM_PASSWORD
-              value: nominatim
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-nominatim-import-config
+                  key: import_password
             - name: THREADS
-              value: "4"
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-nominatim-import-config
+                  key: import_threads
             # config.sh (invoked by the image's start.sh) unconditionally requires either
             # PBF_URL or PBF_PATH to be set, even though the actual import already ran via
             # nominatim-import-job.yaml and start.sh only uses this file when the

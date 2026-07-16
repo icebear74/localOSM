@@ -75,6 +75,21 @@ The script downloads the extract and writes an import request. The orchestrator 
 
 Each step uses a dedicated Kubernetes Job and only promotes staged data after the job succeeds.
 
+### Tuning the Nominatim import
+
+The `osm2pgsql` step invoked by `nominatim import` maps its worker/process count 1:1 to the
+`THREADS` value it is started with. `k8s/nominatim-import-config.yaml` (`ConfigMap
+osm-nominatim-import-config`) is the single place to configure this: edit `import_threads` to
+match the CPU cores available to the `nominatim-import` Job (see its `resources.limits.cpu` in
+`k8s/nominatim-import-job.yaml`), then re-apply the ConfigMap:
+
+```bash
+kubectl apply -f k8s/nominatim-import-config.yaml
+```
+
+before starting the next import. The same ConfigMap also supplies `import_password`, used by both
+the import Job and the running `nominatim` deployment, so the two always stay in sync.
+
 ## URLs
 
 - Status dashboard: `http://<node-ip>:30083/`
