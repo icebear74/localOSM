@@ -2,7 +2,7 @@
 # running Nominatim deployment (k8s/nominatim.yaml), both of which read
 # NOMINATIM_PASSWORD/THREADS from this ConfigMap. To change the number of
 # osm2pgsql worker processes used for the (slow) initial import, edit
-# import_threads below to match the CPU cores available to the
+# import_threads (below) to match the CPU cores available to the
 # nominatim-import Job, then re-apply this file (kubectl apply -f
 # k8s/nominatim-import-config.yaml) before starting the next import.
 apiVersion: v1
