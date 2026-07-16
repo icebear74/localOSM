@@ -864,9 +864,13 @@ INDEX_HTML = """<!doctype html>
       <div class="controls">
         <div class="message">
           1. <a href="#" id="style-editor-link-2" data-port="30086" target="_blank" rel="noopener">Style-Editor öffnen</a> (lädt automatisch den aktiven Kartenstil).<br>
-          2. Im Editor bearbeiten und über Menü ▸ Exportieren ▸ "style.json" herunterladen.<br>
-          3. Exportierte Datei unten hochladen, um sie sofort zu aktivieren (TileServer GL startet automatisch neu).
+          &#9888; Maputnik zeigt dabei einen Bestätigungsdialog ("Load style from URL ... discard current changes?") &ndash; bitte mit <b>OK</b> bestätigen! Wird der Dialog übersehen/abgebrochen, zeigt Maputnik stattdessen seinen eigenen Standard-Demo-Stil (Weltkarte mit Rasterquelle) statt der Luxemburg-Karte.<br>
+          2. Erscheint trotzdem nur die Weltkarte: Menü ▸ Open ▸ die unten kopierte Style-URL einfügen &ndash; dieser Weg fragt nicht nach und lädt zuverlässig.<br>
+          3. Im Editor bearbeiten und über Menü ▸ Exportieren ▸ "style.json" herunterladen.<br>
+          4. Exportierte Datei unten hochladen, um sie sofort zu aktivieren (TileServer GL startet automatisch neu).
         </div>
+        <button id="copy-style-url-btn" class="subtle" onclick="copyStyleUrl()">Style-URL kopieren</button>
+        <div id="style-url-status" class="hint"></div>
         <input type="file" id="style-upload-input" accept="application/json,.json">
         <button onclick="activateStyle()">Style aktivieren</button>
         <div id="style-upload-status" class="hint"></div>
@@ -879,6 +883,7 @@ INDEX_HTML = """<!doctype html>
   var ALL_COUNTRIES = [];
   var refreshTimer = null;
   var WORKFLOW_RUNNING = false;
+  var CURRENT_STYLE_API_URL = '';
 
   function updateLinks() {
     var baseUrl = (NODE_URL || (location.protocol + '//' + location.hostname)).replace(/\\/+$/, '');
@@ -895,6 +900,7 @@ INDEX_HTML = """<!doctype html>
     var tileserverLink = document.getElementById('tileserver-link');
     var tileserverPort = (tileserverLink && tileserverLink.dataset.port) || '30085';
     var styleApiUrl = baseUrl + ':' + tileserverPort + '/styles/osm/style.json';
+    CURRENT_STYLE_API_URL = styleApiUrl;
     ['style-editor-link', 'style-editor-link-2'].forEach(function(id) {
       var styleLink = document.getElementById(id);
       if (styleLink) {
@@ -903,6 +909,26 @@ INDEX_HTML = """<!doctype html>
     });
   }
   updateLinks();
+
+  // Maputnik's "?style=" auto-load requires the user to accept a native
+  // confirm() popup; if that popup is missed/declined, Maputnik silently
+  // falls back to its own cached/default demo style (a raster world map),
+  // which looks like "just world outlines" with no Luxembourg overlay.
+  // Copying the URL lets the user paste it into Maputnik's Menü ▸ Open
+  // dialog instead, which loads the style directly without any popup.
+  async function copyStyleUrl() {
+    var statusEl = document.getElementById('style-url-status');
+    if (!CURRENT_STYLE_API_URL) {
+      statusEl.textContent = 'Style-URL noch nicht verfügbar.';
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(CURRENT_STYLE_API_URL);
+      statusEl.textContent = 'Kopiert: ' + CURRENT_STYLE_API_URL;
+    } catch (err) {
+      statusEl.textContent = CURRENT_STYLE_API_URL;
+    }
+  }
 
   function esc(value) {
     return String(value == null ? '' : value)
