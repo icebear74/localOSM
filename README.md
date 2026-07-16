@@ -78,10 +78,16 @@ Each step uses a dedicated Kubernetes Job and only promotes staged data after th
 ### Tuning the Nominatim import
 
 The `osm2pgsql` step invoked by `nominatim import` maps its worker/process count 1:1 to the
-`THREADS` value it is started with. `k8s/nominatim-import-config.yaml` (`ConfigMap
-osm-nominatim-import-config`) is the single place to configure this: edit `import_threads` to
-match the CPU cores available to the `nominatim-import` Job (see its `resources.limits.cpu` in
-`k8s/nominatim-import-job.yaml`), then re-apply the ConfigMap:
+`THREADS` value it is started with, and its node cache size (`--cache`, in MB) to
+`NOMINATIM_OSM2PGSQL_CACHE`. `k8s/nominatim-import-config.yaml` (`ConfigMap
+osm-nominatim-import-config`) is the single place to configure both:
+
+- `import_threads` (default `8`) — match this to the CPU cores available to the
+  `nominatim-import` Job (see its `resources.limits.cpu` in `k8s/nominatim-import-job.yaml`).
+- `import_cache_mb` (default `12000`, i.e. ~12 GB) — match this to the RAM available to the
+  `nominatim-import` Job (see its `resources.limits.memory`), up to roughly 75% of that RAM.
+
+Edit the values, then re-apply the ConfigMap:
 
 ```bash
 kubectl apply -f k8s/nominatim-import-config.yaml

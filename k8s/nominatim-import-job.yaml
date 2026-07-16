@@ -33,12 +33,21 @@ spec:
                 configMapKeyRef:
                   name: osm-nominatim-import-config
                   key: import_threads
+            # osm2pgsql's --cache (node cache, in MB) during the initial
+            # import; sized to the node's available RAM (see
+            # k8s/nominatim-import-config.yaml) rather than left at
+            # osm2pgsql's small auto-detected default.
+            - name: NOMINATIM_OSM2PGSQL_CACHE
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-nominatim-import-config
+                  key: import_cache_mb
           resources:
             requests:
-              memory: "12Gi"
-              cpu: "6"
+              memory: "14Gi"
+              cpu: "8"
             limits:
-              memory: "18Gi"
+              memory: "20Gi"
               cpu: "8"
           command: ["/bin/bash", "-c"]
           args:
