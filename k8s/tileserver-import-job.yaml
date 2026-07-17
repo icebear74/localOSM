@@ -64,18 +64,18 @@ spec:
           imagePullPolicy: Always
           resources:
             requests:
-              memory: "16Gi"
+              memory: "12Gi"
               cpu: "5"
             limits:
-              memory: "28Gi"
+              memory: "14Gi"
               cpu: "14"
           env:
             - name: JAVA_OPTS
 #              value: "-Xms6g -Xmx8g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
-              value: "-Xms8g -Xmx12g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"
+              value: "-Xms6g -Xmx10g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"
  
             - name: JAVA_TOOL_OPTIONS
-              value: "-Xms8g -Xmx12g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"
+              value: "-Xms6g -Xmx10g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"
 
 #          args:
 #            - --osm-path=/data/import/planet.osm.pbf
