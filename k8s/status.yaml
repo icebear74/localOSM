@@ -2250,6 +2250,13 @@ spec:
               command -v osmium >/dev/null || { echo "ERROR: osmium command not found after apt install. Verify package contents and PATH inside the container."; exit 1; }
               cp /config/app.py /tmp/app.py
               python /tmp/app.py
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
           env:
             - name: STATUS_HOST
               value: "0.0.0.0"

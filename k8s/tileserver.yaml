@@ -51,6 +51,13 @@ spec:
               else
                 printf '{"options":{"paths":{"root":"","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true,"cors":true},"styles":{},"data":{}}\n' > /data/config.json
               fi
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
           volumeMounts:
             - name: tileserver-data
               mountPath: /data
@@ -62,6 +69,13 @@ spec:
           image: maptiler/tileserver-gl:latest
           imagePullPolicy: Always
           args: ["/data/config.json"]
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
           env:
             - name: PORT
               value: "80"

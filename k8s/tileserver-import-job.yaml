@@ -19,6 +19,13 @@ spec:
               test -f /data/import/planet.osm.pbf
               mkdir -p /data
               mkdir -p /data/sources
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
           volumeMounts:
             - name: osm-data
               mountPath: /data
@@ -39,6 +46,13 @@ spec:
               if [ ! -s /data/sources/natural_earth_vector.sqlite.zip ]; then
                 wget -q -O /data/sources/natural_earth_vector.sqlite.zip https://naciscdn.org/naturalearth/packages/natural_earth_vector.sqlite.zip
               fi
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "512Mi"
           volumeMounts:
             - name: osm-data
               mountPath: /data

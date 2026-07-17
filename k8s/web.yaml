@@ -786,6 +786,13 @@ spec:
                   || { rm -f /data/static/maplibre-gl.css; echo "ERROR: maplibre-gl.css download failed"; exit 1; }
               fi
               echo "Static assets ready."
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
           volumeMounts:
             - name: web-static
               mountPath: /data/static
@@ -798,6 +805,13 @@ spec:
             - |
               cp /config/app.py /tmp/app.py
               python /tmp/app.py
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "300m"
+              memory: "256Mi"
           env:
             - name: WEB_HOST
               value: "0.0.0.0"

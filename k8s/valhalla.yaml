@@ -26,6 +26,13 @@ spec:
                 sleep 30
               done
               echo "Tiles found — starting Valhalla service."
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "16Mi"
+            limits:
+              cpu: "50m"
+              memory: "64Mi"
           volumeMounts:
             - name: valhalla-data
               mountPath: /custom_files

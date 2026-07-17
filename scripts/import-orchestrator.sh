@@ -201,6 +201,13 @@ spec:
       containers:
         - name: import-prep
           image: python:3.12-slim
+          resources:
+            requests:
+              cpu: "1"
+              memory: "2Gi"
+            limits:
+              cpu: "2"
+              memory: "6Gi"
           command: ["/bin/sh", "-c"]
           args:
             - |
