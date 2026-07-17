@@ -101,7 +101,7 @@ clean_data_directory() {
   fi
 }
 
-# OSMTemp only ever holds scratch/staging data for an in-progress import, so
+# The temp dir only ever holds scratch/staging data for an in-progress import, so
 # on a clean start its contents can always be discarded outright. Only the
 # contents are removed — the directory (mount point) itself, which the user
 # creates and mounts, is left untouched.
@@ -188,6 +188,10 @@ ${SUDO} chown -R 100:100   "${TEMP_BASE_DIR}/nominatim"           2>/dev/null ||
 ${SUDO} chown -R 1000:1000 "${TEMP_BASE_DIR}/valhalla"            2>/dev/null || true
 
 echo ">>> Copying static manifests and orchestrator script …"
+# Manifests that hardcode the OSM_TEMP_DIR mount use the placeholder
+# __OSM_TEMP_DIR__ instead of a literal path, so that a custom
+# --temp-dir/OSM_TEMP_DIR value is honored by the deployed hostPaths/env vars
+# too, not just by the directories this script creates below.
 for manifest in \
   namespace.yaml \
   postgres.yaml \
@@ -206,7 +210,7 @@ for manifest in \
   import-orchestrator.yaml \
   web.yaml \
   style-editor.yaml; do
-  ${SUDO} cp "${REPO_ROOT}/k8s/${manifest}" "${BASE_DIR}/manifests/${manifest}"
+  sed "s|__OSM_TEMP_DIR__|${TEMP_BASE_DIR}|g" "${REPO_ROOT}/k8s/${manifest}" | ${SUDO} tee "${BASE_DIR}/manifests/${manifest}" >/dev/null
 done
 ${SUDO} cp "${REPO_ROOT}/scripts/import-orchestrator.sh" "${BASE_DIR}/scripts/import-orchestrator.sh"
 ${SUDO} chmod +x "${BASE_DIR}/scripts/import-orchestrator.sh"

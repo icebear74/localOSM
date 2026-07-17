@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE_DIR="/mnt/data/OSM"
-TEMP_DIR="${OSM_TEMP_DIR:-/mnt/data/OSMTemp}"
+TEMP_DIR="${OSM_TEMP_DIR:-/mnt/data/OSM/TempDir}"
 DEST="${TEMP_DIR}/import/planet.osm.pbf"
 URL=""
 
@@ -18,7 +18,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      echo "Usage: $0 --url <https://...osm.pbf> [--dest /mnt/data/OSMTemp/import/planet.osm.pbf]"
+      echo "Usage: $0 --url <https://...osm.pbf> [--dest /mnt/data/OSM/TempDir/import/planet.osm.pbf]"
       exit 0
       ;;
     *)

@@ -70,7 +70,7 @@ spec:
             - name: OSM_DATA_DIR
               value: /mnt/data/OSM
             - name: OSM_TEMP_DIR
-              value: /mnt/data/OSMTemp
+              value: __OSM_TEMP_DIR__
           resources:
             requests:
               cpu: "100m"
@@ -96,7 +96,7 @@ spec:
             - name: data
               mountPath: /mnt/data/OSM
             - name: temp-data
-              mountPath: /mnt/data/OSMTemp
+              mountPath: __OSM_TEMP_DIR__
       volumes:
         - name: orchestrator-script
           hostPath:
@@ -128,5 +128,5 @@ spec:
             type: DirectoryOrCreate
         - name: temp-data
           hostPath:
-            path: /mnt/data/OSMTemp
+            path: __OSM_TEMP_DIR__
             type: DirectoryOrCreate

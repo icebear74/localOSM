@@ -3,7 +3,7 @@ set -euo pipefail
 
 NAMESPACE="${OSM_NAMESPACE:-osm}"
 DATA_DIR="${OSM_DATA_DIR:-/mnt/data/OSM}"
-TEMP_DIR="${OSM_TEMP_DIR:-/mnt/data/OSMTemp}"
+TEMP_DIR="${OSM_TEMP_DIR:-/mnt/data/OSM/TempDir}"
 MANIFEST_DIR="${OSM_MANIFEST_DIR:-/manifests}"
 STATE_DIR="${OSM_STATE_DIR:-/state}"
 CONFIG_DIR="${OSM_CONFIG_DIR:-/config}"
@@ -17,7 +17,7 @@ CONFIG_CHECK_INTERVAL=60
 mkdir -p "${STATE_DIR}"
 
 # Removes everything *inside* a scratch directory on the (user-provided,
-# fast/SSD-backed) OSMTemp mount without ever removing the directory (mount
+# fast/SSD-backed) temp-dir mount without ever removing the directory (mount
 # point) itself, so temporary import data never lingers once a step is done.
 cleanup_temp_dir() {
   local dir="$1"
@@ -368,8 +368,8 @@ swap_stage() {
   fi
   mv "${staging_dir}" "${active_dir}"
   rm -rf "${active_dir}.old" 2>/dev/null || true
-  # OSMTemp is scratch space only; once the promoted data has been moved into
-  # OSM/<service>/active, nothing must remain behind on the temp mount.
+  # The temp dir is scratch space only; once the promoted data has been moved
+  # into OSM/<service>/active, nothing must remain behind on the temp mount.
   cleanup_temp_dir "$(dirname "${staging_dir}")"
   kubectl -n "${NAMESPACE}" rollout restart "deployment/${deployment}" >/dev/null
   if [ "${deployment}" = "nominatim" ]; then
@@ -387,7 +387,7 @@ swap_stage() {
 run_step() {
   local service="$1" job_name="$2" manifest="$3" active_dir="$4" staging_dir="$5" deployment="$6"
   check_config_change
-  # Start from a clean OSMTemp scratch area in case a previous run crashed
+  # Start from a clean temp-dir scratch area in case a previous run crashed
   # before it could clean up after itself.
   cleanup_temp_dir "$(dirname "${staging_dir}")"
   log "Starting ${service} import job."
@@ -451,7 +451,7 @@ main() {
 
     # The shared merged-extract scratch data is only needed while the three
     # import steps run; once TileServer, Nominatim and Valhalla have all
-    # consumed it, OSMTemp must be cleared again.
+    # consumed it, the temp dir must be cleared again.
     cleanup_temp_dir "${TEMP_DIR}/import"
     rm -f "${REQUEST_FILE}"
     write_state false "done" 100 "Import erfolgreich abgeschlossen." "Alle Daten wurden sequentiell verarbeitet und aktiviert."

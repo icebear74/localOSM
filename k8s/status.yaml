@@ -99,7 +99,7 @@ data:
     HOST = os.environ.get("STATUS_HOST", "0.0.0.0")
     PORT = parse_int_env("STATUS_PORT", 8080)
     DATA_DIR = os.environ.get("OSM_DATA_DIR", "/mnt/data/OSM")
-    TEMP_DIR = os.environ.get("OSM_TEMP_DIR", "/mnt/data/OSMTemp")
+    TEMP_DIR = os.environ.get("OSM_TEMP_DIR", "/mnt/data/OSM/TempDir")
     NAMESPACE = os.environ.get("OSM_NAMESPACE", "osm")
     OSM_NODE_URL = os.environ.get("OSM_NODE_URL", "").strip()
     
@@ -2258,7 +2258,7 @@ spec:
             - name: OSM_DATA_DIR
               value: "/mnt/data/OSM"
             - name: OSM_TEMP_DIR
-              value: "/mnt/data/OSMTemp"
+              value: "__OSM_TEMP_DIR__"
             - name: OSM_NAMESPACE
               value: "osm"
             - name: OSM_NODE_URL
@@ -2271,7 +2271,7 @@ spec:
             - name: osm-data
               mountPath: /mnt/data/OSM
             - name: osm-temp
-              mountPath: /mnt/data/OSMTemp
+              mountPath: __OSM_TEMP_DIR__
       volumes:
         - name: app-code
           configMap:
@@ -2282,7 +2282,7 @@ spec:
             type: DirectoryOrCreate
         - name: osm-temp
           hostPath:
-            path: /mnt/data/OSMTemp
+            path: __OSM_TEMP_DIR__
             type: DirectoryOrCreate
 ---
 apiVersion: v1

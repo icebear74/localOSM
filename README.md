@@ -32,11 +32,13 @@ A self-hosted OSM stack on K3s with a read-only status dashboard, a routing web 
 
 Persistent (final) data lives under `/mnt/data/OSM`. All temporary/scratch
 data produced while an import is running lives under a separate directory,
-`/mnt/data/OSMTemp` (override with `OSM_TEMP_DIR`). Create and mount
-`OSMTemp` on fast storage (e.g. an SSD) yourself — the scripts only manage
-its *contents*, never the directory/mount point itself, and they clear those
-contents as soon as an import step has finished (successfully or not) so
-nothing lingers on the fast disk.
+`/mnt/data/OSM/TempDir` by default (override with `--temp-dir` or the
+`OSM_TEMP_DIR` environment variable when running `scripts/deploy-osm.sh`,
+which also templates that value into the deployed manifests). Create and
+mount the temp directory on fast storage (e.g. an SSD) yourself — the
+scripts only manage its *contents*, never the directory/mount point itself,
+and they clear those contents as soon as an import step has finished
+(successfully or not) so nothing lingers on the fast disk.
 
 Important subdirectories under `/mnt/data/OSM` (final data only):
 
@@ -48,7 +50,7 @@ Important subdirectories under `/mnt/data/OSM` (final data only):
 - `scripts/` – mounted orchestration script
 - `status/` – dashboard and orchestrator state files
 
-Important subdirectories under `/mnt/data/OSMTemp` (scratch data only, cleared after each import step):
+Important subdirectories under `/mnt/data/OSM/TempDir` (scratch data only, cleared after each import step):
 
 - `import/` – merged/downloaded `planet.osm.pbf` used as the shared input for the TileServer, Nominatim and Valhalla import jobs
 - `nominatim/staging` – osm2pgsql/PostgreSQL working data while Nominatim import runs
