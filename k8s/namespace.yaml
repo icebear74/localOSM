@@ -14,8 +14,8 @@ spec:
     - type: Container
       # Standard-Zuweisungen (Requests), wenn im Pod-YAML gar nichts eingetragen ist:
       defaultRequest:
-        cpu: "4"
-        memory: "8Gi"
+        cpu: "0.1"
+        memory: "2Gi"
       # Standard-Grenzwerte (Limits), die automatisch gesetzt werden:
       default:
         cpu: "8"

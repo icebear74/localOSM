@@ -58,10 +58,10 @@ spec:
           env:
             - name: JAVA_OPTS
 #              value: "-Xms6g -Xmx8g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
-              value: "-Xms15g -Xmx20g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"
+              value: "-Xms8g -Xmx12g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"
  
             - name: JAVA_TOOL_OPTIONS
-              value: "-Xms15g -Xmx20g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"
+              value: "-Xms8g -Xmx12g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"
 
 #          args:
 #            - --osm-path=/data/import/planet.osm.pbf
@@ -82,9 +82,10 @@ spec:
             - --fetch-wikidata
             # ÄNDRUNG: Wechsel auf Disk-Speicher für Nodes, um den RAM zu schonen
             - --nodemap-type=sparsearray
-            - --nodemap-storage=ram
+            - --nodemap-storage=mmap
             # ÄNDERUNG: Threads auf 14 hochgeschraubt
             - --threads=14
+            
             - --lake_centerlines_path=/data/sources/lake_centerline.shp.zip
             - --water_polygons_path=/data/sources/water-polygons-split-3857.zip
             - --natural_earth_path=/data/sources/natural_earth_vector.sqlite.zip
