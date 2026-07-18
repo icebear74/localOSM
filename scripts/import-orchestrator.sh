@@ -389,6 +389,7 @@ swap_stage() {
   local staging_dir="$3"
   local deployment="$4"
   local backup_dir="${active_dir}.old"
+  local mv_err
 
   if [ ! -d "${staging_dir}" ]; then
     log "Staging directory ${staging_dir} not found; cannot promote ${service}."
@@ -397,14 +398,14 @@ swap_stage() {
 
   rm -rf "${backup_dir}" 2>/dev/null || true
   if [ -d "${active_dir}" ]; then
-    if ! mv "${active_dir}" "${backup_dir}"; then
-      log "Failed to back up existing ${active_dir} before promoting ${service}."
+    if ! mv_err="$(mv "${active_dir}" "${backup_dir}" 2>&1)"; then
+      log "Failed to back up existing ${active_dir} before promoting ${service}: ${mv_err}"
       return 1
     fi
   fi
 
-  if ! mv "${staging_dir}" "${active_dir}"; then
-    log "Failed to move staged ${service} data from ${staging_dir} to ${active_dir}."
+  if ! mv_err="$(mv "${staging_dir}" "${active_dir}" 2>&1)"; then
+    log "Failed to move staged ${service} data from ${staging_dir} to ${active_dir}: ${mv_err}"
     # Restore the previous good data so the service keeps serving it instead
     # of being left without any active data at all.
     if [ -d "${backup_dir}" ]; then
