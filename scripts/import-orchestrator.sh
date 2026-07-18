@@ -11,6 +11,7 @@ LOG_FILE="${STATE_DIR}/import-orchestrator.log"
 STATE_FILE="${STATE_DIR}/import-orchestrator.json"
 HASH_FILE="${STATE_DIR}/import-orchestrator.hash"
 REQUEST_FILE="${STATE_DIR}/import-request.json"
+ABORT_FILE="${STATE_DIR}/import-abort.flag"
 LAST_CONFIG_CHECK=0
 CONFIG_CHECK_INTERVAL=60
 
@@ -30,6 +31,14 @@ log() {
   local timestamp
   timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   printf '%s %s\n' "$timestamp" "$message" | tee -a "${LOG_FILE}"
+}
+
+abort_requested() {
+  [ -f "${ABORT_FILE}" ]
+}
+
+clear_abort_flag() {
+  rm -f "${ABORT_FILE}" 2>/dev/null || true
 }
 
 write_state() {
@@ -162,6 +171,11 @@ wait_for_job() {
   start="$(date +%s)"
   while true; do
     check_config_change
+    if abort_requested; then
+      log "Abort requested; deleting job ${job_name} and its pods."
+      kubectl -n "${NAMESPACE}" delete job "${job_name}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+      return 2
+    fi
     if kubectl -n "${NAMESPACE}" wait --for=condition=complete "job/${job_name}" --timeout=30s >/dev/null 2>&1; then
       return 0
     fi
@@ -344,7 +358,12 @@ spec:
             path: ${TEMP_DIR}/import
             type: DirectoryOrCreate
 EOF
-  if ! wait_for_job "${job_name}"; then
+  local rc=0
+  wait_for_job "${job_name}" || rc=$?
+  if [ "${rc}" -eq 2 ]; then
+    write_state false "aborted" 0 "Map download aborted." "Import wurde vom Benutzer abgebrochen."
+    return 2
+  elif [ "${rc}" -ne 0 ]; then
     write_state false "failed" 0 "Map download failed." "See job logs for details."
     return 1
   fi
@@ -369,16 +388,40 @@ swap_stage() {
   local active_dir="$2"
   local staging_dir="$3"
   local deployment="$4"
-  if [ -d "${active_dir}" ]; then
-    rm -rf "${active_dir}.old" 2>/dev/null || true
-    mv "${active_dir}" "${active_dir}.old" 2>/dev/null || true
+  local backup_dir="${active_dir}.old"
+
+  if [ ! -d "${staging_dir}" ]; then
+    log "Staging directory ${staging_dir} not found; cannot promote ${service}."
+    return 1
   fi
-  mv "${staging_dir}" "${active_dir}"
-  rm -rf "${active_dir}.old" 2>/dev/null || true
+
+  rm -rf "${backup_dir}" 2>/dev/null || true
+  if [ -d "${active_dir}" ]; then
+    if ! mv "${active_dir}" "${backup_dir}"; then
+      log "Failed to back up existing ${active_dir} before promoting ${service}."
+      return 1
+    fi
+  fi
+
+  if ! mv "${staging_dir}" "${active_dir}"; then
+    log "Failed to move staged ${service} data from ${staging_dir} to ${active_dir}."
+    # Restore the previous good data so the service keeps serving it instead
+    # of being left without any active data at all.
+    if [ -d "${backup_dir}" ]; then
+      rm -rf "${active_dir}" 2>/dev/null || true
+      mv "${backup_dir}" "${active_dir}" 2>/dev/null || true
+    fi
+    return 1
+  fi
+  rm -rf "${backup_dir}" 2>/dev/null || true
   # The temp dir is scratch space only; once the promoted data has been moved
   # into OSM/<service>/active, nothing must remain behind on the temp mount.
   cleanup_temp_dir "$(dirname "${staging_dir}")"
-  kubectl -n "${NAMESPACE}" rollout restart "deployment/${deployment}" >/dev/null
+
+  if ! kubectl -n "${NAMESPACE}" rollout restart "deployment/${deployment}" >/dev/null; then
+    log "Failed to restart deployment/${deployment} after promoting ${service}."
+    return 1
+  fi
   if [ "${deployment}" = "nominatim" ]; then
     if ! wait_for_nominatim_rollout 600; then
       return 1
@@ -389,6 +432,7 @@ swap_stage() {
     fi
   fi
   log "Swapped ${service} staging data into production."
+  return 0
 }
 
 run_step() {
@@ -401,7 +445,13 @@ run_step() {
   write_state true "${service}" 10 "${service} import started." "Submitting ${job_name}."
   kubectl -n "${NAMESPACE}" delete job "${job_name}" --ignore-not-found >/dev/null 2>&1 || true
   kubectl -n "${NAMESPACE}" apply -f "${MANIFEST_DIR}/${manifest}" >/dev/null
-  if ! wait_for_job "${job_name}"; then
+  local rc=0
+  wait_for_job "${job_name}" || rc=$?
+  if [ "${rc}" -eq 2 ]; then
+    write_state false "aborted" 0 "${service} import aborted." "Import wurde vom Benutzer abgebrochen."
+    cleanup_temp_dir "$(dirname "${staging_dir}")"
+    return 2
+  elif [ "${rc}" -ne 0 ]; then
     write_state false "failed" 0 "${service} import failed." "See job logs for details."
     cleanup_temp_dir "$(dirname "${staging_dir}")"
     return 1
@@ -409,6 +459,7 @@ run_step() {
   write_state true "${service}" 90 "${service} import completed." "Promoting staged data."
   if ! swap_stage "${service}" "${active_dir}" "${staging_dir}" "${deployment}"; then
     write_state false "failed" 0 "${service} promotion failed." "Rollout of deployment/${deployment} did not become ready."
+    cleanup_temp_dir "$(dirname "${staging_dir}")"
     return 1
   fi
   write_state false "${service}" 100 "${service} import promoted." "${service} is serving the newly imported data."
@@ -421,6 +472,9 @@ main() {
   while true; do
     check_config_change
     if [ ! -s "${REQUEST_FILE}" ]; then
+      # No request pending: any leftover abort flag from a previous run is
+      # stale and must not affect the next request.
+      clear_abort_flag
       sleep 15
       continue
     fi
@@ -429,30 +483,58 @@ main() {
     write_state true "queued" 5 "Import request received." "Running TileServer, Nominatim and Valhalla sequentially."
 
     if request_has_countries; then
-      if ! prepare_import_data; then
-        log "Import preparation failed; discarding import request to avoid retrying the same failing request in a loop."
+      local prc=0
+      prepare_import_data || prc=$?
+      if [ "${prc}" -ne 0 ]; then
+        if [ "${prc}" -eq 2 ]; then
+          log "Import aborted by user during preparation; discarding import request."
+        else
+          log "Import preparation failed; discarding import request to avoid retrying the same failing request in a loop."
+        fi
         cleanup_temp_dir "${TEMP_DIR}/import"
         rm -f "${REQUEST_FILE}"
+        clear_abort_flag
         continue
       fi
     fi
 
-    if ! run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${TEMP_DIR}/tileserver/staging" "tileserver-gl"; then
-      log "TileServer import failed; discarding import request to avoid retrying the same failing request in a loop."
+    local src=0
+    run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${TEMP_DIR}/tileserver/staging" "tileserver-gl" || src=$?
+    if [ "${src}" -ne 0 ]; then
+      if [ "${src}" -eq 2 ]; then
+        log "Import aborted by user during TileServer import; discarding import request."
+      else
+        log "TileServer import failed; discarding import request to avoid retrying the same failing request in a loop."
+      fi
       cleanup_temp_dir "${TEMP_DIR}/import"
       rm -f "${REQUEST_FILE}"
+      clear_abort_flag
       continue
     fi
-    if ! run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${TEMP_DIR}/nominatim/staging" "nominatim"; then
-      log "Nominatim import failed; discarding import request to avoid retrying the same failing request in a loop."
+    local nrc=0
+    run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${TEMP_DIR}/nominatim/staging" "nominatim" || nrc=$?
+    if [ "${nrc}" -ne 0 ]; then
+      if [ "${nrc}" -eq 2 ]; then
+        log "Import aborted by user during Nominatim import; discarding import request."
+      else
+        log "Nominatim import failed; discarding import request to avoid retrying the same failing request in a loop."
+      fi
       cleanup_temp_dir "${TEMP_DIR}/import"
       rm -f "${REQUEST_FILE}"
+      clear_abort_flag
       continue
     fi
-    if ! run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${TEMP_DIR}/valhalla/staging" "valhalla"; then
-      log "Valhalla import failed; discarding import request to avoid retrying the same failing request in a loop."
+    local vrc=0
+    run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${TEMP_DIR}/valhalla/staging" "valhalla" || vrc=$?
+    if [ "${vrc}" -ne 0 ]; then
+      if [ "${vrc}" -eq 2 ]; then
+        log "Import aborted by user during Valhalla import; discarding import request."
+      else
+        log "Valhalla import failed; discarding import request to avoid retrying the same failing request in a loop."
+      fi
       cleanup_temp_dir "${TEMP_DIR}/import"
       rm -f "${REQUEST_FILE}"
+      clear_abort_flag
       continue
     fi
 
@@ -461,6 +543,7 @@ main() {
     # consumed it, the temp dir must be cleared again.
     cleanup_temp_dir "${TEMP_DIR}/import"
     rm -f "${REQUEST_FILE}"
+    clear_abort_flag
     write_state false "done" 100 "Import erfolgreich abgeschlossen." "Alle Daten wurden sequentiell verarbeitet und aktiviert."
     log "Import request completed successfully."
   done

@@ -81,8 +81,8 @@ data:
     import urllib.parse
     import urllib.request
     from datetime import datetime, timezone
-    
-    
+
+
     def parse_int_env(name, default):
         value = os.environ.get(name)
         if value is None:
@@ -94,15 +94,15 @@ data:
             return int(value)
         except ValueError:
             return default
-    
-    
+
+
     HOST = os.environ.get("STATUS_HOST", "0.0.0.0")
     PORT = parse_int_env("STATUS_PORT", 8080)
     DATA_DIR = os.environ.get("OSM_DATA_DIR", "/mnt/data/OSM")
     TEMP_DIR = os.environ.get("OSM_TEMP_DIR", "/mnt/data/OSM/TempDir")
     NAMESPACE = os.environ.get("OSM_NAMESPACE", "osm")
     OSM_NODE_URL = os.environ.get("OSM_NODE_URL", "").strip()
-    
+
     STATUS_DIR = os.path.join(DATA_DIR, "status")
     LIBRARY_DIR = os.path.join(DATA_DIR, "library")
     IMPORT_DIR = os.path.join(TEMP_DIR, "import")
@@ -114,13 +114,19 @@ data:
     # Live style used by TileServer-GL (k8s/tileserver.yaml mounts the same hostPath).
     TILESERVER_STYLE_PATH = os.path.join(DATA_DIR, "tileserver", "active", "style.json")
     IMPORT_REQUEST_FILE = os.path.join(STATUS_DIR, "import-request.json")
-    
+    # import-orchestrator.sh writes its own live progress here (same hostPath as
+    # STATUS_DIR, see k8s/import-orchestrator.yaml "state" volume) and watches for
+    # ABORT_FLAG_FILE to cancel whatever it is currently doing.
+    ORCHESTRATOR_STATE_FILE = os.path.join(STATUS_DIR, "import-orchestrator.json")
+    ABORT_FLAG_FILE = os.path.join(STATUS_DIR, "import-abort.flag")
+    IMPORT_JOB_NAMES = ("import-prep", "tileserver-import", "nominatim-import", "valhalla-import")
+
     CONFIG_DEFAULTS = {
         "node_url": "",
         "auto_update_enabled": False,
         "auto_update_time": "03:00",
     }
-    
+
     SERVICES = [
         ("postgres", "postgres.osm.svc.cluster.local", 5432, "tcp", None),
         ("tileserver", "tileserver-gl.osm.svc.cluster.local", 80, "http", "/"),
@@ -128,7 +134,7 @@ data:
         ("valhalla", "valhalla.osm.svc.cluster.local", 8002, "http", "/"),
         ("web", "web.osm.svc.cluster.local", 8080, "http", "/healthz"),
     ]
-    
+
     COUNTRY_LIBRARY_GROUPS = [
         (
             "Africa",
@@ -346,7 +352,7 @@ data:
             ],
         ),
     ]
-    
+
     COUNTRY_LIBRARY = [
         {
             "slug": slug,
@@ -357,7 +363,7 @@ data:
         for continent, continent_path, countries in COUNTRY_LIBRARY_GROUPS
         for slug, name in countries
     ]
-    
+
     # Approximate bounding boxes (min_lon, min_lat, max_lon, max_lat) for each Geofabrik slug.
     # Used to compute the geographic center of all downloaded regions for the map initial view.
     COUNTRY_BBOX = {
@@ -542,7 +548,7 @@ data:
         "uruguay": (-58.44, -34.95, -53.09, -30.09),
         "venezuela": (-73.35, 0.64, -59.76, 12.20),
     }
-    
+
     # MapLibre GL base style – kept in sync with k8s/tileserver.yaml init container.
     _STYLE_JSON = (
         '{"version":8,"name":"LocalOSM","sources":{"openmaptiles":{"type":"vector","url":"mbtiles://{v3}"}},'
@@ -574,7 +580,7 @@ data:
         '{"id":"place-hamlet","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["in","class","hamlet","isolated_dwelling"],"minzoom":13,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["NotoSansRegular"],"text-size":10},"paint":{"text-color":"#666","text-halo-color":"rgba(255,255,255,0.9)","text-halo-width":1.5}}'
         "]}"
     )
-    
+
     def compute_map_center(records):
         """Return (center_lon, center_lat, zoom) from the bounding union of all non-error country records."""
         slugs = [r.get("slug", "") for r in records if r.get("status") != "error"]
@@ -601,7 +607,7 @@ data:
         else:
             zoom = 8
         return round(center_lon, 4), round(center_lat, 4), zoom
-    
+
     def build_style_json(center_lon=None, center_lat=None, zoom=6):
         """Return the MapLibre GL style dict, optionally with initial center and zoom."""
         style = json.loads(_STYLE_JSON)
@@ -609,19 +615,19 @@ data:
             style["center"] = [center_lon, center_lat]
             style["zoom"] = zoom
         return style
-    
+
     WORKFLOW_LOCK = threading.Lock()
     ACTIVE_WORKFLOW = {"thread": None}
     SCHEDULER_LOCK = threading.Lock()
     LAST_AUTO_RUN = {"date": ""}
-    
-    
+
+
     _SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount"
-    
-    
+
+
     class KubeClient:
         """Minimal Kubernetes REST API client using in-cluster credentials."""
-    
+
         def __init__(self, namespace, timeout=30):
             self.namespace = namespace
             self.timeout = timeout
@@ -639,7 +645,7 @@ data:
             if not os.path.exists(ca_path):
                 self._ssl.check_hostname = False
                 self._ssl.verify_mode = ssl.CERT_NONE
-    
+
         def _request(self, method, path, body=None, params=None, content_type="application/json"):
             url = self._base + path
             if params:
@@ -657,13 +663,13 @@ data:
             except urllib.error.HTTPError as exc:
                 body_text = exc.read().decode(errors="replace")
                 raise RuntimeError(f"K8s API {method} {path} → {exc.code}: {body_text}") from exc
-    
+
         def get_job(self, name):
             return self._request("GET", f"/apis/batch/v1/namespaces/{self.namespace}/jobs/{name}")
-    
+
         def create_job(self, manifest):
             return self._request("POST", f"/apis/batch/v1/namespaces/{self.namespace}/jobs", body=manifest)
-    
+
         def delete_job(self, name):
             try:
                 self._request(
@@ -674,7 +680,7 @@ data:
             except RuntimeError as exc:
                 if "404" not in str(exc):
                     raise
-    
+
         def get_job_logs(self, name, tail_lines=80):
             pods = self._request(
                 "GET",
@@ -695,7 +701,7 @@ data:
                     return resp.read().decode(errors="replace")
             except urllib.error.HTTPError:
                 return ""
-    
+
         def get_pod_logs(self, name, tail_lines=80):
             url = self._base + f"/api/v1/namespaces/{self.namespace}/pods/{name}/log?tailLines={tail_lines}"
             headers = {}
@@ -707,10 +713,10 @@ data:
                     return resp.read().decode(errors="replace")
             except urllib.error.HTTPError:
                 return ""
-    
+
         def get_deployment(self, name):
             return self._request("GET", f"/apis/apps/v1/namespaces/{self.namespace}/deployments/{name}")
-    
+
         def scale_deployment(self, name, replicas):
             self._request(
                 "PATCH",
@@ -718,7 +724,7 @@ data:
                 body={"spec": {"replicas": replicas}},
                 content_type="application/merge-patch+json",
             )
-    
+
         def rollout_restart(self, name):
             ts = datetime.now(timezone.utc).isoformat()
             self._request(
@@ -735,14 +741,14 @@ data:
                 },
                 content_type="application/merge-patch+json",
             )
-    
+
         def list_pods(self, label_selector):
             return self._request(
                 "GET",
                 f"/api/v1/namespaces/{self.namespace}/pods",
                 params={"labelSelector": label_selector},
             )
-    
+
         def get_node_ips(self):
             """Return a list of InternalIP addresses for all cluster nodes."""
             try:
@@ -755,19 +761,19 @@ data:
                 return ips
             except Exception:  # noqa: BLE001
                 return []
-    
-    
-    
+
+
+
     KUBE = KubeClient(NAMESPACE)
-    
+
     _detected_node_url_cache: "str | None" = None
     _detected_node_url_cache_time: float = 0.0
     _NODE_URL_EMPTY_CACHE_TTL = 30.0  # seconds to suppress retries after a failed lookup
-    
-    
+
+
     def detect_node_url():
         """Return a node URL for service links, or empty string if unavailable.
-    
+
         Priority: OSM_NODE_URL env var → first InternalIP from the K8s node list.
         Successful results are cached permanently; failed lookups are suppressed for
         _NODE_URL_EMPTY_CACHE_TTL seconds to avoid a K8s API round-trip on every page load.
@@ -785,8 +791,8 @@ data:
         if result:
             _detected_node_url_cache = result
         return result
-    
-    
+
+
     INDEX_HTML = """<!doctype html>
     <html lang="de">
     <head>
@@ -846,7 +852,7 @@ data:
     <body>
       <h1>&#127757; localOSM – Status-Dashboard</h1>
       <p class="refresh">Automatische Aktualisierung alle 5 Sekunden. <span id="ts"></span></p>
-    
+
       <div class="links" id="links">
         <a href="#" id="web-link" data-port="30084">&#128205; Routing-UI</a>
         <a href="#" id="valhalla-link" data-port="30082">Valhalla API</a>
@@ -854,7 +860,7 @@ data:
         <a href="#" id="tileserver-link" data-port="30085">TileServer GL</a>
         <a href="#" id="style-editor-link" data-port="30086" target="_blank" rel="noopener" aria-label="Style-Editor">&#127912; Style-Editor</a>
       </div>
-    
+
       <div class="grid">
         <div class="card">
           <h2>Node-Konfiguration</h2>
@@ -867,7 +873,7 @@ data:
             <div id="node-url-hint" class="hint">Optional: explizite Node-URL für alle Service-Links.</div>
           </div>
         </div>
-    
+
         <div class="card">
           <h2>Auto-Update</h2>
           <div class="controls">
@@ -883,7 +889,7 @@ data:
             <div id="auto-update-status" class="hint"></div>
           </div>
         </div>
-    
+
         <div class="card">
           <h2>Country Library</h2>
           <div class="controls">
@@ -901,32 +907,33 @@ data:
             <div class="hint">Wählt ein Land aus. Der Hinzufügen-Button prüft nur die Verfügbarkeit; der Build-Button schreibt den Auftrag an den Import-Orchestrator.</div>
           </div>
         </div>
-    
+
         <div class="card">
           <h2>Workflow Fortschritt</h2>
           <div id="workflow-body">Lade ...</div>
+          <button id="abort-btn" class="danger" onclick="abortImport()" style="display:none;margin-top:0.6rem">Import abbrechen</button>
         </div>
-    
+
         <div class="card">
           <h2>Hinzugefügte Länder</h2>
           <div id="country-list">Lade ...</div>
         </div>
-    
+
         <div class="card">
           <h2>Services</h2>
           <div id="svc-list">Lade ...</div>
         </div>
-    
+
         <div class="card">
           <h2>Import-Dateien</h2>
           <div id="import-list">Lade ...</div>
         </div>
-    
+
         <div class="card">
           <h2>Valhalla Tiles</h2>
           <div id="tiles-info">Lade ...</div>
         </div>
-    
+
         <div class="card">
           <h2><span aria-hidden="true">&#127912;</span> Style-Editor</h2>
           <div class="controls">
@@ -945,14 +952,14 @@ data:
           </div>
         </div>
       </div>
-    
+
       <script>
       var NODE_URL = "{{NODE_URL}}";
       var ALL_COUNTRIES = [];
       var refreshTimer = null;
       var WORKFLOW_RUNNING = false;
       var CURRENT_STYLE_API_URL = '';
-    
+
       function updateLinks() {
         var baseUrl = (NODE_URL || (location.protocol + '//' + location.hostname)).replace(/\\/+$/, '');
         ['web-link','valhalla-link','nominatim-link','tileserver-link'].forEach(function(id) {
@@ -977,7 +984,7 @@ data:
         });
       }
       updateLinks();
-    
+
       // Maputnik's "?style=" auto-load requires the user to accept a native
       // confirm() popup; if that popup is missed/declined, Maputnik silently
       // falls back to its own cached/default demo style (a raster world map),
@@ -997,7 +1004,7 @@ data:
           statusEl.textContent = CURRENT_STYLE_API_URL;
         }
       }
-    
+
       function esc(value) {
         return String(value == null ? '' : value)
           .replace(/&/g, '&amp;')
@@ -1006,7 +1013,7 @@ data:
           .replace(/"/g, '&quot;')
           .replace(/'/g, '&#39;');
       }
-    
+
       function renderContinentOptions(countries) {
         var select = document.getElementById('continent-select');
         var current = select.value;
@@ -1027,7 +1034,7 @@ data:
         select.innerHTML = html;
         if (current && seen[current]) select.value = current;
       }
-    
+
       function renderCountryOptions(countries) {
         var select = document.getElementById('country-select');
         var current = select.value;
@@ -1042,11 +1049,11 @@ data:
         select.innerHTML = html;
         if (current) select.value = current;
       }
-    
+
       function filterCountriesByContinent() {
         renderCountryOptions(ALL_COUNTRIES);
       }
-    
+
       function renderWorkflow(workflow) {
         var body = document.getElementById('workflow-body');
         var running = !!(workflow && workflow.running);
@@ -1064,6 +1071,9 @@ data:
         } else if (phase === 'error') {
           statusClass = 'status-error';
           statusText = 'fehler';
+        } else if (phase === 'aborted') {
+          statusClass = 'status-error';
+          statusText = 'abgebrochen';
         }
         var extra = workflow && workflow.error ? '<pre>' + esc(workflow.error) + '</pre>' : '';
         body.innerHTML = '' +
@@ -1081,8 +1091,12 @@ data:
         document.querySelectorAll('.remove-country-btn').forEach(function(btn) {
           btn.disabled = running;
         });
+        var abortBtn = document.getElementById('abort-btn');
+        var canAbort = running && !!(workflow && workflow.request_pending);
+        abortBtn.style.display = canAbort ? 'inline-block' : 'none';
+        abortBtn.disabled = false;
       }
-    
+
       function renderCountries(countries) {
         var el = document.getElementById('country-list');
         if (!countries || countries.length === 0) {
@@ -1113,7 +1127,7 @@ data:
         html += '</div>';
         el.innerHTML = html;
       }
-    
+
       function renderQueuedCount(countries) {
         var count = (countries || []).filter(function(country) { return country.status === 'queued'; }).length;
         var el = document.getElementById('queue-count');
@@ -1122,7 +1136,7 @@ data:
           ? count + ' Land/Länder warten aktuell auf den Build.'
           : 'Keine Länder in der Queue.';
       }
-    
+
       function buildCountryPayload() {
         return {
           country: document.getElementById('country-select').value,
@@ -1130,12 +1144,12 @@ data:
           url: document.getElementById('custom-url').value.trim()
         };
       }
-    
+
       function clearCountryInputs() {
         document.getElementById('custom-name').value = '';
         document.getElementById('custom-url').value = '';
       }
-    
+
       async function startLibraryQueue() {
         var workflowBody = document.getElementById('workflow-body');
         workflowBody.innerHTML = 'Starte Queue-Workflow ...';
@@ -1156,11 +1170,11 @@ data:
           workflowBody.innerHTML = '<span class="status-pill status-error">fehler</span><pre>' + esc(err) + '</pre>';
         }
       }
-    
+
       async function startLibraryAdd() {
         return startLibraryQueue();
       }
-    
+
       async function startBuild() {
         var workflowBody = document.getElementById('workflow-body');
         workflowBody.innerHTML = 'Starte Build-Workflow ...';
@@ -1180,7 +1194,30 @@ data:
           workflowBody.innerHTML = '<span class="status-pill status-error">fehler</span><pre>' + esc(err) + '</pre>';
         }
       }
-    
+
+      async function abortImport() {
+        if (!confirm('Laufenden Import wirklich abbrechen?\\nAlle laufenden Import-Jobs und -Pods werden gelöscht.')) return;
+        var abortBtn = document.getElementById('abort-btn');
+        abortBtn.disabled = true;
+        try {
+          var resp = await fetch('/api/library/abort', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: '{}'
+          });
+          var data = await resp.json();
+          if (!resp.ok) {
+            alert('Fehler: ' + (data.error || 'Unbekannter Fehler'));
+            abortBtn.disabled = false;
+            return;
+          }
+          await refresh();
+        } catch (err) {
+          alert('Fehler: ' + err);
+          abortBtn.disabled = false;
+        }
+      }
+
       async function removeCountry(slug) {
         if (!confirm('Land wirklich aus der Library entfernen?\\nAlle verbleibenden Länder werden anschließend für einen Rebuild markiert.')) return;
         try {
@@ -1199,7 +1236,7 @@ data:
           alert('Fehler: ' + err);
         }
       }
-    
+
       async function loadConfig() {
         try {
           var resp = await fetch('/api/config');
@@ -1224,7 +1261,7 @@ data:
           updateNextRunDisplay(cfg);
         } catch(e) {}
       }
-    
+
       function updateNextRunDisplay(cfg) {
         var el = document.getElementById('auto-update-status');
         if (!el) return;
@@ -1234,17 +1271,17 @@ data:
           el.textContent = 'Auto-Update deaktiviert.';
         }
       }
-    
+
       async function saveNodeUrl() {
         var nodeUrl = document.getElementById('node-url-input').value.trim();
         var resp = await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({node_url: nodeUrl})});
         if (resp.ok) { NODE_URL = nodeUrl; updateLinks(); location.reload(); }
       }
-    
+
       async function saveConfig() {
         return saveNodeUrl();
       }
-    
+
       async function saveAutoUpdate() {
         var enabled = document.getElementById('auto-update-enabled').checked;
         var t = document.getElementById('auto-update-time').value;
@@ -1254,7 +1291,7 @@ data:
           updateNextRunDisplay(cfg);
         }
       }
-    
+
       async function activateStyle() {
         var input = document.getElementById('style-upload-input');
         var statusEl = document.getElementById('style-upload-status');
@@ -1272,7 +1309,7 @@ data:
           statusEl.textContent = 'Fehler: ' + err;
         }
       }
-    
+
       async function refresh() {
         try {
           var resp = await fetch('/api/status');
@@ -1284,7 +1321,7 @@ data:
           renderWorkflow(d.workflow || {});
           renderCountries(d.selected_countries || []);
           renderQueuedCount(d.selected_countries || []);
-    
+
           var svcs = d.services || [];
           var okCount = svcs.filter(function(s){ return s.ok; }).length;
           var html = '';
@@ -1301,7 +1338,7 @@ data:
               okCount + '/' + svcs.length + ' OK</span></div>' + html;
           }
           document.getElementById('svc-list').innerHTML = html || 'Keine Services.';
-    
+
           var files = d.import_files || [];
           if (files.length === 0) {
             document.getElementById('import-list').innerHTML =
@@ -1317,7 +1354,7 @@ data:
             fhtml += '</div>';
             document.getElementById('import-list').innerHTML = fhtml;
           }
-    
+
           var tMB = d.valhalla_tiles_mb;
           document.getElementById('tiles-info').innerHTML =
             '<div class="stat-big">' + esc(tMB) + ' MB</div>' +
@@ -1336,23 +1373,23 @@ data:
         if (refreshTimer) clearTimeout(refreshTimer);
         refreshTimer = setTimeout(refresh, 5000);
       }
-    
+
       loadConfig();
       refresh();
       </script>
     </body>
     </html>
     """
-    
-    
+
+
     def now_iso():
         return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    
-    
+
+
     def clone_default(value):
         return json.loads(json.dumps(value))
-    
-    
+
+
     def ensure_dirs():
         for path in (
             STATUS_DIR,
@@ -1360,24 +1397,24 @@ data:
             IMPORT_DIR,
         ):
             os.makedirs(path, exist_ok=True)
-    
-    
+
+
     def load_json(path, default):
         try:
             with open(path, encoding="utf-8") as handle:
                 return json.load(handle)
         except (OSError, json.JSONDecodeError):
             return clone_default(default)
-    
-    
+
+
     def save_json(path, payload):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         tmp_path = f"{path}.{threading.get_ident()}.tmp"
         with open(tmp_path, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2, sort_keys=True)
         os.replace(tmp_path, path)
-    
-    
+
+
     def load_config():
         data = load_json(CONFIG_FILE, CONFIG_DEFAULTS)
         config = clone_default(CONFIG_DEFAULTS)
@@ -1388,19 +1425,19 @@ data:
         config["auto_update_time"] = str(config.get("auto_update_time") or "03:00")
         config["detected_node_url"] = detect_node_url() if not config["node_url"] else ""
         return config
-    
-    
+
+
     def save_config(data):
         config = clone_default(CONFIG_DEFAULTS)
         config.update({key: data.get(key, value) for key, value in CONFIG_DEFAULTS.items()})
         save_json(CONFIG_FILE, config)
         return config
-    
-    
+
+
     def valid_time_value(value):
         return bool(re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", value or ""))
-    
-    
+
+
     def apply_config_update(payload):
         config = load_config()
         if "node_url" in payload:
@@ -1413,8 +1450,8 @@ data:
                 raise ValueError("auto_update_time must use HH:MM format.")
             config["auto_update_time"] = time_value
         return save_config(config)
-    
-    
+
+
     def slugify(value):
         cleaned = []
         last_dash = False
@@ -1427,15 +1464,15 @@ data:
                 last_dash = True
         slug = "".join(cleaned).strip("-")
         return slug or "custom-country"
-    
-    
+
+
     def file_size_mb(path):
         try:
             return round(os.path.getsize(path) / (1024 * 1024), 1)
         except OSError:
             return None
-    
-    
+
+
     def dir_size_mb(path):
         total = 0
         try:
@@ -1449,8 +1486,8 @@ data:
         except OSError:
             pass
         return round(total / (1024 * 1024), 1)
-    
-    
+
+
     def read_tileserver_style():
         """Return the raw bytes of the live style.json, or None if it does not exist yet."""
         try:
@@ -1458,11 +1495,11 @@ data:
                 return handle.read()
         except OSError:
             return None
-    
-    
+
+
     def write_tileserver_style(raw_body):
         """Validate and atomically persist a new style.json, then restart TileServer-GL.
-    
+
         Returns a tuple (ok: bool, message: str (user-facing, German), restarted: bool).
         """
         try:
@@ -1475,7 +1512,7 @@ data:
             or not isinstance(style.get("version"), (int, float))
         ):
             return False, "Kein gültiger MapLibre-Style (version/layers fehlen oder ungültig).", False
-    
+
         os.makedirs(os.path.dirname(TILESERVER_STYLE_PATH), exist_ok=True)
         tmp_path = TILESERVER_STYLE_PATH + ".tmp"
         try:
@@ -1490,23 +1527,23 @@ data:
                     os.remove(tmp_path)
                 except OSError:
                     pass
-    
+
         try:
             KUBE.rollout_restart("tileserver-gl")
             restarted = True
         except Exception as exc:  # noqa: BLE001
             return True, f"Style gespeichert, TileServer-GL Neustart fehlgeschlagen: {exc}", False
         return True, "Style gespeichert, TileServer-GL wird neu gestartet.", restarted
-    
-    
+
+
     def check_tcp(host, port, timeout=2):
         try:
             with socket.create_connection((host, port), timeout=timeout):
                 return True, f"TCP ok ({host}:{port})"
         except Exception as exc:  # noqa: BLE001
             return False, str(exc)
-    
-    
+
+
     def check_http(url, timeout=3):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "osm-status/1.0"})
@@ -1516,8 +1553,8 @@ data:
             return True, f"HTTP {exc.code}"
         except Exception as exc:  # noqa: BLE001
             return False, str(exc)
-    
-    
+
+
     def list_library_records():
         records = load_json(COUNTRIES_FILE, [])
         enriched = []
@@ -1529,12 +1566,12 @@ data:
                     item["pbf_size_mb"] = size_mb
             enriched.append(item)
         return enriched
-    
-    
+
+
     def save_library_records(records):
         save_json(COUNTRIES_FILE, records)
-    
-    
+
+
     def upsert_country_record(country, **updates):
         records = list_library_records()
         for record in records:
@@ -1557,8 +1594,8 @@ data:
             record.update(updates)
             records.append(record)
         save_library_records(records)
-    
-    
+
+
     def delete_country_record(slug):
         records = list_library_records()
         to_delete = next((r for r in records if r.get("slug") == slug), None)
@@ -1572,8 +1609,8 @@ data:
             if record.get("status") == "ready":
                 record["status"] = "queued"
         save_library_records(records)
-    
-    
+
+
     def mark_library_ready():
         records = list_library_records()
         timestamp = now_iso()
@@ -1587,8 +1624,8 @@ data:
             if size_mb is not None:
                 record["pbf_size_mb"] = size_mb
         save_library_records(records)
-    
-    
+
+
     def read_workflow_state():
         return load_json(
             STATE_FILE,
@@ -1603,15 +1640,88 @@ data:
                 "updated_at": now_iso(),
             },
         )
-    
-    
+
+
     def write_workflow_state(**updates):
         state = read_workflow_state()
         state.update(updates)
         state["updated_at"] = now_iso()
         save_json(STATE_FILE, state)
-    
-    
+
+
+    def read_orchestrator_state():
+        """Return the import-orchestrator's own live progress (see
+        scripts/import-orchestrator.sh write_state()), separate from this app's
+        local library workflow state above."""
+        return load_json(
+            ORCHESTRATOR_STATE_FILE,
+            {
+                "running": False,
+                "phase": "idle",
+                "progress": 0,
+                "message": "",
+                "detail": "",
+                "updated_at": "",
+            },
+        )
+
+
+    def combined_workflow_state():
+        """Merge the local library workflow with the orchestrator's live import
+        progress so the dashboard reflects what is actually happening once a
+        build request has been handed off (TileServer/Nominatim/Valhalla import
+        phases), not just the initial "queued" message."""
+        request_pending = os.path.exists(IMPORT_REQUEST_FILE)
+        orchestrator_state = read_orchestrator_state()
+        if request_pending or orchestrator_state.get("running"):
+            state = dict(orchestrator_state)
+            state["running"] = True
+            state.setdefault("country", "")
+            state["request_pending"] = True
+            return state
+        state = read_workflow_state()
+        state["request_pending"] = False
+        return state
+
+
+    def abort_import_workflow():
+        """Abort whatever the import-orchestrator is currently doing.
+
+        Signals the orchestrator (via ABORT_FLAG_FILE) to stop waiting on its
+        current job and discard the request, discards the pending import request
+        so it is not picked up again, and proactively deletes any running import
+        Jobs so their pods are freed immediately instead of waiting for the
+        orchestrator's next poll (kubernetes garbage-collects a Job's pods when
+        the Job itself is deleted).
+        """
+        request_pending = os.path.exists(IMPORT_REQUEST_FILE)
+        orchestrator_running = read_orchestrator_state().get("running")
+        if not request_pending and not orchestrator_running:
+            raise RuntimeError("No import is currently running.")
+
+        with open(ABORT_FLAG_FILE, "w", encoding="utf-8") as handle:
+            handle.write(now_iso())
+
+        if os.path.exists(IMPORT_REQUEST_FILE):
+            os.remove(IMPORT_REQUEST_FILE)
+
+        for job_name in IMPORT_JOB_NAMES:
+            try:
+                KUBE.delete_job(job_name)
+            except RuntimeError as exc:  # noqa: BLE001
+                print(f"Failed to delete job {job_name} during abort: {exc}", flush=True)
+
+        write_workflow_state(
+            running=False,
+            phase="aborted",
+            progress=0,
+            message="Import wurde abgebrochen.",
+            detail="Der laufende Import wurde manuell abgebrochen.",
+            error="",
+        )
+        return True
+
+
     def country_catalog_with_flags(records):
         selected = {record.get("slug") for record in records}
         catalog = []
@@ -1620,26 +1730,26 @@ data:
             item["selected"] = item["slug"] in selected
             catalog.append(item)
         return catalog
-    
-    
+
+
     def resolve_country_request(payload):
         slug = (payload.get("country") or "").strip()
         custom_name = (payload.get("name") or "").strip()
         custom_url = (payload.get("url") or "").strip()
-    
+
         if custom_name or custom_url:
             if not custom_name or not custom_url:
                 raise ValueError("Custom imports require both a name and a URL.")
             if not custom_url.startswith(("http://", "https://")):
                 raise ValueError("Custom URL must start with http:// or https://.")
             return {"slug": slugify(custom_name), "name": custom_name, "url": custom_url, "continent": "Custom"}
-    
+
         for country in COUNTRY_LIBRARY:
             if country["slug"] == slug:
                 return dict(country)
         raise ValueError("Choose a country or provide custom country details.")
-    
-    
+
+
     def verify_country_url(country):
         request = urllib.request.Request(
             country["url"],
@@ -1653,14 +1763,14 @@ data:
             return exc.code in {200, 301, 302, 303, 307, 308}
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(f"Could not verify {country['name']} ({country['url']}): {exc}")
-    
-    
+
+
     def collect_status():
         try:
             ensure_dirs()
         except OSError:
             pass
-    
+
         def _check_service(svc):
             name, host, port, kind, path = svc
             if kind == "tcp":
@@ -1668,7 +1778,7 @@ data:
             else:
                 ok, detail = check_http(f"http://{host}:{port}{path or '/'}")
             return {"name": name, "ok": ok, "detail": detail}
-    
+
         # Use wait() with an explicit timeout so a hung DNS lookup cannot block the
         # entire /api/status response indefinitely.  The executor is shut down
         # without waiting so that the few threads that are still resolving DNS can
@@ -1689,7 +1799,7 @@ data:
             services = [{"name": svc[0], "ok": False, "detail": "unavailable"} for svc in SERVICES]
         finally:
             svc_pool.shutdown(wait=False)
-    
+
         import_files = []
         if os.path.isdir(IMPORT_DIR):
             for entry in sorted(os.listdir(IMPORT_DIR)):
@@ -1700,7 +1810,7 @@ data:
                 except OSError:
                     size_mb, mtime = 0, "?"
                 import_files.append({"name": entry, "size_mb": size_mb, "mtime": mtime})
-    
+
         records = list_library_records()
         return {
             "timestamp": now_iso(),
@@ -1711,10 +1821,10 @@ data:
             "available_countries": country_catalog_with_flags(records),
             "selected_countries": records,
             "queued_count": len([record for record in records if record.get("status") == "queued"]),
-            "workflow": read_workflow_state(),
+            "workflow": combined_workflow_state(),
         }
-    
-    
+
+
     def write_import_request(records):
         payload = {
             "requested_at": now_iso(),
@@ -1732,8 +1842,8 @@ data:
         }
         save_json(IMPORT_REQUEST_FILE, payload)
         return payload
-    
-    
+
+
     def run_command(args, *, input_text=None, check=True, timeout=60):
         try:
             result = subprocess.run(
@@ -1752,16 +1862,16 @@ data:
             output = (result.stderr or result.stdout or "").strip()
             raise RuntimeError(output or f"Command failed: {' '.join(args)}")
         return result.stdout.strip()
-    
-    
+
+
     def validate_pbf_file(path, *, label="OSM extract"):
         if not os.path.isfile(path):
             raise RuntimeError(f"{label} not found: {path}")
         if os.path.getsize(path) <= 0:
             raise RuntimeError(f"{label} is empty: {path}")
         run_command(["osmium", "fileinfo", "-F", "pbf", path], timeout=120)
-    
-    
+
+
     def clear_directory(path):
         os.makedirs(path, exist_ok=True)
         for entry in os.listdir(path):
@@ -1770,8 +1880,8 @@ data:
                 shutil.rmtree(full_path)
             else:
                 os.unlink(full_path)
-    
-    
+
+
     def wait_for_job_deletion(name, timeout_seconds=60):
         deadline = time.time() + timeout_seconds
         while time.time() < deadline:
@@ -1782,8 +1892,8 @@ data:
                     return
             time.sleep(2)
         raise RuntimeError(f"Timed out waiting for job deletion: {name}")
-    
-    
+
+
     def download_country_file(country):
         destination = os.path.join(LIBRARY_DIR, f"{country['slug']}.osm.pbf")
         temp_path = f"{destination}.part"
@@ -1804,7 +1914,7 @@ data:
                 )
                 upsert_country_record(country, pbf_path=destination, pbf_size_mb=file_size_mb(destination))
                 return destination
-    
+
         request = urllib.request.Request(country["url"], headers={"User-Agent": "localosm-status/1.0"})
         os.makedirs(os.path.dirname(destination), exist_ok=True)
         downloaded = 0
@@ -1846,8 +1956,8 @@ data:
             last_error="",
         )
         return destination
-    
-    
+
+
     def merge_library_files(country, records=None):
         merge_records = records or [
             record for record in list_library_records() if record.get("pbf_path") and record.get("status") != "error"
@@ -1855,7 +1965,7 @@ data:
         input_paths = [record.get("pbf_path") for record in merge_records if record.get("pbf_path")]
         if not input_paths:
             raise RuntimeError("No downloaded country extracts available to merge.")
-    
+
         tmp_path = f"{MERGED_PBF}.tmp"
         os.makedirs(IMPORT_DIR, exist_ok=True)
         write_workflow_state(
@@ -1889,7 +1999,7 @@ data:
             os.replace(dedup_output_path, tmp_path)
         validate_pbf_file(tmp_path, label="Merged library extract")
         os.replace(tmp_path, MERGED_PBF)
-    
+
         meta_path = f"{MERGED_PBF}.meta"
         with open(meta_path, "w", encoding="utf-8") as handle:
             handle.write(f"downloaded_at={now_iso()}\n")
@@ -1897,14 +2007,14 @@ data:
             handle.write(f"countries={','.join(record['slug'] for record in merge_records)}\n")
             for record in merge_records:
                 handle.write(f"source[{record['slug']}]={record['url']}\n")
-    
-    
+
+
     def finish_workflow_thread():
         ACTIVE_WORKFLOW["thread"] = None
         if WORKFLOW_LOCK.locked():
             WORKFLOW_LOCK.release()
-    
-    
+
+
     def run_queue_workflow(country):
         try:
             ensure_dirs()
@@ -1944,8 +2054,8 @@ data:
             )
         finally:
             finish_workflow_thread()
-    
-    
+
+
     def run_build_workflow(country=None):
         country = country or {"name": "Library", "slug": "library", "url": ""}
         try:
@@ -1979,12 +2089,12 @@ data:
             )
         finally:
             finish_workflow_thread()
-    
-    
+
+
     def run_country_workflow(country):
         run_queue_workflow(country)
-    
-    
+
+
     def start_country_workflow(payload):
         country = resolve_country_request(payload)
         if not WORKFLOW_LOCK.acquire(blocking=False):
@@ -1993,8 +2103,8 @@ data:
         ACTIVE_WORKFLOW["thread"] = thread
         thread.start()
         return country
-    
-    
+
+
     def start_queue_workflow(payload):
         country = resolve_country_request(payload)
         if not WORKFLOW_LOCK.acquire(blocking=False):
@@ -2003,8 +2113,8 @@ data:
         ACTIVE_WORKFLOW["thread"] = thread
         thread.start()
         return country
-    
-    
+
+
     def start_build_workflow():
         if not WORKFLOW_LOCK.acquire(blocking=False):
             raise RuntimeError("Another country library workflow is already running.")
@@ -2016,8 +2126,8 @@ data:
                 [record for record in list_library_records() if record.get("status") in {"queued", "ready"}]
             )
         }
-    
-    
+
+
     def run_scheduler_loop():
         while True:
             time.sleep(60)
@@ -2043,8 +2153,8 @@ data:
                 print(f"Auto-update scheduler error: {exc}", flush=True)
             finally:
                 SCHEDULER_LOCK.release()
-    
-    
+
+
     class Handler(BaseHTTPRequestHandler):
         def _send_json(self, payload, status=200):
             body = json.dumps(payload, indent=2).encode("utf-8")
@@ -2053,7 +2163,7 @@ data:
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-    
+
         def do_GET(self):
             if self.path in {"/", "/index.html"}:
                 cfg = load_config()
@@ -2065,22 +2175,22 @@ data:
                 self.end_headers()
                 self.wfile.write(body)
                 return
-    
+
             if self.path == "/healthz":
                 self._send_json({"status": "ok"})
                 return
-    
+
             if self.path == "/api/status":
                 try:
                     self._send_json(collect_status())
                 except Exception as exc:  # noqa: BLE001
                     self._send_json({"error": str(exc)}, 500)
                 return
-    
+
             if self.path == "/api/config":
                 self._send_json(load_config())
                 return
-    
+
             if self.path == "/api/style":
                 raw = read_tileserver_style()
                 if raw is None:
@@ -2094,7 +2204,7 @@ data:
                 self.end_headers()
                 self.wfile.write(raw)
                 return
-    
+
             if self.path.startswith("/test/"):
                 name = self.path.split("/", 2)[-1]
                 if name == "postgres":
@@ -2112,24 +2222,24 @@ data:
                     return
                 self._send_json({"test": name, "ok": ok, "detail": detail})
                 return
-    
+
             self._send_json({"error": "not found"}, 404)
-    
+
         def do_POST(self):
             content_length = int(self.headers.get("Content-Length", "0"))
             raw_body = self.rfile.read(content_length) if content_length else b"{}"
-    
+
             if self.path == "/api/style":
                 ok, message, restarted = write_tileserver_style(raw_body)
                 self._send_json({"ok": ok, "message": message, "restarted": restarted}, 200 if ok else 400)
                 return
-    
+
             try:
                 payload = json.loads(raw_body.decode("utf-8"))
             except Exception:  # noqa: BLE001
                 self._send_json({"error": "invalid json"}, 400)
                 return
-    
+
             if self.path == "/api/library/add":
                 try:
                     country = start_country_workflow(payload)
@@ -2141,7 +2251,7 @@ data:
                     return
                 self._send_json({"status": "started", "country": country})
                 return
-    
+
             if self.path == "/api/library/queue":
                 try:
                     country = start_queue_workflow(payload)
@@ -2153,7 +2263,7 @@ data:
                     return
                 self._send_json({"status": "queued", "country": country})
                 return
-    
+
             if self.path == "/api/library/remove":
                 slug = payload.get("slug", "").strip()
                 if not slug:
@@ -2169,7 +2279,7 @@ data:
                     return
                 self._send_json({"status": "removed", "slug": slug})
                 return
-    
+
             if self.path == "/api/library/build":
                 try:
                     build = start_build_workflow()
@@ -2178,7 +2288,16 @@ data:
                     return
                 self._send_json({"status": "started", "build": build})
                 return
-    
+
+            if self.path == "/api/library/abort":
+                try:
+                    abort_import_workflow()
+                except RuntimeError as exc:
+                    self._send_json({"error": str(exc)}, 409)
+                    return
+                self._send_json({"status": "aborted"})
+                return
+
             if self.path == "/api/config":
                 try:
                     config = apply_config_update(payload)
@@ -2187,13 +2306,13 @@ data:
                     return
                 self._send_json(config)
                 return
-    
+
             self._send_json({"error": "not found"}, 404)
-    
+
         def log_message(self, format, *args):
             return
-    
-    
+
+
     if __name__ == "__main__":
         ensure_dirs()
         _startup_state = read_workflow_state()

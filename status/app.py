@@ -46,6 +46,12 @@ CONFIG_FILE = os.path.join(STATUS_DIR, "config.json")
 # Live style used by TileServer-GL (k8s/tileserver.yaml mounts the same hostPath).
 TILESERVER_STYLE_PATH = os.path.join(DATA_DIR, "tileserver", "active", "style.json")
 IMPORT_REQUEST_FILE = os.path.join(STATUS_DIR, "import-request.json")
+# import-orchestrator.sh writes its own live progress here (same hostPath as
+# STATUS_DIR, see k8s/import-orchestrator.yaml "state" volume) and watches for
+# ABORT_FLAG_FILE to cancel whatever it is currently doing.
+ORCHESTRATOR_STATE_FILE = os.path.join(STATUS_DIR, "import-orchestrator.json")
+ABORT_FLAG_FILE = os.path.join(STATUS_DIR, "import-abort.flag")
+IMPORT_JOB_NAMES = ("import-prep", "tileserver-import", "nominatim-import", "valhalla-import")
 
 CONFIG_DEFAULTS = {
     "node_url": "",
@@ -837,6 +843,7 @@ INDEX_HTML = """<!doctype html>
     <div class="card">
       <h2>Workflow Fortschritt</h2>
       <div id="workflow-body">Lade ...</div>
+      <button id="abort-btn" class="danger" onclick="abortImport()" style="display:none;margin-top:0.6rem">Import abbrechen</button>
     </div>
 
     <div class="card">
@@ -996,6 +1003,9 @@ INDEX_HTML = """<!doctype html>
     } else if (phase === 'error') {
       statusClass = 'status-error';
       statusText = 'fehler';
+    } else if (phase === 'aborted') {
+      statusClass = 'status-error';
+      statusText = 'abgebrochen';
     }
     var extra = workflow && workflow.error ? '<pre>' + esc(workflow.error) + '</pre>' : '';
     body.innerHTML = '' +
@@ -1013,6 +1023,10 @@ INDEX_HTML = """<!doctype html>
     document.querySelectorAll('.remove-country-btn').forEach(function(btn) {
       btn.disabled = running;
     });
+    var abortBtn = document.getElementById('abort-btn');
+    var canAbort = running && !!(workflow && workflow.request_pending);
+    abortBtn.style.display = canAbort ? 'inline-block' : 'none';
+    abortBtn.disabled = false;
   }
 
   function renderCountries(countries) {
@@ -1110,6 +1124,29 @@ INDEX_HTML = """<!doctype html>
       await refresh();
     } catch (err) {
       workflowBody.innerHTML = '<span class="status-pill status-error">fehler</span><pre>' + esc(err) + '</pre>';
+    }
+  }
+
+  async function abortImport() {
+    if (!confirm('Laufenden Import wirklich abbrechen?\\nAlle laufenden Import-Jobs und -Pods werden gelöscht.')) return;
+    var abortBtn = document.getElementById('abort-btn');
+    abortBtn.disabled = true;
+    try {
+      var resp = await fetch('/api/library/abort', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: '{}'
+      });
+      var data = await resp.json();
+      if (!resp.ok) {
+        alert('Fehler: ' + (data.error || 'Unbekannter Fehler'));
+        abortBtn.disabled = false;
+        return;
+      }
+      await refresh();
+    } catch (err) {
+      alert('Fehler: ' + err);
+      abortBtn.disabled = false;
     }
   }
 
@@ -1544,6 +1581,79 @@ def write_workflow_state(**updates):
     save_json(STATE_FILE, state)
 
 
+def read_orchestrator_state():
+    """Return the import-orchestrator's own live progress (see
+    scripts/import-orchestrator.sh write_state()), separate from this app's
+    local library workflow state above."""
+    return load_json(
+        ORCHESTRATOR_STATE_FILE,
+        {
+            "running": False,
+            "phase": "idle",
+            "progress": 0,
+            "message": "",
+            "detail": "",
+            "updated_at": "",
+        },
+    )
+
+
+def combined_workflow_state():
+    """Merge the local library workflow with the orchestrator's live import
+    progress so the dashboard reflects what is actually happening once a
+    build request has been handed off (TileServer/Nominatim/Valhalla import
+    phases), not just the initial "queued" message."""
+    request_pending = os.path.exists(IMPORT_REQUEST_FILE)
+    orchestrator_state = read_orchestrator_state()
+    if request_pending or orchestrator_state.get("running"):
+        state = dict(orchestrator_state)
+        state["running"] = True
+        state.setdefault("country", "")
+        state["request_pending"] = True
+        return state
+    state = read_workflow_state()
+    state["request_pending"] = False
+    return state
+
+
+def abort_import_workflow():
+    """Abort whatever the import-orchestrator is currently doing.
+
+    Signals the orchestrator (via ABORT_FLAG_FILE) to stop waiting on its
+    current job and discard the request, discards the pending import request
+    so it is not picked up again, and proactively deletes any running import
+    Jobs so their pods are freed immediately instead of waiting for the
+    orchestrator's next poll (kubernetes garbage-collects a Job's pods when
+    the Job itself is deleted).
+    """
+    request_pending = os.path.exists(IMPORT_REQUEST_FILE)
+    orchestrator_running = read_orchestrator_state().get("running")
+    if not request_pending and not orchestrator_running:
+        raise RuntimeError("No import is currently running.")
+
+    with open(ABORT_FLAG_FILE, "w", encoding="utf-8") as handle:
+        handle.write(now_iso())
+
+    if os.path.exists(IMPORT_REQUEST_FILE):
+        os.remove(IMPORT_REQUEST_FILE)
+
+    for job_name in IMPORT_JOB_NAMES:
+        try:
+            KUBE.delete_job(job_name)
+        except RuntimeError as exc:  # noqa: BLE001
+            print(f"Failed to delete job {job_name} during abort: {exc}", flush=True)
+
+    write_workflow_state(
+        running=False,
+        phase="aborted",
+        progress=0,
+        message="Import wurde abgebrochen.",
+        detail="Der laufende Import wurde manuell abgebrochen.",
+        error="",
+    )
+    return True
+
+
 def country_catalog_with_flags(records):
     selected = {record.get("slug") for record in records}
     catalog = []
@@ -1643,7 +1753,7 @@ def collect_status():
         "available_countries": country_catalog_with_flags(records),
         "selected_countries": records,
         "queued_count": len([record for record in records if record.get("status") == "queued"]),
-        "workflow": read_workflow_state(),
+        "workflow": combined_workflow_state(),
     }
 
 
@@ -2109,6 +2219,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(exc)}, 409)
                 return
             self._send_json({"status": "started", "build": build})
+            return
+
+        if self.path == "/api/library/abort":
+            try:
+                abort_import_workflow()
+            except RuntimeError as exc:
+                self._send_json({"error": str(exc)}, 409)
+                return
+            self._send_json({"status": "aborted"})
             return
 
         if self.path == "/api/config":
