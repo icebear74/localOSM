@@ -1888,7 +1888,9 @@ data:
         try:
             os.replace(staging_dir, active_dir)
         except Exception as exc:  # noqa: BLE001
-            if os.path.isdir(backup_dir) and not os.path.isdir(active_dir):
+            if os.path.isdir(backup_dir):
+                if os.path.isdir(active_dir):
+                    shutil.rmtree(active_dir)
                 os.replace(backup_dir, active_dir)
             raise RuntimeError(f"Could not promote staged {service} data: {exc}") from exc
     

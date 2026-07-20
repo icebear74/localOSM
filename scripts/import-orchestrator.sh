@@ -195,6 +195,17 @@ wait_for_job() {
   done
 }
 
+deployment_selector() {
+  local deployment="$1"
+  local selector
+  selector="$(kubectl -n "${NAMESPACE}" get "deployment/${deployment}" -o jsonpath='{range $k,$v := .spec.selector.matchLabels}{printf "%s=%s," $k $v}{end}' 2>/dev/null || true)"
+  selector="${selector%,}"
+  if [ -z "${selector}" ]; then
+    selector="app=${deployment}"
+  fi
+  echo "${selector}"
+}
+
 prepare_import_data() {
   local job_name="import-prep"
   log "Starting import preparation job."
@@ -391,6 +402,7 @@ swap_stage() {
   local backup_dir="${active_dir}.old"
   local mv_err
   local wait_start
+  local selector
 
   if [ ! -d "${staging_dir}" ]; then
     log "Staging directory ${staging_dir} not found; cannot promote ${service}."
@@ -409,7 +421,8 @@ swap_stage() {
   fi
 
   wait_start="$(date +%s)"
-  while kubectl -n "${NAMESPACE}" get pods -l "app=${deployment}" --no-headers 2>/dev/null | grep -q .; do
+  selector="$(deployment_selector "${deployment}")"
+  while kubectl -n "${NAMESPACE}" get pods -l "${selector}" --no-headers 2>/dev/null | grep -q .; do
     check_config_change
     if abort_requested; then
       log "Abort requested while waiting for deployment/${deployment} pods to terminate."
@@ -431,7 +444,11 @@ swap_stage() {
     fi
   fi
 
-  if ! mv_err="$(mv -T "${staging_dir}" "${active_dir}" 2>&1)"; then
+  local mv_cmd=(mv -T "${staging_dir}" "${active_dir}")
+  if ! mv --help 2>&1 | grep -q -- ' -T'; then
+    mv_cmd=(mv "${staging_dir}" "${active_dir}")
+  fi
+  if ! mv_err="$("${mv_cmd[@]}" 2>&1)"; then
     log "Failed to move staged ${service} data from ${staging_dir} to ${active_dir}: ${mv_err}"
     # Restore the previous good data so the service keeps serving it instead
     # of being left without any active data at all.

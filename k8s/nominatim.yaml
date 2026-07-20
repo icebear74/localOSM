@@ -27,6 +27,8 @@ spec:
               IMPORT_FINISHED=/nominatim-db/import-finished
               until [ -f "$DB" ] && [ -f "$IMPORT_FINISHED" ]; do
                 echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for imported Nominatim database markers at $DB and $IMPORT_FINISHED ..."
+                [ -f "$DB" ] || echo "  missing: $DB"
+                [ -f "$IMPORT_FINISHED" ] || echo "  missing: $IMPORT_FINISHED"
                 sleep 30
               done
               echo "Database ready — starting Nominatim."
