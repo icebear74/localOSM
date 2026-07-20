@@ -1073,7 +1073,7 @@ INDEX_HTML = """<!doctype html>
       html += '<div class="country-row">' +
         '<div><div class="country-name">' + esc(name) + '</div><div class="country-meta">' + activeText + '<br>' + stagedText + '</div></div>' +
         '<div style="display:flex;align-items:center;justify-content:flex-end">' +
-        '<button class="subtle" style="width:auto" onclick="promoteService(\'' + esc(name) + '\')" ' + disabled + '>Promote</button>' +
+        '<button class="subtle" style="width:auto" onclick="promoteService(&#39;' + esc(name) + '&#39;)" ' + disabled + '>Promote</button>' +
         '</div></div>';
     });
     html += '</div>';
