@@ -452,6 +452,10 @@ swap_stage() {
 
   local mv_cmd=(mv -T "${staging_dir}" "${active_dir}")
   if [ "${MV_SUPPORTS_T}" != "true" ]; then
+    if [ -e "${active_dir}" ]; then
+      log "Fallback mv requested but ${active_dir} still exists; refusing non-atomic promote for ${service}."
+      return 1
+    fi
     mv_cmd=(mv "${staging_dir}" "${active_dir}")
   fi
   if ! mv_err="$("${mv_cmd[@]}" 2>&1)"; then
