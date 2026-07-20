@@ -1838,7 +1838,13 @@ def _move_directory_replacing(src, dst):
         if exc.errno != errno.EXDEV:
             raise
         shutil.copytree(src, dst)
-        shutil.rmtree(src)
+        try:
+            shutil.rmtree(src)
+        except OSError:
+            # dst was created successfully; leaving a stale copy of src
+            # behind is safe to ignore, it will simply be cleaned up (or
+            # overwritten) on the next promote attempt.
+            pass
 
 
 def _restore_missing_entries(backup_dir, active_dir):
@@ -1849,6 +1855,8 @@ def _restore_missing_entries(backup_dir, active_dir):
     of the import output - e.g. a customized style.json saved via the style
     editor, or the fonts directory - are not lost.
     """
+    if not os.path.isdir(backup_dir):
+        return
     for name in os.listdir(backup_dir):
         src = os.path.join(backup_dir, name)
         dst = os.path.join(active_dir, name)
