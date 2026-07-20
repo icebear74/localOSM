@@ -82,6 +82,8 @@ spec:
             httpGet:
               path: /
               port: 8080
+            # Nominatim may spend several minutes on cache warming before
+            # serving HTTP, so startup must allow a long grace period.
             periodSeconds: 10
             failureThreshold: 90
             timeoutSeconds: 5

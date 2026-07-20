@@ -52,6 +52,9 @@ IMPORT_REQUEST_FILE = os.path.join(STATUS_DIR, "import-request.json")
 ORCHESTRATOR_STATE_FILE = os.path.join(STATUS_DIR, "import-orchestrator.json")
 ABORT_FLAG_FILE = os.path.join(STATUS_DIR, "import-abort.flag")
 IMPORT_JOB_NAMES = ("import-prep", "tileserver-import", "nominatim-import", "valhalla-import")
+PROMOTE_POD_TERMINATION_TIMEOUT_SECONDS = 240
+PROMOTE_READY_TIMEOUT_SECONDS = 900
+PROMOTE_NOMINATIM_READY_TIMEOUT_SECONDS = 1200
 PROMOTE_SERVICES = {
     "tileserver": {
         "deployment": "tileserver-gl",
@@ -1810,7 +1813,7 @@ def promote_service(service):
 
     selector = _deployment_selector(deployment)
     KUBE.scale_deployment(deployment, 0)
-    _wait_for_pods_terminated(selector)
+    _wait_for_pods_terminated(selector, timeout_seconds=PROMOTE_POD_TERMINATION_TIMEOUT_SECONDS)
 
     if os.path.isdir(backup_dir):
         shutil.rmtree(backup_dir)
@@ -1819,7 +1822,7 @@ def promote_service(service):
 
     try:
         os.replace(staging_dir, active_dir)
-    except Exception as exc:  # noqa: BLE001
+    except OSError as exc:
         if os.path.isdir(backup_dir):
             if os.path.isdir(active_dir):
                 shutil.rmtree(active_dir)
@@ -1830,7 +1833,7 @@ def promote_service(service):
         shutil.rmtree(backup_dir)
 
     KUBE.scale_deployment(deployment, 1)
-    wait_seconds = 1200 if service == "nominatim" else 900
+    wait_seconds = PROMOTE_NOMINATIM_READY_TIMEOUT_SECONDS if service == "nominatim" else PROMOTE_READY_TIMEOUT_SECONDS
     _wait_for_deployment_available(deployment, timeout_seconds=wait_seconds)
     return promote_status()["services"][service]
 
@@ -1874,7 +1877,7 @@ def verify_country_url(country):
             return 200 <= response.status < 400
     except urllib.error.HTTPError as exc:
         return exc.code in {200, 301, 302, 303, 307, 308}
-    except Exception as exc:  # noqa: BLE001
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise RuntimeError(f"Could not verify {country['name']} ({country['url']}): {exc}")
 
 

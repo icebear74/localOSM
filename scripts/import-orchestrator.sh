@@ -15,6 +15,7 @@ ABORT_FILE="${STATE_DIR}/import-abort.flag"
 LAST_CONFIG_CHECK=0
 CONFIG_CHECK_INTERVAL=60
 MV_SUPPORTS_T=false
+POD_TERMINATION_TIMEOUT_SECONDS=180
 
 if mv --help 2>&1 | grep -q -- ' -T'; then
   MV_SUPPORTS_T=true
@@ -434,7 +435,7 @@ swap_stage() {
       kubectl -n "${NAMESPACE}" scale "deployment/${deployment}" --replicas=1 >/dev/null 2>&1 || true
       return 2
     fi
-    if [ "$(( $(date +%s) - wait_start ))" -gt 180 ]; then
+    if [ "$(( $(date +%s) - wait_start ))" -gt "${POD_TERMINATION_TIMEOUT_SECONDS}" ]; then
       log "Timed out waiting for deployment/${deployment} pods to terminate before promoting ${service}."
       return 1
     fi

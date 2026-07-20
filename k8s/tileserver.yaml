@@ -46,6 +46,13 @@ spec:
               copy_font_stack "KlokanTech Noto Sans CJK Regular" "NotoSansCJKRegular"
               copy_font_stack "KlokanTech Noto Sans CJK Bold" "NotoSansCJKBold"
 
+              EXPECTED_STACKS="NotoSansRegular NotoSansBold NotoSansItalic NotoSansCJKRegular NotoSansCJKBold"
+              for stack in $EXPECTED_STACKS; do
+                if [ ! -d "/data/fonts/$stack" ]; then
+                  echo "[!] WARNING: Missing expected font stack directory /data/fonts/$stack"
+                fi
+              done
+
               FONT_COUNT=$(find /data/fonts -mindepth 2 -type f \( -name "*.pbf" -o -name "*.ttf" -o -name "*.otf" \) 2>/dev/null | wc -l)
               if [ "$FONT_COUNT" -gt 0 ]; then
                 echo "[✓] Fonts verified: $FONT_COUNT glyph files available"
