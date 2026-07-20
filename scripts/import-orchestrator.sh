@@ -14,6 +14,11 @@ REQUEST_FILE="${STATE_DIR}/import-request.json"
 ABORT_FILE="${STATE_DIR}/import-abort.flag"
 LAST_CONFIG_CHECK=0
 CONFIG_CHECK_INTERVAL=60
+MV_SUPPORTS_T=false
+
+if mv --help 2>&1 | grep -q -- ' -T'; then
+  MV_SUPPORTS_T=true
+fi
 
 mkdir -p "${STATE_DIR}"
 
@@ -445,7 +450,7 @@ swap_stage() {
   fi
 
   local mv_cmd=(mv -T "${staging_dir}" "${active_dir}")
-  if ! mv --help 2>&1 | grep -q -- ' -T'; then
+  if [ "${MV_SUPPORTS_T}" != "true" ]; then
     mv_cmd=(mv "${staging_dir}" "${active_dir}")
   fi
   if ! mv_err="$("${mv_cmd[@]}" 2>&1)"; then

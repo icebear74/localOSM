@@ -25,10 +25,15 @@ spec:
             - |
               DB=/nominatim-db/PG_VERSION
               IMPORT_FINISHED=/nominatim-db/import-finished
+              LAST_MISSING=""
               until [ -f "$DB" ] && [ -f "$IMPORT_FINISHED" ]; do
-                echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for imported Nominatim database markers at $DB and $IMPORT_FINISHED ..."
-                [ -f "$DB" ] || echo "  missing: $DB"
-                [ -f "$IMPORT_FINISHED" ] || echo "  missing: $IMPORT_FINISHED"
+                MISSING=""
+                [ -f "$DB" ] || MISSING="$MISSING $DB"
+                [ -f "$IMPORT_FINISHED" ] || MISSING="$MISSING $IMPORT_FINISHED"
+                if [ "$MISSING" != "$LAST_MISSING" ]; then
+                  echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for imported Nominatim database markers at$MISSING ..."
+                  LAST_MISSING="$MISSING"
+                fi
                 sleep 30
               done
               echo "Database ready — starting Nominatim."
