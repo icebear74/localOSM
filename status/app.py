@@ -52,6 +52,23 @@ IMPORT_REQUEST_FILE = os.path.join(STATUS_DIR, "import-request.json")
 ORCHESTRATOR_STATE_FILE = os.path.join(STATUS_DIR, "import-orchestrator.json")
 ABORT_FLAG_FILE = os.path.join(STATUS_DIR, "import-abort.flag")
 IMPORT_JOB_NAMES = ("import-prep", "tileserver-import", "nominatim-import", "valhalla-import")
+PROMOTE_SERVICES = {
+    "tileserver": {
+        "deployment": "tileserver-gl",
+        "active_dir": os.path.join(DATA_DIR, "tileserver", "active"),
+        "staging_dir": os.path.join(TEMP_DIR, "tileserver", "staging"),
+    },
+    "nominatim": {
+        "deployment": "nominatim",
+        "active_dir": os.path.join(DATA_DIR, "nominatim", "active"),
+        "staging_dir": os.path.join(TEMP_DIR, "nominatim", "staging"),
+    },
+    "valhalla": {
+        "deployment": "valhalla",
+        "active_dir": os.path.join(DATA_DIR, "valhalla", "active"),
+        "staging_dir": os.path.join(TEMP_DIR, "valhalla", "staging"),
+    },
+}
 
 CONFIG_DEFAULTS = {
     "node_url": "",
@@ -847,6 +864,11 @@ INDEX_HTML = """<!doctype html>
     </div>
 
     <div class="card">
+      <h2>Manuelle Promotion (Staging → Active)</h2>
+      <div id="promote-list" class="hint">Lade ...</div>
+    </div>
+
+    <div class="card">
       <h2>Hinzugefügte Länder</h2>
       <div id="country-list">Lade ...</div>
     </div>
@@ -1029,6 +1051,32 @@ INDEX_HTML = """<!doctype html>
     abortBtn.disabled = false;
   }
 
+  function renderPromote(promote) {
+    var el = document.getElementById('promote-list');
+    var services = promote && promote.services ? promote.services : {};
+    var keys = ['tileserver', 'nominatim', 'valhalla'];
+    var html = '<div class="stack">';
+    keys.forEach(function(name) {
+      var row = services[name] || {};
+      var active = row.active || {};
+      var staged = row.staged || {};
+      var activeText = active.exists
+        ? ('Active: ' + esc(active.size_mb) + ' MB · ' + esc(active.mtime || '?'))
+        : 'Active: nicht vorhanden';
+      var stagedText = staged.exists
+        ? ('Staging: ' + esc(staged.size_mb) + ' MB · ' + esc(staged.mtime || '?'))
+        : 'Staging: nicht vorhanden';
+      var disabled = WORKFLOW_RUNNING || !staged.exists ? 'disabled' : '';
+      html += '<div class="country-row">' +
+        '<div><div class="country-name">' + esc(name) + '</div><div class="country-meta">' + activeText + '<br>' + stagedText + '</div></div>' +
+        '<div style="display:flex;align-items:center;justify-content:flex-end">' +
+        '<button class="subtle" style="width:auto" onclick="promoteService(\'' + esc(name) + '\')" ' + disabled + '>Promote</button>' +
+        '</div></div>';
+    });
+    html += '</div>';
+    el.innerHTML = html;
+  }
+
   function renderCountries(countries) {
     var el = document.getElementById('country-list');
     if (!countries || countries.length === 0) {
@@ -1132,7 +1180,7 @@ INDEX_HTML = """<!doctype html>
     var abortBtn = document.getElementById('abort-btn');
     abortBtn.disabled = true;
     try {
-      var resp = await fetch('/api/library/abort', {
+      var resp = await fetch('/api/import/abort', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: '{}'
@@ -1147,6 +1195,25 @@ INDEX_HTML = """<!doctype html>
     } catch (err) {
       alert('Fehler: ' + err);
       abortBtn.disabled = false;
+    }
+  }
+
+  async function promoteService(service) {
+    if (!confirm('Staging-Daten für ' + service + ' wirklich aktiv schalten?')) return;
+    try {
+      var resp = await fetch('/api/promote/' + encodeURIComponent(service), {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: '{}'
+      });
+      var data = await resp.json();
+      if (!resp.ok) {
+        alert('Fehler: ' + (data.error || 'Unbekannter Fehler'));
+        return;
+      }
+      await refresh();
+    } catch (err) {
+      alert('Fehler: ' + err);
     }
   }
 
@@ -1253,6 +1320,7 @@ INDEX_HTML = """<!doctype html>
       renderWorkflow(d.workflow || {});
       renderCountries(d.selected_countries || []);
       renderQueuedCount(d.selected_countries || []);
+      renderPromote(d.promote || {});
 
       var svcs = d.services || [];
       var okCount = svcs.filter(function(s){ return s.ok; }).length;
@@ -1654,6 +1722,117 @@ def abort_import_workflow():
     return True
 
 
+def _format_mtime(path):
+    try:
+        return datetime.fromtimestamp(os.path.getmtime(path), timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    except OSError:
+        return ""
+
+
+def _describe_data_dir(path):
+    exists = os.path.isdir(path)
+    payload = {
+        "path": path,
+        "exists": exists,
+        "size_mb": dir_size_mb(path) if exists else 0.0,
+        "mtime": _format_mtime(path) if exists else "",
+    }
+    return payload
+
+
+def _deployment_selector(name):
+    deployment = KUBE.get_deployment(name)
+    match_labels = deployment.get("spec", {}).get("selector", {}).get("matchLabels", {})
+    if not match_labels:
+        raise RuntimeError(f"Deployment {name} has no selector labels.")
+    return ",".join(f"{key}={value}" for key, value in sorted(match_labels.items()))
+
+
+def _wait_for_pods_terminated(label_selector, timeout_seconds=240):
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        pods = KUBE.list_pods(label_selector).get("items", [])
+        if not pods:
+            return
+        time.sleep(2)
+    raise RuntimeError(f"Timed out waiting for pods ({label_selector}) to terminate.")
+
+
+def _wait_for_deployment_available(name, timeout_seconds=900):
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        deployment = KUBE.get_deployment(name)
+        status = deployment.get("status", {})
+        ready = status.get("readyReplicas", 0) or 0
+        desired = deployment.get("spec", {}).get("replicas", 1) or 1
+        conditions = status.get("conditions", [])
+        available = any(
+            cond.get("type") == "Available" and cond.get("status") == "True"
+            for cond in conditions
+        )
+        if available and ready >= desired:
+            return
+        time.sleep(3)
+    raise RuntimeError(f"Timed out waiting for deployment/{name} to become available.")
+
+
+def promote_status():
+    services = {}
+    for name, config in PROMOTE_SERVICES.items():
+        staged = _describe_data_dir(config["staging_dir"])
+        active = _describe_data_dir(config["active_dir"])
+        services[name] = {
+            "service": name,
+            "deployment": config["deployment"],
+            "active": active,
+            "staged": staged,
+            "can_promote": staged["exists"],
+        }
+    return {"services": services}
+
+
+def promote_service(service):
+    if service not in PROMOTE_SERVICES:
+        raise ValueError("Unknown service.")
+
+    workflow = combined_workflow_state()
+    if workflow.get("request_pending") or workflow.get("running"):
+        raise RuntimeError("A running import is active. Try manual promote again when it is finished.")
+
+    config = PROMOTE_SERVICES[service]
+    active_dir = config["active_dir"]
+    staging_dir = config["staging_dir"]
+    backup_dir = f"{active_dir}.old"
+    deployment = config["deployment"]
+
+    if not os.path.isdir(staging_dir):
+        raise RuntimeError(f"No staged data found for {service} at {staging_dir}.")
+
+    selector = _deployment_selector(deployment)
+    KUBE.scale_deployment(deployment, 0)
+    _wait_for_pods_terminated(selector)
+
+    if os.path.isdir(backup_dir):
+        shutil.rmtree(backup_dir)
+    if os.path.isdir(active_dir):
+        os.replace(active_dir, backup_dir)
+
+    try:
+        os.replace(staging_dir, active_dir)
+    except Exception as exc:  # noqa: BLE001
+        if os.path.isdir(backup_dir) and not os.path.isdir(active_dir):
+            os.replace(backup_dir, active_dir)
+        raise RuntimeError(f"Could not promote staged {service} data: {exc}") from exc
+
+    if os.path.isdir(backup_dir):
+        shutil.rmtree(backup_dir)
+
+    KUBE.scale_deployment(deployment, 1)
+    wait_seconds = 1200 if service == "nominatim" else 900
+    _wait_for_deployment_available(deployment, timeout_seconds=wait_seconds)
+    return promote_status()["services"][service]
+
+
 def country_catalog_with_flags(records):
     selected = {record.get("slug") for record in records}
     catalog = []
@@ -1754,6 +1933,7 @@ def collect_status():
         "selected_countries": records,
         "queued_count": len([record for record in records if record.get("status") == "queued"]),
         "workflow": combined_workflow_state(),
+        "promote": promote_status(),
     }
 
 
@@ -2119,6 +2299,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(exc)}, 500)
             return
 
+        if self.path == "/api/promote/status":
+            try:
+                self._send_json(promote_status())
+            except Exception as exc:  # noqa: BLE001
+                self._send_json({"error": str(exc)}, 500)
+            return
+
         if self.path == "/api/config":
             self._send_json(load_config())
             return
@@ -2228,6 +2415,31 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(exc)}, 409)
                 return
             self._send_json({"status": "aborted"})
+            return
+
+        if self.path == "/api/import/abort":
+            try:
+                abort_import_workflow()
+            except RuntimeError as exc:
+                self._send_json({"error": str(exc)}, 409)
+                return
+            self._send_json({"status": "aborted"})
+            return
+
+        if self.path.startswith("/api/promote/"):
+            service = self.path.rsplit("/", 1)[-1].strip().lower()
+            if not service:
+                self._send_json({"error": "service is required"}, 400)
+                return
+            try:
+                result = promote_service(service)
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 400)
+                return
+            except RuntimeError as exc:
+                self._send_json({"error": str(exc)}, 409)
+                return
+            self._send_json({"status": "promoted", "service": service, "result": result})
             return
 
         if self.path == "/api/config":

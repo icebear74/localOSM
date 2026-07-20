@@ -24,8 +24,9 @@ spec:
           args:
             - |
               DB=/nominatim-db/PG_VERSION
-              until [ -f "$DB" ]; do
-                echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for imported Nominatim database at $DB ..."
+              IMPORT_FINISHED=/nominatim-db/import-finished
+              until [ -f "$DB" ] && [ -f "$IMPORT_FINISHED" ]; do
+                echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for imported Nominatim database markers at $DB and $IMPORT_FINISHED ..."
                 sleep 30
               done
               echo "Database ready — starting Nominatim."
@@ -70,6 +71,21 @@ spec:
             limits:
               memory: "8Gi"
               cpu: "8"
+          startupProbe:
+            httpGet:
+              path: /
+              port: 8080
+            periodSeconds: 10
+            failureThreshold: 90
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+            timeoutSeconds: 5
           volumeMounts:
             - name: nominatim-data
               mountPath: /var/lib/postgresql/16/main

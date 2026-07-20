@@ -390,11 +390,38 @@ swap_stage() {
   local deployment="$4"
   local backup_dir="${active_dir}.old"
   local mv_err
+  local wait_start
 
   if [ ! -d "${staging_dir}" ]; then
     log "Staging directory ${staging_dir} not found; cannot promote ${service}."
     return 1
   fi
+
+  if abort_requested; then
+    log "Abort requested before promoting ${service}; skipping swap."
+    return 2
+  fi
+
+  log "Scaling deployment/${deployment} down to 0 before promoting ${service} to release file locks."
+  if ! kubectl -n "${NAMESPACE}" scale "deployment/${deployment}" --replicas=0 >/dev/null; then
+    log "Failed to scale deployment/${deployment} down before promoting ${service}."
+    return 1
+  fi
+
+  wait_start="$(date +%s)"
+  while kubectl -n "${NAMESPACE}" get pods -l "app=${deployment}" --no-headers 2>/dev/null | grep -q .; do
+    check_config_change
+    if abort_requested; then
+      log "Abort requested while waiting for deployment/${deployment} pods to terminate."
+      kubectl -n "${NAMESPACE}" scale "deployment/${deployment}" --replicas=1 >/dev/null 2>&1 || true
+      return 2
+    fi
+    if [ "$(( $(date +%s) - wait_start ))" -gt 180 ]; then
+      log "Timed out waiting for deployment/${deployment} pods to terminate before promoting ${service}."
+      return 1
+    fi
+    sleep 3
+  done
 
   rm -rf "${backup_dir}" 2>/dev/null || true
   if [ -d "${active_dir}" ]; then
@@ -404,7 +431,7 @@ swap_stage() {
     fi
   fi
 
-  if ! mv_err="$(mv "${staging_dir}" "${active_dir}" 2>&1)"; then
+  if ! mv_err="$(mv -T "${staging_dir}" "${active_dir}" 2>&1)"; then
     log "Failed to move staged ${service} data from ${staging_dir} to ${active_dir}: ${mv_err}"
     # Restore the previous good data so the service keeps serving it instead
     # of being left without any active data at all.
@@ -414,13 +441,20 @@ swap_stage() {
     fi
     return 1
   fi
+
+  if [ "${service}" = "nominatim" ] && [ ! -f "${active_dir}/import-finished" ]; then
+    log "import-finished marker missing after promoting ${service}; recreating ${active_dir}/import-finished."
+    touch "${active_dir}/import-finished"
+  fi
+
   rm -rf "${backup_dir}" 2>/dev/null || true
   # The temp dir is scratch space only; once the promoted data has been moved
   # into OSM/<service>/active, nothing must remain behind on the temp mount.
   cleanup_temp_dir "$(dirname "${staging_dir}")"
 
-  if ! kubectl -n "${NAMESPACE}" rollout restart "deployment/${deployment}" >/dev/null; then
-    log "Failed to restart deployment/${deployment} after promoting ${service}."
+  log "Scaling deployment/${deployment} back to 1 after promoting ${service}."
+  if ! kubectl -n "${NAMESPACE}" scale "deployment/${deployment}" --replicas=1 >/dev/null; then
+    log "Failed to scale deployment/${deployment} back up after promoting ${service}."
     return 1
   fi
   if [ "${deployment}" = "nominatim" ]; then
@@ -458,7 +492,13 @@ run_step() {
     return 1
   fi
   write_state true "${service}" 90 "${service} import completed." "Promoting staged data."
-  if ! swap_stage "${service}" "${active_dir}" "${staging_dir}" "${deployment}"; then
+  local prc=0
+  swap_stage "${service}" "${active_dir}" "${staging_dir}" "${deployment}" || prc=$?
+  if [ "${prc}" -eq 2 ]; then
+    write_state false "aborted" 0 "${service} promotion aborted." "Import wurde vom Benutzer abgebrochen."
+    cleanup_temp_dir "$(dirname "${staging_dir}")"
+    return 2
+  elif [ "${prc}" -ne 0 ]; then
     write_state false "failed" 0 "${service} promotion failed." "Rollout of deployment/${deployment} did not become ready."
     cleanup_temp_dir "$(dirname "${staging_dir}")"
     return 1

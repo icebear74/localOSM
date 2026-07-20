@@ -215,6 +215,11 @@ done
 ${SUDO} cp "${REPO_ROOT}/scripts/import-orchestrator.sh" "${BASE_DIR}/scripts/import-orchestrator.sh"
 ${SUDO} chmod +x "${BASE_DIR}/scripts/import-orchestrator.sh"
 
+if [ -d "${REPO_ROOT}/fonts" ]; then
+  ${SUDO} find "${BASE_DIR}/tileserver/fonts" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+  ${SUDO} cp -a "${REPO_ROOT}/fonts/." "${BASE_DIR}/tileserver/fonts/"
+fi
+
 CONFIG_PATH="${BASE_DIR}/status/config.json"
 if [ ! -f "${CONFIG_PATH}" ]; then
   cat > "${CONFIG_PATH}" <<'EOF'
