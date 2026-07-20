@@ -1,13 +1,13 @@
 {
   "version": 8,
-  "name": "LocalOSM",
+  "name": "LocalOSM-OfflineEnhanced",
   "sources": {
     "openmaptiles": {
       "type": "vector",
       "url": "mbtiles://{v3}"
     }
   },
-  "glyphs": "/fonts/{fontstack}/{range}.pbf",
+  "glyphs": "{fontstack}/{range}.pbf",
   "layers": [
     {
       "id": "background",
@@ -54,10 +54,10 @@
       "type": "fill",
       "source": "openmaptiles",
       "source-layer": "landuse",
-      "filter": ["==", "class", "commercial"],
+      "filter": ["in", "class", "commercial", "retail"],
       "paint": {
-        "fill-color": "#deebf7",
-        "fill-opacity": 0.65
+        "fill-color": "#fbe3b5",
+        "fill-opacity": 0.7
       }
     },
     {
@@ -101,29 +101,25 @@
       }
     },
     {
-      "id": "boundary-country",
+      "id": "tunnel-casing",
       "type": "line",
       "source": "openmaptiles",
-      "source-layer": "boundary",
-      "filter": ["==", "admin_level", 2],
+      "source-layer": "transportation",
+      "filter": ["==", "brücke", 1],
       "paint": {
-        "line-color": "#9e9cab",
-        "line-width": {
-          "stops": [[2, 0.5], [6, 1.5], [10, 2]]
-        }
+        "line-color": "#aa1010"
       }
     },
     {
-      "id": "boundary-state",
+      "id": "road-tunnel",
       "type": "line",
       "source": "openmaptiles",
-      "source-layer": "boundary",
-      "filter": ["==", "admin_level", 4],
-      "minzoom": 4,
+      "source-layer": "transportation",
+      "filter": ["==", "tunnel", 1],
       "paint": {
-        "line-color": "#b0adb8",
-        "line-width": 0.8,
-        "line-dasharray": [3, 2]
+        "line-color": "#d7d1ca",
+        "line-dasharray": [2, 2],
+        "line-opacity": 0.6
       }
     },
     {
@@ -131,7 +127,7 @@
       "type": "line",
       "source": "openmaptiles",
       "source-layer": "transportation",
-      "filter": ["in", "class", "minor", "service", "track", "path"],
+      "filter": ["all", ["in", "class", "minor", "service", "track", "path"], ["!=", "tunnel", 1]],
       "minzoom": 12,
       "paint": {
         "line-color": "#d7d1ca",
@@ -145,7 +141,7 @@
       "type": "line",
       "source": "openmaptiles",
       "source-layer": "transportation",
-      "filter": ["in", "class", "secondary", "tertiary"],
+      "filter": ["all", ["in", "class", "secondary", "tertiary"], ["!=", "tunnel", 1]],
       "minzoom": 9,
       "paint": {
         "line-color": "#cabfb0",
@@ -159,7 +155,7 @@
       "type": "line",
       "source": "openmaptiles",
       "source-layer": "transportation",
-      "filter": ["==", "class", "primary"],
+      "filter": ["all", ["==", "class", "primary"], ["!=", "tunnel", 1]],
       "minzoom": 7,
       "paint": {
         "line-color": "#f0c95c",
@@ -173,12 +169,51 @@
       "type": "line",
       "source": "openmaptiles",
       "source-layer": "transportation",
-      "filter": ["in", "class", "motorway", "trunk"],
+      "filter": ["all", ["in", "class", "motorway", "trunk"], ["!=", "tunnel", 1]],
       "paint": {
         "line-color": "#f7a93b",
         "line-width": {
           "stops": [[6, 1], [10, 3], [14, 7], [16, 12]]
         }
+      }
+    },
+    {
+      "id": "bridge-casing",
+      "type": "line",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": ["==", "brücke", 1],
+      "paint": {
+        "line-color": "#8c847c",
+        "line-width": {
+          "stops": [[12, 2], [14, 5], [16, 14]]
+        },
+        "line-gap-width": {
+          "stops": [[12, 0.5], [14, 2], [16, 8]]
+        }
+      }
+    },
+    {
+      "id": "road-oneway-arrows",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": ["==", "oneway", 1],
+      "minzoom": 15,
+      "layout": {
+        "text-field": "➔",
+        "text-font": ["NotoSansRegular"],
+        "text-size": {
+          "stops": [[15, 8], [18, 12]]
+        },
+        "symbol-placement": "line",
+        "symbol-spacing": 120,
+        "text-keep-upright": false
+      },
+      "paint": {
+        "text-color": "#948f8a",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1
       }
     },
     {
@@ -200,10 +235,17 @@
       "minzoom": 14,
       "filter": ["!=", "class", "housenumber"],
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": [
+          "case",
+          ["has", "housenumber"],
+          ["concat", ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]], "\n", ["get", "housenumber"]],
+          ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]]
+        ],
         "text-font": ["NotoSansRegular"],
         "text-size": 11,
-        "text-padding": 5
+        "text-padding": 5,
+        "text-variable-anchor": ["top", "bottom", "left", "right"],
+        "text-justify": "center"
       },
       "paint": {
         "text-color": "#4b4b4b",
@@ -216,11 +258,13 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "housenumber",
-      "minzoom": 17,
+      "minzoom": 16,
       "layout": {
         "text-field": ["get", "housenumber"],
         "text-font": ["NotoSansRegular"],
-        "text-size": 9
+        "text-size": 9,
+        "text-allow-overlap": true,
+        "text-ignore-placement": true
       },
       "paint": {
         "text-color": "#666666",
@@ -234,7 +278,7 @@
       "source": "openmaptiles",
       "source-layer": "water_name",
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "text-size": {
           "stops": [[4, 10], [10, 14]]
@@ -255,7 +299,7 @@
       "filter": ["in", "class", "minor", "service", "track"],
       "minzoom": 15,
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "symbol-placement": "line",
         "text-size": 10,
@@ -276,7 +320,7 @@
       "filter": ["in", "class", "secondary", "tertiary"],
       "minzoom": 13,
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "symbol-placement": "line",
         "text-size": 11,
@@ -296,7 +340,7 @@
       "filter": ["in", "class", "primary", "trunk", "motorway"],
       "minzoom": 10,
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "symbol-placement": "line",
         "text-size": 12,
@@ -309,13 +353,57 @@
       }
     },
     {
+      "id": "highway-shield-motorway",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "transportation_name",
+      "filter": ["all", ["==", "class", "motorway"], ["has", "ref"]],
+      "minzoom": 6,
+      "layout": {
+        "text-field": ["get", "ref"],
+        "text-font": ["NotoSansRegular"],
+        "text-size": 10,
+        "symbol-placement": "line",
+        "symbol-spacing": 200,
+        "text-rotation-alignment": "viewport"
+      },
+      "paint": {
+        "text-color": "#ffffff",
+        "text-halo-color": "#1f6cb0",
+        "text-halo-width": 3,
+        "text-halo-blur": 0.5
+      }
+    },
+    {
+      "id": "highway-shield-trunk-primary",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "transportation_name",
+      "filter": ["all", ["in", "class", "trunk", "primary"], ["has", "ref"]],
+      "minzoom": 8,
+      "layout": {
+        "text-field": ["get", "ref"],
+        "text-font": ["NotoSansRegular"],
+        "text-size": 9.5,
+        "symbol-placement": "line",
+        "symbol-spacing": 150,
+        "text-rotation-alignment": "viewport"
+      },
+      "paint": {
+        "text-color": "#000000",
+        "text-halo-color": "#eec12e",
+        "text-halo-width": 3,
+        "text-halo-blur": 0.5
+      }
+    },
+    {
       "id": "place-country",
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "place",
       "filter": ["==", "class", "country"],
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "text-size": {
           "stops": [[2, 10], [6, 16], [8, 18]]
@@ -336,7 +424,7 @@
       "minzoom": 5,
       "maxzoom": 12,
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "text-size": {
           "stops": [[5, 10], [10, 14]]
@@ -355,7 +443,7 @@
       "source-layer": "place",
       "filter": ["in", "class", "city"],
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "text-size": {
           "stops": [[6, 11], [10, 15], [14, 18]]
@@ -375,7 +463,7 @@
       "filter": ["==", "class", "town"],
       "minzoom": 8,
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "text-size": {
           "stops": [[8, 10], [12, 14], [16, 17]]
@@ -395,7 +483,7 @@
       "filter": ["==", "class", "village"],
       "minzoom": 10,
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "text-size": {
           "stops": [[10, 10], [14, 13]]
@@ -415,7 +503,7 @@
       "filter": ["in", "class", "suburb", "quarter", "neighbourhood"],
       "minzoom": 12,
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "text-size": 11
       },
@@ -433,7 +521,7 @@
       "filter": ["in", "class", "hamlet", "isolated_dwelling"],
       "minzoom": 13,
       "layout": {
-        "text-field": ["coalesce", ["get", "name:de"], ["get", "name:en"], ["get", "name"]],
+        "text-field": ["coalesce", ["get", "name_de"], ["get", "name_en"], ["get", "name"]],
         "text-font": ["NotoSansRegular"],
         "text-size": 10
       },

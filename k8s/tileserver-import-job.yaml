@@ -19,6 +19,13 @@ spec:
               test -f /data/import/planet.osm.pbf
               mkdir -p /data
               mkdir -p /data/sources
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
           volumeMounts:
             - name: osm-data
               mountPath: /data
@@ -39,6 +46,13 @@ spec:
               if [ ! -s /data/sources/natural_earth_vector.sqlite.zip ]; then
                 wget -q -O /data/sources/natural_earth_vector.sqlite.zip https://naciscdn.org/naturalearth/packages/natural_earth_vector.sqlite.zip
               fi
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "512Mi"
           volumeMounts:
             - name: osm-data
               mountPath: /data
@@ -50,24 +64,48 @@ spec:
           imagePullPolicy: Always
           resources:
             requests:
-              memory: "13Gi"
-              cpu: "6"
+              memory: "6Gi"
+              cpu: "5"
             limits:
-              memory: "13Gi"
-              cpu: "6"
+              memory: "20Gi"
+              cpu: "14"
           env:
             - name: JAVA_OPTS
-              value: "-Xms11g -Xmx11g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+#              value: "-Xms6g -Xmx8g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+              value: "-Xms4g -Xmx7g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"
+ 
+            - name: JAVA_TOOL_OPTIONS
+              value: "-Xms4g -Xmx7g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"
+
+#          args:
+#            - --osm-path=/data/import/planet.osm.pbf
+#            - --output=/data/map.mbtiles
+#            - --force
+#            - --fetch-wikidata
+#            - --nodemap-type=sparsearray
+ #           - --threads=8
+ #           - --lake_centerlines_path=/data/sources/lake_centerline.shp.zip
+#            - --water_polygons_path=/data/sources/water-polygons-split-3857.zip
+#            - --natural_earth_path=/data/sources/natural_earth_vector.sqlite.zip
+#            - --minzoom=0
+#            - --maxzoom=16
           args:
             - --osm-path=/data/import/planet.osm.pbf
             - --output=/data/map.mbtiles
             - --force
-            - --threads=6
+            - --fetch-wikidata
+            # ÄNDRUNG: Wechsel auf Disk-Speicher für Nodes, um den RAM zu schonen
+            - --nodemap-type=sparsearray
+            - --nodemap-storage=mmap
+            # ÄNDERUNG: Threads auf 14 hochgeschraubt
+            - --threads=14
+            - --arguments=journal_mode=WAL,synchronous=OFF,mmap_size=268435456            
             - --lake_centerlines_path=/data/sources/lake_centerline.shp.zip
             - --water_polygons_path=/data/sources/water-polygons-split-3857.zip
             - --natural_earth_path=/data/sources/natural_earth_vector.sqlite.zip
             - --minzoom=0
             - --maxzoom=16
+            - --extra-osm-tags=shop,building,construction,name,wheelchair,amenity,highway,landuse
           volumeMounts:
             - name: osm-data
               mountPath: /data
@@ -76,9 +114,9 @@ spec:
       volumes:
         - name: osm-data
           hostPath:
-            path: /mnt/data/OSM/tileserver/staging
+            path: __OSM_TEMP_DIR__/tileserver/staging
             type: DirectoryOrCreate
         - name: import-data
           hostPath:
-            path: /mnt/data/OSM/import
+            path: __OSM_TEMP_DIR__/import
             type: DirectoryOrCreate

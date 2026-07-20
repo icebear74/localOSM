@@ -3,6 +3,7 @@ set -euo pipefail
 
 NAMESPACE="${OSM_NAMESPACE:-osm}"
 DATA_DIR="${OSM_DATA_DIR:-/mnt/data/OSM}"
+TEMP_DIR="${OSM_TEMP_DIR:-/mnt/data/OSM/TempDir}"
 MANIFEST_DIR="${OSM_MANIFEST_DIR:-/manifests}"
 STATE_DIR="${OSM_STATE_DIR:-/state}"
 CONFIG_DIR="${OSM_CONFIG_DIR:-/config}"
@@ -10,16 +11,34 @@ LOG_FILE="${STATE_DIR}/import-orchestrator.log"
 STATE_FILE="${STATE_DIR}/import-orchestrator.json"
 HASH_FILE="${STATE_DIR}/import-orchestrator.hash"
 REQUEST_FILE="${STATE_DIR}/import-request.json"
+ABORT_FILE="${STATE_DIR}/import-abort.flag"
 LAST_CONFIG_CHECK=0
 CONFIG_CHECK_INTERVAL=60
 
 mkdir -p "${STATE_DIR}"
+
+# Removes everything *inside* a scratch directory on the (user-provided,
+# fast/SSD-backed) temp-dir mount without ever removing the directory (mount
+# point) itself, so temporary import data never lingers once a step is done.
+cleanup_temp_dir() {
+  local dir="$1"
+  [ -d "${dir}" ] || return 0
+  find "${dir}" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+}
 
 log() {
   local message="$1"
   local timestamp
   timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   printf '%s %s\n' "$timestamp" "$message" | tee -a "${LOG_FILE}"
+}
+
+abort_requested() {
+  [ -f "${ABORT_FILE}" ]
+}
+
+clear_abort_flag() {
+  rm -f "${ABORT_FILE}" 2>/dev/null || true
 }
 
 write_state() {
@@ -152,6 +171,11 @@ wait_for_job() {
   start="$(date +%s)"
   while true; do
     check_config_change
+    if abort_requested; then
+      log "Abort requested; deleting job ${job_name} and its pods."
+      kubectl -n "${NAMESPACE}" delete job "${job_name}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+      return 2
+    fi
     if kubectl -n "${NAMESPACE}" wait --for=condition=complete "job/${job_name}" --timeout=30s >/dev/null 2>&1; then
       return 0
     fi
@@ -191,14 +215,24 @@ spec:
       containers:
         - name: import-prep
           image: python:3.12-slim
+          resources:
+            requests:
+              cpu: "1"
+              memory: "2Gi"
+            limits:
+              cpu: "2"
+              memory: "6Gi"
           command: ["/bin/sh", "-c"]
           args:
             - |
               set -euo pipefail
               export DEBIAN_FRONTEND=noninteractive
+              echo "Installing osmium-tool ..."
               apt-get update >/dev/null
               apt-get install -y --no-install-recommends osmium-tool >/dev/null
-              python3 - <<'PY'
+              echo "osmium-tool installed."
+              # -u: unbuffered stdout so progress prints show up live in kubectl logs.
+              python3 -u - <<'PY'
               import json
               import os
               import shutil
@@ -226,27 +260,59 @@ spec:
                   dest = library_dir / f'{slug}.osm.pbf'
                   temp = library_dir / f'{slug}.osm.pbf.part'
                   if not dest.exists() or dest.stat().st_size <= 0:
+                      print(f'Downloading {slug} from {url} ...')
                       req = urllib.request.Request(url, headers={'User-Agent': 'localosm-import-orchestrator/1.0'})
                       with urllib.request.urlopen(req, timeout=300) as response, temp.open('wb') as handle:
                           shutil.copyfileobj(response, handle)
                       os.replace(temp, dest)
+                      print(f'Downloaded {slug}.')
+                  else:
+                      print(f'Using cached extract for {slug}.')
                   paths.append(str(dest))
 
               merged = import_dir / 'planet.osm.pbf'
               temp_merged = import_dir / 'planet.osm.pbf.tmp'
               if len(paths) == 1:
+                  print('Only one extract selected; copying it directly.')
                   shutil.copyfile(paths[0], temp_merged)
               else:
+                  print(f'Merging {len(paths)} extracts ...')
                   try:
                       subprocess.run(['osmium', 'merge', '--overwrite', '-o', str(temp_merged), '-f', 'pbf', *paths], check=True)
                   except subprocess.CalledProcessError as exc:
                       joined = ', '.join(country['slug'] for country in countries)
                       raise RuntimeError(f'Could not merge selected countries: {joined}') from exc
+                  # Country extracts are downloaded independently and can be
+                  # generated/cached at different times, so shared border
+                  # nodes/ways can end up with different edit versions in each
+                  # file. "osmium merge" (the correct tool for this, as
+                  # opposed to "osmium cat") keeps every distinct version it
+                  # finds instead of dropping one, so the merged file can
+                  # still contain the same node/way/relation ID more than
+                  # once. osm2pgsql (used by the Nominatim import) is not
+                  # history-aware and aborts with "Input data is not ordered:
+                  # ... appears more than once" in that case. Collapsing the
+                  # merged file with "osmium time-filter" (no explicit
+                  # timestamp = current point in time) keeps only the latest
+                  # version of each object, guaranteeing a clean,
+                  # duplicate-free extract regardless of how stale the
+                  # individual cached/downloaded files were relative to each
+                  # other.
+                  dedup_output_path = import_dir / 'planet.osm.pbf.dedup'
+                  print('Deduplicating merged extract ...')
+                  try:
+                      subprocess.run(['osmium', 'time-filter', '--overwrite', '-o', str(dedup_output_path), '-f', 'pbf', '-F', 'pbf', str(temp_merged)], check=True)
+                  except subprocess.CalledProcessError as exc:
+                      joined = ', '.join(country['slug'] for country in countries)
+                      raise RuntimeError(f'Could not deduplicate merged extract for: {joined}') from exc
+                  os.replace(dedup_output_path, temp_merged)
+              print('Validating merged extract ...')
               try:
                   subprocess.run(['osmium', 'fileinfo', '-F', 'pbf', str(temp_merged)], check=True)
               except subprocess.CalledProcessError as exc:
                   raise RuntimeError(f'Invalid merged PBF: {temp_merged}') from exc
               os.replace(temp_merged, merged)
+              print('Merged extract ready.')
 
               countries_path = data_dir / 'status' / 'countries.json'
               try:
@@ -280,13 +346,24 @@ spec:
           volumeMounts:
             - name: osm-data
               mountPath: /data
+            - name: temp-data
+              mountPath: /data/import
       volumes:
         - name: osm-data
           hostPath:
-            path: /mnt/data/OSM
+            path: ${DATA_DIR}
+            type: DirectoryOrCreate
+        - name: temp-data
+          hostPath:
+            path: ${TEMP_DIR}/import
             type: DirectoryOrCreate
 EOF
-  if ! wait_for_job "${job_name}"; then
+  local rc=0
+  wait_for_job "${job_name}" || rc=$?
+  if [ "${rc}" -eq 2 ]; then
+    write_state false "aborted" 0 "Map download aborted." "Import wurde vom Benutzer abgebrochen."
+    return 2
+  elif [ "${rc}" -ne 0 ]; then
     write_state false "failed" 0 "Map download failed." "See job logs for details."
     return 1
   fi
@@ -311,36 +388,81 @@ swap_stage() {
   local active_dir="$2"
   local staging_dir="$3"
   local deployment="$4"
-  if [ -d "${active_dir}" ]; then
-    rm -rf "${active_dir}.old" 2>/dev/null || true
-    mv "${active_dir}" "${active_dir}.old" 2>/dev/null || true
+  local backup_dir="${active_dir}.old"
+  local mv_err
+
+  if [ ! -d "${staging_dir}" ]; then
+    log "Staging directory ${staging_dir} not found; cannot promote ${service}."
+    return 1
   fi
-  mv "${staging_dir}" "${active_dir}"
-  rm -rf "${active_dir}.old" 2>/dev/null || true
-  kubectl -n "${NAMESPACE}" rollout restart "deployment/${deployment}" >/dev/null
+
+  rm -rf "${backup_dir}" 2>/dev/null || true
+  if [ -d "${active_dir}" ]; then
+    if ! mv_err="$(mv "${active_dir}" "${backup_dir}" 2>&1)"; then
+      log "Failed to back up existing ${active_dir} before promoting ${service}: ${mv_err}"
+      return 1
+    fi
+  fi
+
+  if ! mv_err="$(mv "${staging_dir}" "${active_dir}" 2>&1)"; then
+    log "Failed to move staged ${service} data from ${staging_dir} to ${active_dir}: ${mv_err}"
+    # Restore the previous good data so the service keeps serving it instead
+    # of being left without any active data at all.
+    if [ -d "${backup_dir}" ]; then
+      rm -rf "${active_dir}" 2>/dev/null || true
+      mv "${backup_dir}" "${active_dir}" 2>/dev/null || true
+    fi
+    return 1
+  fi
+  rm -rf "${backup_dir}" 2>/dev/null || true
+  # The temp dir is scratch space only; once the promoted data has been moved
+  # into OSM/<service>/active, nothing must remain behind on the temp mount.
+  cleanup_temp_dir "$(dirname "${staging_dir}")"
+
+  if ! kubectl -n "${NAMESPACE}" rollout restart "deployment/${deployment}" >/dev/null; then
+    log "Failed to restart deployment/${deployment} after promoting ${service}."
+    return 1
+  fi
   if [ "${deployment}" = "nominatim" ]; then
     if ! wait_for_nominatim_rollout 600; then
       return 1
     fi
   else
-    kubectl -n "${NAMESPACE}" rollout status "deployment/${deployment}" --timeout=600s >/dev/null
+    if ! kubectl -n "${NAMESPACE}" rollout status "deployment/${deployment}" --timeout=600s >/dev/null; then
+      return 1
+    fi
   fi
   log "Swapped ${service} staging data into production."
+  return 0
 }
 
 run_step() {
   local service="$1" job_name="$2" manifest="$3" active_dir="$4" staging_dir="$5" deployment="$6"
   check_config_change
+  # Start from a clean temp-dir scratch area in case a previous run crashed
+  # before it could clean up after itself.
+  cleanup_temp_dir "$(dirname "${staging_dir}")"
   log "Starting ${service} import job."
   write_state true "${service}" 10 "${service} import started." "Submitting ${job_name}."
   kubectl -n "${NAMESPACE}" delete job "${job_name}" --ignore-not-found >/dev/null 2>&1 || true
   kubectl -n "${NAMESPACE}" apply -f "${MANIFEST_DIR}/${manifest}" >/dev/null
-  if ! wait_for_job "${job_name}"; then
+  local rc=0
+  wait_for_job "${job_name}" || rc=$?
+  if [ "${rc}" -eq 2 ]; then
+    write_state false "aborted" 0 "${service} import aborted." "Import wurde vom Benutzer abgebrochen."
+    cleanup_temp_dir "$(dirname "${staging_dir}")"
+    return 2
+  elif [ "${rc}" -ne 0 ]; then
     write_state false "failed" 0 "${service} import failed." "See job logs for details."
+    cleanup_temp_dir "$(dirname "${staging_dir}")"
     return 1
   fi
   write_state true "${service}" 90 "${service} import completed." "Promoting staged data."
-  swap_stage "${service}" "${active_dir}" "${staging_dir}" "${deployment}"
+  if ! swap_stage "${service}" "${active_dir}" "${staging_dir}" "${deployment}"; then
+    write_state false "failed" 0 "${service} promotion failed." "Rollout of deployment/${deployment} did not become ready."
+    cleanup_temp_dir "$(dirname "${staging_dir}")"
+    return 1
+  fi
   write_state false "${service}" 100 "${service} import promoted." "${service} is serving the newly imported data."
 }
 
@@ -351,24 +473,78 @@ main() {
   while true; do
     check_config_change
     if [ ! -s "${REQUEST_FILE}" ]; then
+      # No request pending: any leftover abort flag from a previous run is
+      # stale and must not affect the next request.
+      clear_abort_flag
       sleep 15
       continue
     fi
 
     log "Detected import request at ${REQUEST_FILE}."
-    write_state true "queued" 5 "Import request received." "Running Nominatim, Valhalla and TileServer sequentially."
+    write_state true "queued" 5 "Import request received." "Running TileServer, Nominatim and Valhalla sequentially."
 
     if request_has_countries; then
-      if ! prepare_import_data; then
+      local prc=0
+      prepare_import_data || prc=$?
+      if [ "${prc}" -ne 0 ]; then
+        if [ "${prc}" -eq 2 ]; then
+          log "Import aborted by user during preparation; discarding import request."
+        else
+          log "Import preparation failed; discarding import request to avoid retrying the same failing request in a loop."
+        fi
+        cleanup_temp_dir "${TEMP_DIR}/import"
+        rm -f "${REQUEST_FILE}"
+        clear_abort_flag
         continue
       fi
     fi
 
-    run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${DATA_DIR}/nominatim/staging" "nominatim"
-    run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${DATA_DIR}/valhalla/staging" "valhalla"
-    run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${DATA_DIR}/tileserver/staging" "tileserver-gl"
+    local src=0
+    run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${TEMP_DIR}/tileserver/staging" "tileserver-gl" || src=$?
+    if [ "${src}" -ne 0 ]; then
+      if [ "${src}" -eq 2 ]; then
+        log "Import aborted by user during TileServer import; discarding import request."
+      else
+        log "TileServer import failed; discarding import request to avoid retrying the same failing request in a loop."
+      fi
+      cleanup_temp_dir "${TEMP_DIR}/import"
+      rm -f "${REQUEST_FILE}"
+      clear_abort_flag
+      continue
+    fi
+    local nrc=0
+    run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${TEMP_DIR}/nominatim/staging" "nominatim" || nrc=$?
+    if [ "${nrc}" -ne 0 ]; then
+      if [ "${nrc}" -eq 2 ]; then
+        log "Import aborted by user during Nominatim import; discarding import request."
+      else
+        log "Nominatim import failed; discarding import request to avoid retrying the same failing request in a loop."
+      fi
+      cleanup_temp_dir "${TEMP_DIR}/import"
+      rm -f "${REQUEST_FILE}"
+      clear_abort_flag
+      continue
+    fi
+    local vrc=0
+    run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${TEMP_DIR}/valhalla/staging" "valhalla" || vrc=$?
+    if [ "${vrc}" -ne 0 ]; then
+      if [ "${vrc}" -eq 2 ]; then
+        log "Import aborted by user during Valhalla import; discarding import request."
+      else
+        log "Valhalla import failed; discarding import request to avoid retrying the same failing request in a loop."
+      fi
+      cleanup_temp_dir "${TEMP_DIR}/import"
+      rm -f "${REQUEST_FILE}"
+      clear_abort_flag
+      continue
+    fi
 
+    # The shared merged-extract scratch data is only needed while the three
+    # import steps run; once TileServer, Nominatim and Valhalla have all
+    # consumed it, the temp dir must be cleared again.
+    cleanup_temp_dir "${TEMP_DIR}/import"
     rm -f "${REQUEST_FILE}"
+    clear_abort_flag
     write_state false "done" 100 "Import erfolgreich abgeschlossen." "Alle Daten wurden sequentiell verarbeitet und aktiviert."
     log "Import request completed successfully."
   done

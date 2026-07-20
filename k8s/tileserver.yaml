@@ -38,27 +38,44 @@ spec:
                 echo "[!] WARNING: No fonts found. Map will render WITHOUT text labels."
               fi
 
-              if [ -f /data/style.template.json ] && [ ! -f /data/style.json ]; then
-                cp /data/style.template.json /data/style.json
-                echo "[INFO] TileServer: installed style.json from style.template.json"
+              if [ -f /style-source/style.json ] && [ ! -f /data/style.json ]; then
+                cp /style-source/style.json /data/style.json
+                echo "[INFO] TileServer: installed style.json from ConfigMap tileserver-style"
               fi
 
               if [ -f /data/map.mbtiles ]; then
                 printf '%s\n' '{"options":{"paths":{"root":"/","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true,"cors":true},"styles":{"osm":{"style":"/data/style.json"}},"data":{"v3":{"mbtiles":"/data/map.mbtiles"}}}' > /data/config.json
                 if [ ! -f /data/style.json ]; then
-                  printf '%s\n' '{"version":8,"name":"LocalOSM","sources":{"openmaptiles":{"type":"vector","url":"mbtiles://{v3}"}},"glyphs":"/fonts/{fontstack}/{range}.pbf","layers":[{"id":"background","type":"background","paint":{"background-color":"#f2efe9"}}]}' > /data/style.json
+                  printf '%s\n' '{"version":8,"name":"LocalOSM","sources":{"openmaptiles":{"type":"vector","url":"mbtiles://{v3}"}},"glyphs":"{fontstack}/{range}.pbf","layers":[{"id":"background","type":"background","paint":{"background-color":"#f2efe9"}}]}' > /data/style.json
                 fi
               else
                 printf '{"options":{"paths":{"root":"","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true,"cors":true},"styles":{},"data":{}}\n' > /data/config.json
               fi
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
           volumeMounts:
             - name: tileserver-data
               mountPath: /data
+            - name: tileserver-style
+              mountPath: /style-source
+              readOnly: true
       containers:
         - name: tileserver-gl
           image: maptiler/tileserver-gl:latest
           imagePullPolicy: Always
           args: ["/data/config.json"]
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
           env:
             - name: PORT
               value: "80"
@@ -67,11 +84,27 @@ spec:
           volumeMounts:
             - name: tileserver-data
               mountPath: /data
+            - name: dshm
+              mountPath: /dev/shm
       volumes:
         - name: tileserver-data
           hostPath:
             path: /mnt/data/OSM/tileserver/active
             type: DirectoryOrCreate
+        - name: tileserver-style
+          configMap:
+            name: tileserver-style
+            optional: true
+        # TileServer-GL renders raster tiles server-side via MapLibre GL Native's
+        # headless GL backend, which needs shared memory to allocate its GL
+        # context/framebuffers. Kubernetes containers default to a tiny 64Mi
+        # /dev/shm, which is enough for vector (.pbf) tile serving (no rendering
+        # involved) but too small for raster rendering, causing raster tiles to
+        # fail/return blank while vector tiles keep working fine.
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi
 ---
 apiVersion: v1
 kind: Service

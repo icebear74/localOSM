@@ -19,17 +19,48 @@ spec:
             - name: PBF_PATH
               value: /nominatim/data/import/planet.osm.pbf
             - name: NOMINATIM_PASSWORD
-              value: nominatim
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-nominatim-import-config
+                  key: import_password
+            # osm2pgsql's initial import step ("nominatim import") maps its
+            # --number-processes / worker thread count directly to THREADS, so
+            # this must be sized to the node's available CPUs (see
+            # k8s/nominatim-import-config.yaml) rather than left at a small,
+            # hardcoded value that leaves most cores idle during import.
             - name: THREADS
-              value: "4"
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-nominatim-import-config
+                  key: import_threads
+            # osm2pgsql's --cache (node cache, in MB) during the initial
+            # import; sized to the node's available RAM (see
+            # k8s/nominatim-import-config.yaml) rather than left at
+            # osm2pgsql's small auto-detected default.
+            - name: NOMINATIM_OSM2PGSQL_CACHE
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-nominatim-import-config
+                  key: import_cache_mb
           resources:
             requests:
-              memory: "12Gi"
-              cpu: "4"
+              memory: "14Gi"
+              cpu: "8"
             limits:
-              memory: "18Gi"
-              cpu: "4"
-          command: ["/app/init.sh"]
+              memory: "24Gi"
+              cpu: "14"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              /app/config.sh
+              if id nominatim >/dev/null 2>&1; then
+                echo "user nominatim already exists"
+              else
+                useradd -m -p "${NOMINATIM_PASSWORD}" nominatim
+              fi
+              /app/init.sh
+              touch /var/lib/postgresql/16/main/import-finished
           volumeMounts:
             - name: import-data
               mountPath: /nominatim/data/import
@@ -38,9 +69,9 @@ spec:
       volumes:
         - name: import-data
           hostPath:
-            path: /mnt/data/OSM/import
+            path: __OSM_TEMP_DIR__/import
             type: DirectoryOrCreate
         - name: nominatim-data
           hostPath:
-            path: /mnt/data/OSM/nominatim/staging
+            path: __OSM_TEMP_DIR__/nominatim/staging
             type: DirectoryOrCreate
