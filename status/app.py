@@ -13,6 +13,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import email.utils
 from datetime import datetime, timezone
 
 
@@ -80,7 +81,20 @@ BUILD_STEPS = ("tileserver", "nominatim", "valhalla")
 CONFIG_DEFAULTS = {
     "node_url": "",
     "auto_update_enabled": False,
-    "auto_update_time": "03:00",
+    # Standard 5-field crond expression: Minute Stunde Tag Monat Wochentag.
+    "auto_update_cron": "0 3 * * *",
+    # "download_only": nur Download (neuere Extracts holen, kein Merge).
+    # "download_merge": Download & Merge (kein Build der Dienste).
+    # "custom": nur die in auto_update_steps ausgewählten Build-Schritte.
+    "auto_update_mode": "download_merge",
+    "auto_update_steps": list(BUILD_STEPS),
+    "auto_update_auto_promote": True,
+}
+
+CRON_WEEKDAY_NAMES = {"sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6}
+CRON_MONTH_NAMES = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
 }
 
 SERVICES = [
@@ -575,7 +589,7 @@ def build_style_json(center_lon=None, center_lat=None, zoom=6):
 WORKFLOW_LOCK = threading.Lock()
 ACTIVE_WORKFLOW = {"thread": None}
 SCHEDULER_LOCK = threading.Lock()
-LAST_AUTO_RUN = {"date": ""}
+LAST_AUTO_RUN = {"key": ""}
 
 
 _SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount"
@@ -838,9 +852,37 @@ INDEX_HTML = """<!doctype html>
           Auto-Update aktivieren
         </label>
         <div>
-          <label>Uhrzeit (lokale Zeit)</label>
-          <input type="time" id="auto-update-time" value="03:00">
+          <label>Cron-Ausdruck (lokale Zeit)</label>
+          <input id="auto-update-cron" placeholder="0 3 * * *" value="0 3 * * *">
         </div>
+        <div class="hint">
+          Format: <code>Minute Stunde Tag Monat Wochentag</code> (wie bei crond).<br>
+          <code>*</code> = jeder Wert &middot; <code>*/n</code> = jeder n-te Wert &middot; <code>a-b</code> = Bereich &middot; <code>a,b,c</code> = Liste &middot; Monat/Wochentag auch als Name (<code>jan</code>-<code>dec</code>, <code>sun</code>-<code>sat</code>).<br>
+          Beispiele: <code>0 3 * * *</code> = täglich 03:00 Uhr &middot; <code>0 */6 * * *</code> = alle 6 Stunden &middot; <code>0 4 * * 0</code> = sonntags 04:00 Uhr.
+        </div>
+        <div>
+          <label>Was soll ausgeführt werden?</label>
+          <select id="auto-update-mode">
+            <option value="download_only">Nur Download (neuere Extracts holen)</option>
+            <option value="download_merge">Download &amp; Merge</option>
+            <option value="custom">Einzelne Prozesse (siehe Auswahl unten)</option>
+          </select>
+        </div>
+        <div id="auto-update-steps-wrap" class="row2" style="grid-template-columns:repeat(3, 1fr)">
+          <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.82rem">
+            <input type="checkbox" id="auto-update-step-tileserver" style="width:auto" checked> TileServer bauen
+          </label>
+          <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.82rem">
+            <input type="checkbox" id="auto-update-step-nominatim" style="width:auto" checked> Nominatim bauen
+          </label>
+          <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.82rem">
+            <input type="checkbox" id="auto-update-step-valhalla" style="width:auto" checked> Valhalla bauen
+          </label>
+        </div>
+        <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+          <input type="checkbox" id="auto-update-auto-promote" style="width:auto" checked>
+          Nach dem Auto-Update automatisch promoten (aktiv schalten)
+        </label>
         <button onclick="saveAutoUpdate()">Speichern</button>
         <div id="auto-update-status" class="hint"></div>
       </div>
@@ -857,14 +899,22 @@ INDEX_HTML = """<!doctype html>
         </div>
         <div class="row2">
           <button id="add-country-btn" onclick="startLibraryQueue()">Land zur Queue hinzufügen</button>
+          <button id="check-updates-btn" class="subtle" onclick="checkForUpdates()">Auf Updates prüfen</button>
+        </div>
+        <div class="row2">
+          <button id="download-merge-btn" class="subtle" onclick="startDownloadMerge(false)">Download &amp; Merge</button>
+          <button id="download-only-btn" class="subtle" onclick="startDownloadMerge(true)">Nur Download</button>
+        </div>
+        <div class="row2">
           <button id="build-btn" class="subtle" onclick="startBuild()">Build starten</button>
+          <span></span>
         </div>
         <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
           <input type="checkbox" id="auto-promote-enabled" style="width:auto" checked>
           Nach dem Build automatisch promoten (aktiv schalten)
         </label>
         <div id="queue-count" class="hint">Keine Länder in der Queue.</div>
-        <div class="hint">Wählt ein Land aus. Der Hinzufügen-Button prüft nur die Verfügbarkeit; der Build-Button schreibt den Auftrag an den Import-Orchestrator und führt (wahlweise mit Promotion) TileServer, Nominatim und Valhalla nacheinander aus.</div>
+        <div class="hint">Wählt ein Land aus. Der Hinzufügen-Button prüft nur die Verfügbarkeit. "Download &amp; Merge" lädt neuere Extracts herunter und führt sie zusammen; "Build" verwendet dafür bereits vorhandene, zusammengeführte Kartendaten und lädt/merged nur automatisch, falls noch keine vorhanden sind. Danach führt Build (wahlweise mit Promotion) TileServer, Nominatim und Valhalla nacheinander aus.</div>
         <div class="hint" style="margin-top:0.4rem">Einzelne Build-Schritte auslösen (ohne automatische Promotion):</div>
         <div class="row2" style="grid-template-columns:repeat(3, 1fr)">
           <button id="build-step-tileserver-btn" class="subtle" onclick="startStepBuild('tileserver')">TileServer bauen</button>
@@ -1059,6 +1109,9 @@ INDEX_HTML = """<!doctype html>
       '</div>';
     document.getElementById('add-country-btn').disabled = running;
     document.getElementById('build-btn').disabled = running;
+    document.getElementById('download-merge-btn').disabled = running;
+    document.getElementById('download-only-btn').disabled = running;
+    document.getElementById('check-updates-btn').disabled = running;
     ['tileserver', 'nominatim', 'valhalla'].forEach(function(step) {
       var stepBtn = document.getElementById('build-step-' + step + '-btn');
       if (stepBtn) stepBtn.disabled = running;
@@ -1113,13 +1166,22 @@ INDEX_HTML = """<!doctype html>
       var detail = [];
       if (country.continent) detail.push(country.continent);
       if (country.pbf_size_mb != null) detail.push(country.pbf_size_mb + ' MB');
+      if (country.downloaded_at) detail.push('Download vom ' + country.downloaded_at);
       if (country.imported_at) detail.push('fertig ' + country.imported_at);
       else if (country.added_at) detail.push('hinzugefügt ' + country.added_at);
       if (country.last_error) detail.push('Fehler vorhanden');
+      var updateBadge = '';
+      if (country.update_available) {
+        updateBadge = '<span class="status-pill status-queued" title="Neuere Version verfügbar' +
+          (country.remote_last_modified ? ' (' + esc(country.remote_last_modified) + ')' : '') + '">Update verfügbar</span>';
+      } else if (country.update_checked_at) {
+        updateBadge = '<span class="hint" title="Zuletzt geprüft: ' + esc(country.update_checked_at) + '">aktuell</span>';
+      }
       var slugAttr = esc(country.slug);
       html += '<div class="country-row">' +
         '<div><div class="country-name">' + esc(country.name) + '</div><div class="country-meta">' + esc(detail.join(' · ') || country.url) + '</div></div>' +
         '<div style="text-align:right;display:flex;align-items:center;gap:0.4rem;justify-content:flex-end">' +
+        updateBadge +
         '<span class="status-pill ' + badgeClass + '">' + esc(status) + '</span>' +
         '<button class="remove-country-btn danger" data-slug="' + slugAttr + '" onclick="removeCountry(this.dataset.slug)" style="width:auto;padding:0.18rem 0.5rem;font-size:0.72rem;font-weight:700" ' + (WORKFLOW_RUNNING ? 'disabled' : '') + ' title="Land entfernen">×</button>' +
         '</div>' +
@@ -1194,6 +1256,50 @@ INDEX_HTML = """<!doctype html>
       await refresh();
     } catch (err) {
       workflowBody.innerHTML = '<span class="status-pill status-error">fehler</span><pre>' + esc(err) + '</pre>';
+    }
+  }
+
+  async function startDownloadMerge(downloadOnly) {
+    var workflowBody = document.getElementById('workflow-body');
+    workflowBody.innerHTML = downloadOnly ? 'Starte Download ...' : 'Starte Download &amp; Merge ...';
+    try {
+      var resp = await fetch('/api/library/download-merge', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({download_only: !!downloadOnly})
+      });
+      var data = await resp.json();
+      if (!resp.ok) {
+        workflowBody.innerHTML = '<span class="status-pill status-error">fehler</span><pre>' + esc(data.error || 'Unbekannter Fehler') + '</pre>';
+        return;
+      }
+      await refresh();
+    } catch (err) {
+      workflowBody.innerHTML = '<span class="status-pill status-error">fehler</span><pre>' + esc(err) + '</pre>';
+    }
+  }
+
+  async function checkForUpdates() {
+    var btn = document.getElementById('check-updates-btn');
+    btn.disabled = true;
+    var originalText = btn.textContent;
+    btn.textContent = 'Prüfe ...';
+    try {
+      var resp = await fetch('/api/library/check-updates', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: '{}'
+      });
+      var data = await resp.json();
+      if (!resp.ok) {
+        alert('Fehler: ' + (data.error || 'Unbekannter Fehler'));
+      }
+      await refresh();
+    } catch (err) {
+      alert('Fehler: ' + err);
+    } finally {
+      btn.textContent = originalText;
+      btn.disabled = WORKFLOW_RUNNING;
     }
   }
 
@@ -1297,17 +1403,35 @@ INDEX_HTML = """<!doctype html>
         if (hintEl) hintEl.textContent = 'Node-URL konnte nicht ermittelt werden. Bitte manuell eintragen.';
       }
       document.getElementById('auto-update-enabled').checked = !!cfg.auto_update_enabled;
-      document.getElementById('auto-update-time').value = cfg.auto_update_time || '03:00';
+      document.getElementById('auto-update-cron').value = cfg.auto_update_cron || '0 3 * * *';
+      document.getElementById('auto-update-mode').value = cfg.auto_update_mode || 'download_merge';
+      document.getElementById('auto-update-auto-promote').checked = !!cfg.auto_update_auto_promote;
+      var autoSteps = cfg.auto_update_steps || ['tileserver', 'nominatim', 'valhalla'];
+      ['tileserver', 'nominatim', 'valhalla'].forEach(function(step) {
+        var box = document.getElementById('auto-update-step-' + step);
+        if (box) box.checked = autoSteps.indexOf(step) !== -1;
+      });
+      updateAutoUpdateModeVisibility();
       updateLinks();
       updateNextRunDisplay(cfg);
     } catch(e) {}
   }
 
+  function updateAutoUpdateModeVisibility() {
+    var mode = document.getElementById('auto-update-mode').value;
+    var stepsWrap = document.getElementById('auto-update-steps-wrap');
+    if (stepsWrap) stepsWrap.style.display = mode === 'custom' ? 'grid' : 'none';
+  }
+  document.addEventListener('DOMContentLoaded', function() {
+    var modeSelect = document.getElementById('auto-update-mode');
+    if (modeSelect) modeSelect.addEventListener('change', updateAutoUpdateModeVisibility);
+  });
+
   function updateNextRunDisplay(cfg) {
     var el = document.getElementById('auto-update-status');
     if (!el) return;
     if (cfg.auto_update_enabled) {
-      el.textContent = 'Nächstes Update: täglich um ' + (cfg.auto_update_time || '03:00') + ' (lokale Zeit)';
+      el.textContent = 'Auto-Update aktiv · Cron: ' + (cfg.auto_update_cron || '0 3 * * *') + ' (lokale Zeit)';
     } else {
       el.textContent = 'Auto-Update deaktiviert.';
     }
@@ -1325,11 +1449,31 @@ INDEX_HTML = """<!doctype html>
 
   async function saveAutoUpdate() {
     var enabled = document.getElementById('auto-update-enabled').checked;
-    var t = document.getElementById('auto-update-time').value;
-    var resp = await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({auto_update_enabled: enabled, auto_update_time: t})});
+    var cron = document.getElementById('auto-update-cron').value.trim();
+    var mode = document.getElementById('auto-update-mode').value;
+    var autoPromote = document.getElementById('auto-update-auto-promote').checked;
+    var steps = ['tileserver', 'nominatim', 'valhalla'].filter(function(step) {
+      var box = document.getElementById('auto-update-step-' + step);
+      return box && box.checked;
+    });
+    var statusEl = document.getElementById('auto-update-status');
+    var resp = await fetch('/api/config', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        auto_update_enabled: enabled,
+        auto_update_cron: cron,
+        auto_update_mode: mode,
+        auto_update_steps: steps,
+        auto_update_auto_promote: autoPromote
+      })
+    });
     if (resp.ok) {
       var cfg = await resp.json();
       updateNextRunDisplay(cfg);
+    } else if (statusEl) {
+      var data = await resp.json();
+      statusEl.textContent = 'Fehler: ' + (data.error || 'Unbekannter Fehler');
     }
   }
 
@@ -1460,14 +1604,108 @@ def save_json(path, payload):
     os.replace(tmp_path, path)
 
 
+def _cron_token_value(token, names):
+    token = token.strip().lower()
+    if names and token in names:
+        return names[token]
+    if not re.fullmatch(r"-?\d+", token):
+        raise ValueError(f"invalid value '{token}'")
+    return int(token)
+
+
+def _parse_cron_field(field, min_v, max_v, names=None):
+    values = set()
+    for part in field.split(","):
+        part = part.strip()
+        if not part:
+            raise ValueError("field contains an empty entry")
+        step = 1
+        if "/" in part:
+            part, step_text = part.split("/", 1)
+            if not step_text.isdigit() or int(step_text) <= 0:
+                raise ValueError(f"invalid step '{step_text}'")
+            step = int(step_text)
+        if part == "*":
+            start, end = min_v, max_v
+        elif "-" in part:
+            start_text, end_text = part.split("-", 1)
+            start = _cron_token_value(start_text, names)
+            end = _cron_token_value(end_text, names)
+        else:
+            start = end = _cron_token_value(part, names)
+        if not (min_v <= start <= max_v) or not (min_v <= end <= max_v) or start > end:
+            raise ValueError(f"value out of range in '{part}' (expected {min_v}-{max_v})")
+        values.update(range(start, end + 1, step))
+    if not values:
+        raise ValueError("field has no values")
+    return values
+
+
+def parse_cron_expression(expr):
+    """Parse a standard 5-field crond expression (Minute Stunde Tag Monat
+    Wochentag). Supports '*', lists ('1,2,3'), ranges ('1-5'), steps
+    ('*/15', '1-30/5') and month/weekday names (jan-dec, sun-sat)."""
+    parts = (expr or "").strip().split()
+    if len(parts) != 5:
+        raise ValueError("Cron expression must have exactly 5 fields: Minute Stunde Tag Monat Wochentag.")
+    minute_f, hour_f, dom_f, month_f, dow_f = parts
+    minutes = _parse_cron_field(minute_f, 0, 59)
+    hours = _parse_cron_field(hour_f, 0, 23)
+    doms = _parse_cron_field(dom_f, 1, 31)
+    months = _parse_cron_field(month_f, 1, 12, CRON_MONTH_NAMES)
+    dows = _parse_cron_field(dow_f, 0, 6, CRON_WEEKDAY_NAMES)
+    return minutes, hours, doms, months, dows, dom_f.strip() != "*", dow_f.strip() != "*"
+
+
+def valid_cron_expression(expr):
+    try:
+        parse_cron_expression(expr)
+        return True
+    except ValueError:
+        return False
+
+
+def cron_matches(expr, dt):
+    try:
+        minutes, hours, doms, months, dows, dom_restricted, dow_restricted = parse_cron_expression(expr)
+    except ValueError:
+        return False
+    if dt.minute not in minutes or dt.hour not in hours or dt.month not in months:
+        return False
+    # crond semantics: if BOTH day-of-month and day-of-week are restricted
+    # (i.e. not "*"), a match on either one is enough (logical OR). If only
+    # one of them is restricted, only that one is evaluated.
+    weekday = dt.isoweekday() % 7  # Sunday=0 .. Saturday=6, matching cron
+    if dom_restricted and dow_restricted:
+        return (dt.day in doms) or (weekday in dows)
+    if dom_restricted:
+        return dt.day in doms
+    if dow_restricted:
+        return weekday in dows
+    return True
+
+
 def load_config():
     data = load_json(CONFIG_FILE, CONFIG_DEFAULTS)
     config = clone_default(CONFIG_DEFAULTS)
     if isinstance(data, dict):
         config.update({key: data.get(key, value) for key, value in CONFIG_DEFAULTS.items()})
+        # Migrate the old daily "HH:MM" auto-update time to an equivalent
+        # cron expression when no cron value has been saved yet.
+        if "auto_update_cron" not in data and isinstance(data.get("auto_update_time"), str):
+            match = re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", data["auto_update_time"].strip())
+            if match:
+                config["auto_update_cron"] = f"{int(match.group(2))} {int(match.group(1))} * * *"
     config["node_url"] = str(config.get("node_url") or "").strip()
     config["auto_update_enabled"] = bool(config.get("auto_update_enabled"))
-    config["auto_update_time"] = str(config.get("auto_update_time") or "03:00")
+    if not valid_cron_expression(config.get("auto_update_cron")):
+        config["auto_update_cron"] = CONFIG_DEFAULTS["auto_update_cron"]
+    if config.get("auto_update_mode") not in {"download_only", "download_merge", "custom"}:
+        config["auto_update_mode"] = CONFIG_DEFAULTS["auto_update_mode"]
+    steps = config.get("auto_update_steps")
+    if not isinstance(steps, list) or not all(step in BUILD_STEPS for step in steps):
+        config["auto_update_steps"] = list(BUILD_STEPS)
+    config["auto_update_auto_promote"] = bool(config.get("auto_update_auto_promote"))
     config["detected_node_url"] = detect_node_url() if not config["node_url"] else ""
     return config
 
@@ -1479,21 +1717,31 @@ def save_config(data):
     return config
 
 
-def valid_time_value(value):
-    return bool(re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", value or ""))
-
-
 def apply_config_update(payload):
     config = load_config()
     if "node_url" in payload:
         config["node_url"] = str(payload.get("node_url") or "").strip()
     if "auto_update_enabled" in payload:
         config["auto_update_enabled"] = bool(payload.get("auto_update_enabled"))
-    if "auto_update_time" in payload:
-        time_value = str(payload.get("auto_update_time") or "").strip()
-        if not valid_time_value(time_value):
-            raise ValueError("auto_update_time must use HH:MM format.")
-        config["auto_update_time"] = time_value
+    if "auto_update_cron" in payload:
+        cron_value = str(payload.get("auto_update_cron") or "").strip()
+        if not valid_cron_expression(cron_value):
+            raise ValueError(
+                "auto_update_cron must be a valid 5-field cron expression (Minute Stunde Tag Monat Wochentag)."
+            )
+        config["auto_update_cron"] = cron_value
+    if "auto_update_mode" in payload:
+        mode = str(payload.get("auto_update_mode") or "").strip()
+        if mode not in {"download_only", "download_merge", "custom"}:
+            raise ValueError("auto_update_mode must be one of: download_only, download_merge, custom.")
+        config["auto_update_mode"] = mode
+    if "auto_update_steps" in payload:
+        steps = payload.get("auto_update_steps") or []
+        if not isinstance(steps, list) or not all(step in BUILD_STEPS for step in steps):
+            raise ValueError("auto_update_steps must be a subset of: " + ", ".join(BUILD_STEPS))
+        config["auto_update_steps"] = list(steps)
+    if "auto_update_auto_promote" in payload:
+        config["auto_update_auto_promote"] = bool(payload.get("auto_update_auto_promote"))
     return save_config(config)
 
 
@@ -1980,6 +2228,67 @@ def verify_country_url(country):
         raise RuntimeError(f"Could not verify {country['name']} ({country['url']}): {exc}")
 
 
+def fetch_remote_last_modified(url):
+    """HEAD the extract URL and return its "Last-Modified" header as a local
+    ISO 8601 timestamp, or None if the server does not send one."""
+    request = urllib.request.Request(url, headers={"User-Agent": "localosm-status/1.0"}, method="HEAD")
+    with urllib.request.urlopen(request, timeout=20) as response:
+        header = response.headers.get("Last-Modified")
+    if not header:
+        return None
+    try:
+        parsed = email.utils.parsedate_to_datetime(header)
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone().replace(microsecond=0).isoformat()
+
+
+def _parse_iso(value):
+    try:
+        return datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def check_country_updates(target_slugs=None):
+    """Check every selected country's source URL for a newer file than the
+    one currently downloaded, so the region list can show whether a fresher
+    extract is available (checked via HTTP Last-Modified, no full download).
+    If target_slugs is given, only those countries are actually checked;
+    the rest of the library is left untouched (but still saved back as-is)."""
+    all_records = list_library_records()
+    slugs = set(target_slugs) if target_slugs is not None else None
+    updated = []
+    for record in all_records:
+        url = record.get("url")
+        if not url or (slugs is not None and record.get("slug") not in slugs):
+            updated.append(record)
+            continue
+        item = dict(record)
+        item["update_checked_at"] = now_iso()
+        try:
+            remote_last_modified = fetch_remote_last_modified(url)
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            item["update_check_error"] = str(exc)
+            updated.append(item)
+            continue
+        item["update_check_error"] = ""
+        item["remote_last_modified"] = remote_last_modified
+        downloaded_at = _parse_iso(item.get("downloaded_at"))
+        remote_dt = _parse_iso(remote_last_modified)
+        if not item.get("pbf_path") or not downloaded_at:
+            item["update_available"] = bool(item.get("url"))
+        elif remote_dt is not None:
+            item["update_available"] = remote_dt > downloaded_at
+        else:
+            item["update_available"] = False
+        updated.append(item)
+    save_library_records(updated)
+    return updated
+
+
 def collect_status():
     try:
         ensure_dirs()
@@ -2041,10 +2350,16 @@ def collect_status():
     }
 
 
-def write_import_request(records, steps=None, auto_promote=True):
-    payload = {
-        "requested_at": now_iso(),
-        "countries": [
+def write_import_request(
+    records,
+    steps=None,
+    auto_promote=True,
+    include_countries=True,
+    merge_requested=True,
+    force_slugs=None,
+):
+    countries_payload = (
+        [
             {
                 "slug": record.get("slug", ""),
                 "name": record.get("name", ""),
@@ -2053,10 +2368,22 @@ def write_import_request(records, steps=None, auto_promote=True):
             }
             for record in records
             if record.get("slug") and record.get("url")
-        ],
-        "count": len([record for record in records if record.get("slug") and record.get("url")]),
-        "steps": list(steps) if steps else list(BUILD_STEPS),
+        ]
+        if include_countries
+        else []
+    )
+    payload = {
+        "requested_at": now_iso(),
+        "countries": countries_payload,
+        "count": len(countries_payload),
+        # None (not provided) means "run the full default pipeline"; an
+        # explicit empty list means "run no build steps at all" (used by the
+        # dedicated Download & Merge workflow), so it must NOT fall back to
+        # the default here.
+        "steps": list(steps) if steps is not None else list(BUILD_STEPS),
         "auto_promote": bool(auto_promote),
+        "merge_requested": bool(merge_requested),
+        "force_slugs": list(force_slugs) if force_slugs else [],
     }
     save_json(IMPORT_REQUEST_FILE, payload)
     return payload
@@ -2285,18 +2612,31 @@ def run_build_workflow(country=None, steps=None, auto_promote=True):
         ]
         if not records:
             raise RuntimeError("No queued or ready countries available for a build.")
-        request = write_import_request(records, steps=steps, auto_promote=auto_promote)
-        step_label = ", ".join(request["steps"])
+        # A build only triggers an implicit download & merge when there is no
+        # merged extract yet. Once one exists, "Build" reuses it as-is; use
+        # the dedicated "Download & Merge" button/action to refresh it.
+        merged_exists = os.path.isfile(MERGED_PBF) and os.path.getsize(MERGED_PBF) > 0
+        include_countries = not merged_exists
+        request = write_import_request(
+            records,
+            steps=steps,
+            auto_promote=auto_promote,
+            include_countries=include_countries,
+            merge_requested=include_countries,
+        )
+        step_label = ", ".join(request["steps"]) if request["steps"] else "keine"
         promote_label = "mit automatischer Promotion" if auto_promote else "ohne automatische Promotion (manuell promoten)"
+        data_detail = (
+            f"{request['count']} country/countries queued for download and processing."
+            if include_countries
+            else "Bereits vorhandene, zusammengeführte Kartendaten werden verwendet (kein erneuter Download/Merge)."
+        )
         write_workflow_state(
             running=False,
             phase="queued",
             progress=50,
             message="Build request handed to the import orchestrator.",
-            detail=(
-                f"{request['count']} country/countries queued for download and processing. "
-                f"Steps: {step_label} ({promote_label})."
-            ),
+            detail=f"{data_detail} Steps: {step_label} ({promote_label}).",
             country=country["name"],
             error="",
         )
@@ -2306,6 +2646,78 @@ def run_build_workflow(country=None, steps=None, auto_promote=True):
             phase="error",
             progress=100,
             message="Library build failed.",
+            detail="See the captured error below.",
+            country=country["name"],
+            error=str(exc),
+        )
+    finally:
+        finish_workflow_thread()
+
+
+def run_download_merge_workflow(auto_promote=False, download_only=False):
+    country = {
+        "name": "Download" if download_only else "Download & Merge",
+        "slug": "library-download-merge",
+        "url": "",
+    }
+    try:
+        ensure_dirs()
+        records = [
+            record
+            for record in list_library_records()
+            if record.get("status") in {"queued", "ready"}
+        ]
+        if not records:
+            raise RuntimeError("No queued or ready countries available to download.")
+        write_workflow_state(
+            running=True,
+            phase="checking",
+            progress=5,
+            message="Checking selected countries for newer extracts ...",
+            detail="Sending HTTP HEAD requests to compare against the last download.",
+            country=country["name"],
+            error="",
+        )
+        check_country_updates([record.get("slug") for record in records])
+        all_records = list_library_records()
+        checked_by_slug = {record.get("slug"): record for record in all_records}
+        # Requirement: only re-download extracts that are actually newer (or
+        # were never downloaded); everything else keeps using the cached file.
+        force_slugs = [
+            record.get("slug")
+            for record in records
+            if checked_by_slug.get(record.get("slug"), {}).get("update_available")
+            or not checked_by_slug.get(record.get("slug"), {}).get("pbf_path")
+        ]
+        records = [checked_by_slug.get(record.get("slug"), record) for record in records]
+        request = write_import_request(
+            records,
+            steps=[],
+            auto_promote=auto_promote,
+            include_countries=True,
+            merge_requested=not download_only,
+            force_slugs=force_slugs,
+        )
+        if force_slugs:
+            data_detail = f"{len(force_slugs)} of {request['count']} country/countries have a newer extract and will be re-downloaded."
+        else:
+            data_detail = f"All {request['count']} country/countries are already up to date; using cached extracts."
+        action_label = "Download only" if download_only else "Download & Merge"
+        write_workflow_state(
+            running=False,
+            phase="queued",
+            progress=50,
+            message=f"{action_label} request handed to the import orchestrator.",
+            detail=data_detail,
+            country=country["name"],
+            error="",
+        )
+    except Exception as exc:  # noqa: BLE001
+        write_workflow_state(
+            running=False,
+            phase="error",
+            progress=100,
+            message="Download & Merge failed.",
             detail="See the captured error below.",
             country=country["name"],
             error=str(exc),
@@ -2375,27 +2787,77 @@ def start_step_build_workflow(step):
     }
 
 
+def start_download_merge_workflow(payload=None):
+    payload = payload or {}
+    if not WORKFLOW_LOCK.acquire(blocking=False):
+        raise RuntimeError("Another country library workflow is already running.")
+    download_only = bool(payload.get("download_only", False))
+    thread = threading.Thread(
+        target=run_download_merge_workflow,
+        kwargs={"auto_promote": False, "download_only": download_only},
+        daemon=True,
+    )
+    ACTIVE_WORKFLOW["thread"] = thread
+    thread.start()
+    return {
+        "download_only": download_only,
+        "count": len(
+            [record for record in list_library_records() if record.get("status") in {"queued", "ready"}]
+        ),
+    }
+
+
+def start_check_updates():
+    if WORKFLOW_LOCK.locked():
+        raise RuntimeError("Another country library workflow is currently running.")
+    return check_country_updates()
+
+
 def run_scheduler_loop():
     while True:
-        time.sleep(60)
+        time.sleep(30)
         if not SCHEDULER_LOCK.acquire(blocking=False):
             continue
         try:
             cfg = load_config()
             if not cfg.get("auto_update_enabled"):
                 continue
-            schedule_time = cfg.get("auto_update_time", "03:00")
+            cron_expr = cfg.get("auto_update_cron") or CONFIG_DEFAULTS["auto_update_cron"]
             now_local = datetime.now().astimezone()
-            now_hm = now_local.strftime("%H:%M")
-            today = now_local.strftime("%Y-%m-%d")
-            if now_hm == schedule_time and LAST_AUTO_RUN["date"] != today:
-                LAST_AUTO_RUN["date"] = today
-                records = list_library_records()
-                if records and not WORKFLOW_LOCK.locked():
-                    if WORKFLOW_LOCK.acquire(blocking=False):
-                        thread = threading.Thread(target=run_build_workflow, daemon=True)
-                        ACTIVE_WORKFLOW["thread"] = thread
-                        thread.start()
+            run_key = now_local.strftime("%Y-%m-%d %H:%M")
+            if LAST_AUTO_RUN["key"] == run_key:
+                continue
+            if not cron_matches(cron_expr, now_local):
+                continue
+            LAST_AUTO_RUN["key"] = run_key
+            records = list_library_records()
+            usable = [record for record in records if record.get("status") in {"queued", "ready"}]
+            if not usable or WORKFLOW_LOCK.locked():
+                continue
+            if not WORKFLOW_LOCK.acquire(blocking=False):
+                continue
+            mode = cfg.get("auto_update_mode", "download_merge")
+            if mode == "download_only":
+                thread = threading.Thread(
+                    target=run_download_merge_workflow,
+                    kwargs={"auto_promote": False, "download_only": True},
+                    daemon=True,
+                )
+            elif mode == "download_merge":
+                thread = threading.Thread(
+                    target=run_download_merge_workflow,
+                    kwargs={"auto_promote": bool(cfg.get("auto_update_auto_promote")), "download_only": False},
+                    daemon=True,
+                )
+            else:
+                steps = cfg.get("auto_update_steps") or list(BUILD_STEPS)
+                thread = threading.Thread(
+                    target=run_build_workflow,
+                    kwargs={"steps": steps, "auto_promote": bool(cfg.get("auto_update_auto_promote"))},
+                    daemon=True,
+                )
+            ACTIVE_WORKFLOW["thread"] = thread
+            thread.start()
         except Exception as exc:  # noqa: BLE001
             print(f"Auto-update scheduler error: {exc}", flush=True)
         finally:
@@ -2542,6 +3004,24 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(exc)}, 409)
                 return
             self._send_json({"status": "started", "build": build})
+            return
+
+        if self.path == "/api/library/download-merge":
+            try:
+                build = start_download_merge_workflow(payload)
+            except RuntimeError as exc:
+                self._send_json({"error": str(exc)}, 409)
+                return
+            self._send_json({"status": "started", "build": build})
+            return
+
+        if self.path == "/api/library/check-updates":
+            try:
+                records = start_check_updates()
+            except RuntimeError as exc:
+                self._send_json({"error": str(exc)}, 409)
+                return
+            self._send_json({"status": "checked", "countries": records})
             return
 
         if self.path == "/api/library/build-step":

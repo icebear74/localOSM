@@ -304,23 +304,38 @@ spec:
               if not countries:
                   raise SystemExit('No countries requested')
 
+              # Countries whose cached extract must be re-downloaded even if a
+              # local copy already exists (set by the status dashboard's
+              # "Download & Merge"/"Nur Download" actions after comparing the
+              # remote Last-Modified header against the last download).
+              force_slugs = set(request.get('force_slugs') or [])
+              # Whether the merged planet.osm.pbf should be (re)built at all;
+              # "Nur Download" auto-update/manual runs set this to false so
+              # only the per-country cache is refreshed.
+              merge_requested = bool(request.get('merge_requested', True))
+
               library_dir = data_dir / 'library'
               import_dir = data_dir / 'import'
               library_dir.mkdir(parents=True, exist_ok=True)
               import_dir.mkdir(parents=True, exist_ok=True)
 
               paths = []
+              any_downloaded = False
+              downloaded_slugs = set()
               for country in countries:
                   slug = country['slug']
                   url = country['url']
                   dest = library_dir / f'{slug}.osm.pbf'
                   temp = library_dir / f'{slug}.osm.pbf.part'
-                  if not dest.exists() or dest.stat().st_size <= 0:
+                  needs_download = not dest.exists() or dest.stat().st_size <= 0 or slug in force_slugs
+                  if needs_download:
                       print(f'Downloading {slug} from {url} ...')
                       req = urllib.request.Request(url, headers={'User-Agent': 'localosm-import-orchestrator/1.0'})
                       with urllib.request.urlopen(req, timeout=300) as response, temp.open('wb') as handle:
                           shutil.copyfileobj(response, handle)
                       os.replace(temp, dest)
+                      any_downloaded = True
+                      downloaded_slugs.add(slug)
                       print(f'Downloaded {slug}.')
                   else:
                       print(f'Using cached extract for {slug}.')
@@ -328,47 +343,57 @@ spec:
 
               merged = import_dir / 'planet.osm.pbf'
               temp_merged = import_dir / 'planet.osm.pbf.tmp'
-              if len(paths) == 1:
-                  print('Only one extract selected; copying it directly.')
-                  shutil.copyfile(paths[0], temp_merged)
+              merge_performed = False
+              if not merge_requested:
+                  print('Merge not requested; skipping merge step (download-only run).')
+              elif not any_downloaded and merged.exists() and merged.stat().st_size > 0:
+                  # Requirement: only (re)merge when at least one extract was
+                  # actually refreshed; otherwise reuse the existing merged
+                  # file untouched to avoid needless work.
+                  print('No country extract changed since the last merge; reusing existing planet.osm.pbf.')
               else:
-                  print(f'Merging {len(paths)} extracts ...')
+                  if len(paths) == 1:
+                      print('Only one extract selected; copying it directly.')
+                      shutil.copyfile(paths[0], temp_merged)
+                  else:
+                      print(f'Merging {len(paths)} extracts ...')
+                      try:
+                          subprocess.run(['osmium', 'merge', '--overwrite', '-o', str(temp_merged), '-f', 'pbf', *paths], check=True)
+                      except subprocess.CalledProcessError as exc:
+                          joined = ', '.join(country['slug'] for country in countries)
+                          raise RuntimeError(f'Could not merge selected countries: {joined}') from exc
+                      # Country extracts are downloaded independently and can be
+                      # generated/cached at different times, so shared border
+                      # nodes/ways can end up with different edit versions in each
+                      # file. "osmium merge" (the correct tool for this, as
+                      # opposed to "osmium cat") keeps every distinct version it
+                      # finds instead of dropping one, so the merged file can
+                      # still contain the same node/way/relation ID more than
+                      # once. osm2pgsql (used by the Nominatim import) is not
+                      # history-aware and aborts with "Input data is not ordered:
+                      # ... appears more than once" in that case. Collapsing the
+                      # merged file with "osmium time-filter" (no explicit
+                      # timestamp = current point in time) keeps only the latest
+                      # version of each object, guaranteeing a clean,
+                      # duplicate-free extract regardless of how stale the
+                      # individual cached/downloaded files were relative to each
+                      # other.
+                      dedup_output_path = import_dir / 'planet.osm.pbf.dedup'
+                      print('Deduplicating merged extract ...')
+                      try:
+                          subprocess.run(['osmium', 'time-filter', '--overwrite', '-o', str(dedup_output_path), '-f', 'pbf', '-F', 'pbf', str(temp_merged)], check=True)
+                      except subprocess.CalledProcessError as exc:
+                          joined = ', '.join(country['slug'] for country in countries)
+                          raise RuntimeError(f'Could not deduplicate merged extract for: {joined}') from exc
+                      os.replace(dedup_output_path, temp_merged)
+                  print('Validating merged extract ...')
                   try:
-                      subprocess.run(['osmium', 'merge', '--overwrite', '-o', str(temp_merged), '-f', 'pbf', *paths], check=True)
+                      subprocess.run(['osmium', 'fileinfo', '-F', 'pbf', str(temp_merged)], check=True)
                   except subprocess.CalledProcessError as exc:
-                      joined = ', '.join(country['slug'] for country in countries)
-                      raise RuntimeError(f'Could not merge selected countries: {joined}') from exc
-                  # Country extracts are downloaded independently and can be
-                  # generated/cached at different times, so shared border
-                  # nodes/ways can end up with different edit versions in each
-                  # file. "osmium merge" (the correct tool for this, as
-                  # opposed to "osmium cat") keeps every distinct version it
-                  # finds instead of dropping one, so the merged file can
-                  # still contain the same node/way/relation ID more than
-                  # once. osm2pgsql (used by the Nominatim import) is not
-                  # history-aware and aborts with "Input data is not ordered:
-                  # ... appears more than once" in that case. Collapsing the
-                  # merged file with "osmium time-filter" (no explicit
-                  # timestamp = current point in time) keeps only the latest
-                  # version of each object, guaranteeing a clean,
-                  # duplicate-free extract regardless of how stale the
-                  # individual cached/downloaded files were relative to each
-                  # other.
-                  dedup_output_path = import_dir / 'planet.osm.pbf.dedup'
-                  print('Deduplicating merged extract ...')
-                  try:
-                      subprocess.run(['osmium', 'time-filter', '--overwrite', '-o', str(dedup_output_path), '-f', 'pbf', '-F', 'pbf', str(temp_merged)], check=True)
-                  except subprocess.CalledProcessError as exc:
-                      joined = ', '.join(country['slug'] for country in countries)
-                      raise RuntimeError(f'Could not deduplicate merged extract for: {joined}') from exc
-                  os.replace(dedup_output_path, temp_merged)
-              print('Validating merged extract ...')
-              try:
-                  subprocess.run(['osmium', 'fileinfo', '-F', 'pbf', str(temp_merged)], check=True)
-              except subprocess.CalledProcessError as exc:
-                  raise RuntimeError(f'Invalid merged PBF: {temp_merged}') from exc
-              os.replace(temp_merged, merged)
-              print('Merged extract ready.')
+                      raise RuntimeError(f'Invalid merged PBF: {temp_merged}') from exc
+                  os.replace(temp_merged, merged)
+                  merge_performed = True
+                  print('Merged extract ready.')
 
               countries_path = data_dir / 'status' / 'countries.json'
               try:
@@ -388,17 +413,22 @@ spec:
                           record['pbf_path'] = str(dest)
                           record['pbf_size_mb'] = round(dest.stat().st_size / (1024 * 1024), 1) if dest.exists() else None
                           record['last_error'] = ''
+                          if slug in downloaded_slugs:
+                              record['downloaded_at'] = request.get('requested_at', '')
+                              record['update_available'] = False
                           changed = True
-                  if changed:
-                      with countries_path.open('w', encoding='utf-8') as handle:
-                          json.dump(records, handle, indent=2, sort_keys=True)
+              if isinstance(records, list) and changed:
+                  with countries_path.open('w', encoding='utf-8') as handle:
+                      json.dump(records, handle, indent=2, sort_keys=True)
 
-              meta = import_dir / 'planet.osm.pbf.meta'
-              with meta.open('w', encoding='utf-8') as handle:
-                  handle.write(f"requested_at={request.get('requested_at', '')}\\n")
-                  handle.write(f"countries={','.join(country['slug'] for country in countries)}\\n")
-                  handle.write(f"count={len(countries)}\\n")
+              if merge_performed:
+                  meta = import_dir / 'planet.osm.pbf.meta'
+                  with meta.open('w', encoding='utf-8') as handle:
+                      handle.write(f"requested_at={request.get('requested_at', '')}\\n")
+                      handle.write(f"countries={','.join(country['slug'] for country in countries)}\\n")
+                      handle.write(f"count={len(countries)}\\n")
               PY
+
           volumeMounts:
             - name: osm-data
               mountPath: /data
@@ -451,7 +481,14 @@ import sys
 path = sys.argv[1]
 with open(path, 'r', encoding='utf-8') as handle:
     request = json.load(handle)
-steps = request.get('steps') or ['tileserver', 'nominatim', 'valhalla']
+# Missing "steps" key means "run all three" (back-compat with older/manual
+# requests); an explicitly empty list means "run no build steps at all"
+# (used by the dedicated Download & Merge / download-only workflows) and
+# must NOT fall back to the default here.
+if 'steps' in request:
+    steps = request.get('steps') or []
+else:
+    steps = ['tileserver', 'nominatim', 'valhalla']
 print(' '.join(steps))
 PY
 }
