@@ -2481,16 +2481,7 @@ data:
                 self._send_json({"status": "started", "build": build})
                 return
     
-            if self.path == "/api/library/abort":
-                try:
-                    abort_import_workflow()
-                except RuntimeError as exc:
-                    self._send_json({"error": str(exc)}, 409)
-                    return
-                self._send_json({"status": "aborted"})
-                return
-    
-            if self.path == "/api/import/abort":
+            if self.path in {"/api/library/abort", "/api/import/abort"}:
                 try:
                     abort_import_workflow()
                 except RuntimeError as exc:

@@ -31,7 +31,7 @@ spec:
                 [ -f "$DB" ] || MISSING="$MISSING $DB"
                 [ -f "$IMPORT_FINISHED" ] || MISSING="$MISSING $IMPORT_FINISHED"
                 if [ "$MISSING" != "$LAST_MISSING" ]; then
-                  echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for imported Nominatim database markers at$MISSING ..."
+                  echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for imported Nominatim database markers at $MISSING ..."
                   LAST_MISSING="$MISSING"
                 fi
                 sleep 30
