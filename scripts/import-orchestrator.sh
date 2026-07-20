@@ -12,6 +12,7 @@ STATE_FILE="${STATE_DIR}/import-orchestrator.json"
 HASH_FILE="${STATE_DIR}/import-orchestrator.hash"
 REQUEST_FILE="${STATE_DIR}/import-request.json"
 ABORT_FILE="${STATE_DIR}/import-abort.flag"
+COMPLETED_STEPS_FILE="${STATE_DIR}/import-completed-steps"
 LAST_CONFIG_CHECK=0
 CONFIG_CHECK_INTERVAL=60
 MV_SUPPORTS_T=false
@@ -45,6 +46,44 @@ abort_requested() {
 
 clear_abort_flag() {
   rm -f "${ABORT_FILE}" 2>/dev/null || true
+}
+
+# Tracks which import steps (tileserver/nominatim/valhalla) have already been
+# completed for the *current* request, so that a container/pod restart in the
+# middle of a multi-step import (e.g. after Valhalla finished but before the
+# loop reached its end) resumes instead of redoing already-promoted steps.
+request_fingerprint() {
+  sha256sum "${REQUEST_FILE}" 2>/dev/null | awk '{print $1}'
+}
+
+# Ensures the completed-steps tracker matches the request currently being
+# processed. If the request file changed (new/edited request) since the
+# tracker was last written, the tracker is reset so no stale step is skipped.
+sync_completed_steps() {
+  local current_fp stored_fp
+  current_fp="$(request_fingerprint)"
+  stored_fp=""
+  if [ -f "${COMPLETED_STEPS_FILE}" ]; then
+    stored_fp="$(head -n1 "${COMPLETED_STEPS_FILE}" 2>/dev/null || true)"
+  fi
+  if [ "${stored_fp}" != "${current_fp}" ]; then
+    printf '%s\n' "${current_fp}" > "${COMPLETED_STEPS_FILE}"
+  fi
+}
+
+step_already_done() {
+  local step="$1"
+  [ -f "${COMPLETED_STEPS_FILE}" ] || return 1
+  tail -n +2 "${COMPLETED_STEPS_FILE}" | grep -qxF "${step}"
+}
+
+mark_step_done() {
+  local step="$1"
+  echo "${step}" >> "${COMPLETED_STEPS_FILE}"
+}
+
+clear_completed_steps() {
+  rm -f "${COMPLETED_STEPS_FILE}" 2>/dev/null || true
 }
 
 write_state() {
@@ -549,6 +588,10 @@ main() {
 
     log "Detected import request at ${REQUEST_FILE}."
     write_state true "queued" 5 "Import request received." "Running TileServer, Nominatim and Valhalla sequentially."
+    # Reconcile the completed-steps tracker with this request so that a
+    # container/pod restart in the middle of the sequential pipeline resumes
+    # at the next pending step instead of redoing already-promoted ones.
+    sync_completed_steps
 
     if request_has_countries; then
       local prc=0
@@ -562,48 +605,67 @@ main() {
         cleanup_temp_dir "${TEMP_DIR}/import"
         rm -f "${REQUEST_FILE}"
         clear_abort_flag
+        clear_completed_steps
         continue
       fi
     fi
 
     local src=0
-    run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${TEMP_DIR}/tileserver/staging" "tileserver-gl" || src=$?
-    if [ "${src}" -ne 0 ]; then
-      if [ "${src}" -eq 2 ]; then
-        log "Import aborted by user during TileServer import; discarding import request."
-      else
-        log "TileServer import failed; discarding import request to avoid retrying the same failing request in a loop."
+    if step_already_done "tileserver"; then
+      log "TileServer already promoted for this request (resumed after restart); skipping re-import."
+    else
+      run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${TEMP_DIR}/tileserver/staging" "tileserver-gl" || src=$?
+      if [ "${src}" -ne 0 ]; then
+        if [ "${src}" -eq 2 ]; then
+          log "Import aborted by user during TileServer import; discarding import request."
+        else
+          log "TileServer import failed; discarding import request to avoid retrying the same failing request in a loop."
+        fi
+        cleanup_temp_dir "${TEMP_DIR}/import"
+        rm -f "${REQUEST_FILE}"
+        clear_abort_flag
+        clear_completed_steps
+        continue
       fi
-      cleanup_temp_dir "${TEMP_DIR}/import"
-      rm -f "${REQUEST_FILE}"
-      clear_abort_flag
-      continue
+      mark_step_done "tileserver"
     fi
     local nrc=0
-    run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${TEMP_DIR}/nominatim/staging" "nominatim" || nrc=$?
-    if [ "${nrc}" -ne 0 ]; then
-      if [ "${nrc}" -eq 2 ]; then
-        log "Import aborted by user during Nominatim import; discarding import request."
-      else
-        log "Nominatim import failed; discarding import request to avoid retrying the same failing request in a loop."
+    if step_already_done "nominatim"; then
+      log "Nominatim already promoted for this request (resumed after restart); skipping re-import."
+    else
+      run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${TEMP_DIR}/nominatim/staging" "nominatim" || nrc=$?
+      if [ "${nrc}" -ne 0 ]; then
+        if [ "${nrc}" -eq 2 ]; then
+          log "Import aborted by user during Nominatim import; discarding import request."
+        else
+          log "Nominatim import failed; discarding import request to avoid retrying the same failing request in a loop."
+        fi
+        cleanup_temp_dir "${TEMP_DIR}/import"
+        rm -f "${REQUEST_FILE}"
+        clear_abort_flag
+        clear_completed_steps
+        continue
       fi
-      cleanup_temp_dir "${TEMP_DIR}/import"
-      rm -f "${REQUEST_FILE}"
-      clear_abort_flag
-      continue
+      mark_step_done "nominatim"
     fi
     local vrc=0
-    run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${TEMP_DIR}/valhalla/staging" "valhalla" || vrc=$?
-    if [ "${vrc}" -ne 0 ]; then
-      if [ "${vrc}" -eq 2 ]; then
-        log "Import aborted by user during Valhalla import; discarding import request."
-      else
-        log "Valhalla import failed; discarding import request to avoid retrying the same failing request in a loop."
+    if step_already_done "valhalla"; then
+      log "Valhalla already promoted for this request (resumed after restart); skipping re-import."
+    else
+      run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${TEMP_DIR}/valhalla/staging" "valhalla" || vrc=$?
+      if [ "${vrc}" -ne 0 ]; then
+        if [ "${vrc}" -eq 2 ]; then
+          log "Import aborted by user during Valhalla import; discarding import request."
+        else
+          log "Valhalla import failed; discarding import request to avoid retrying the same failing request in a loop."
+        fi
+        cleanup_temp_dir "${TEMP_DIR}/import"
+        rm -f "${REQUEST_FILE}"
+        clear_abort_flag
+        clear_completed_steps
+        continue
       fi
-      cleanup_temp_dir "${TEMP_DIR}/import"
-      rm -f "${REQUEST_FILE}"
-      clear_abort_flag
-      continue
+      mark_step_done "valhalla"
     fi
 
     # The shared merged-extract scratch data is only needed while the three
@@ -612,6 +674,7 @@ main() {
     cleanup_temp_dir "${TEMP_DIR}/import"
     rm -f "${REQUEST_FILE}"
     clear_abort_flag
+    clear_completed_steps
     write_state false "done" 100 "Import erfolgreich abgeschlossen." "Alle Daten wurden sequentiell verarbeitet und aktiviert."
     log "Import request completed successfully."
   done
