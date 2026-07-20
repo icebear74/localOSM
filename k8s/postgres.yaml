@@ -24,11 +24,11 @@ spec:
               memory: "12Gi"   # Garantiert der DB diesen Speicher
               cpu: "4"         # Garantiert 4 CPU-Kerne
             limits:
-              memory: "24Gi"   # Maximaler Puffer für Spitzen (z.B. Index-Erstellung)
+              memory: "30Gi"   # Maximaler Puffer für Spitzen (z.B. Index-Erstellung)
               cpu: "18"
           args:
             - "-c"
-            - "shared_buffers=8GB"               # ~25% deines RAMs
+            - "shared_buffers=12GB"               # ~25% deines RAMs
             - "-c"
             - "maintenance_work_mem=8GB"         # Wichtig für Index-Erstellung beim Import
             - "-c"
@@ -49,6 +49,12 @@ spec:
             - "wal_level=minimal"
             - "-c"
             - "max_wal_senders=0"
+            - "-c"
+            - "max_worker_processes=20"          # Gesamte Worker-Obergrenze (ca. 70-80% deiner Threads)
+            - "-c"
+            - "max_parallel_workers=14"          # Maximale Anzahl paralleler Worker gesamt
+            - "-c"
+            - "max_parallel_workers_per_gather=6" # Worker pro Connection/Query (optimal für große Index-Scans)
           env:
             - name: POSTGRES_DB
               value: osm
