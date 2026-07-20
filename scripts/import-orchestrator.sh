@@ -439,6 +439,46 @@ sys.exit(0 if request.get('countries') else 1)
 PY
 }
 
+# Space-separated list of steps (subset of "tileserver nominatim valhalla")
+# that should be executed for the current request. Missing/empty "steps"
+# means "run all three", which keeps older/manual requests (e.g. written by
+# scripts/run-import.sh) working unchanged.
+request_steps() {
+  python3 - "${REQUEST_FILE}" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, 'r', encoding='utf-8') as handle:
+    request = json.load(handle)
+steps = request.get('steps') or ['tileserver', 'nominatim', 'valhalla']
+print(' '.join(steps))
+PY
+}
+
+# Whether a successfully imported step should be swapped into production
+# automatically. Missing "auto_promote" defaults to true for backward
+# compatibility with older/manual requests.
+request_auto_promote() {
+  python3 - "${REQUEST_FILE}" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, 'r', encoding='utf-8') as handle:
+    request = json.load(handle)
+print('true' if request.get('auto_promote', True) else 'false')
+PY
+}
+
+step_requested() {
+  local step="$1"
+  case " ${REQUESTED_STEPS} " in
+    *" ${step} "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 swap_stage() {
   local service="$1"
   local active_dir="$2"
@@ -538,6 +578,7 @@ swap_stage() {
 
 run_step() {
   local service="$1" job_name="$2" manifest="$3" active_dir="$4" staging_dir="$5" deployment="$6"
+  local auto_promote="${7:-true}"
   check_config_change
   # Start from a clean temp-dir scratch area in case a previous run crashed
   # before it could clean up after itself.
@@ -556,6 +597,11 @@ run_step() {
     write_state false "failed" 0 "${service} import failed." "See job logs for details."
     cleanup_temp_dir "$(dirname "${staging_dir}")"
     return 1
+  fi
+  if [ "${auto_promote}" != "true" ]; then
+    log "${service} import staged; auto-promote disabled, leaving deployment/${deployment} untouched."
+    write_state false "${service}" 100 "${service} import staged." "Staged data is ready; promote it manually when you are ready."
+    return 0
   fi
   write_state true "${service}" 90 "${service} import completed." "Promoting staged data."
   local prc=0
@@ -592,6 +638,9 @@ main() {
     # container/pod restart in the middle of the sequential pipeline resumes
     # at the next pending step instead of redoing already-promoted ones.
     sync_completed_steps
+    REQUESTED_STEPS="$(request_steps)"
+    AUTO_PROMOTE="$(request_auto_promote)"
+    log "Requested steps: ${REQUESTED_STEPS} (auto_promote=${AUTO_PROMOTE})."
 
     if request_has_countries; then
       local prc=0
@@ -611,10 +660,12 @@ main() {
     fi
 
     local src=0
-    if step_already_done "tileserver"; then
+    if ! step_requested "tileserver"; then
+      log "TileServer step not requested for this import request; skipping."
+    elif step_already_done "tileserver"; then
       log "TileServer already promoted for this request (resumed after restart); skipping re-import."
     else
-      run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${TEMP_DIR}/tileserver/staging" "tileserver-gl" || src=$?
+      run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${TEMP_DIR}/tileserver/staging" "tileserver-gl" "${AUTO_PROMOTE}" || src=$?
       if [ "${src}" -ne 0 ]; then
         if [ "${src}" -eq 2 ]; then
           log "Import aborted by user during TileServer import; discarding import request."
@@ -630,10 +681,12 @@ main() {
       mark_step_done "tileserver"
     fi
     local nrc=0
-    if step_already_done "nominatim"; then
+    if ! step_requested "nominatim"; then
+      log "Nominatim step not requested for this import request; skipping."
+    elif step_already_done "nominatim"; then
       log "Nominatim already promoted for this request (resumed after restart); skipping re-import."
     else
-      run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${TEMP_DIR}/nominatim/staging" "nominatim" || nrc=$?
+      run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${TEMP_DIR}/nominatim/staging" "nominatim" "${AUTO_PROMOTE}" || nrc=$?
       if [ "${nrc}" -ne 0 ]; then
         if [ "${nrc}" -eq 2 ]; then
           log "Import aborted by user during Nominatim import; discarding import request."
@@ -649,10 +702,12 @@ main() {
       mark_step_done "nominatim"
     fi
     local vrc=0
-    if step_already_done "valhalla"; then
+    if ! step_requested "valhalla"; then
+      log "Valhalla step not requested for this import request; skipping."
+    elif step_already_done "valhalla"; then
       log "Valhalla already promoted for this request (resumed after restart); skipping re-import."
     else
-      run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${TEMP_DIR}/valhalla/staging" "valhalla" || vrc=$?
+      run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${TEMP_DIR}/valhalla/staging" "valhalla" "${AUTO_PROMOTE}" || vrc=$?
       if [ "${vrc}" -ne 0 ]; then
         if [ "${vrc}" -eq 2 ]; then
           log "Import aborted by user during Valhalla import; discarding import request."

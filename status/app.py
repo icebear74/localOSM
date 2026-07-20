@@ -73,6 +73,9 @@ PROMOTE_SERVICES = {
     },
 }
 
+# Fixed pipeline order the import-orchestrator always runs these steps in.
+BUILD_STEPS = ("tileserver", "nominatim", "valhalla")
+
 CONFIG_DEFAULTS = {
     "node_url": "",
     "auto_update_enabled": False,
@@ -855,8 +858,18 @@ INDEX_HTML = """<!doctype html>
           <button id="add-country-btn" onclick="startLibraryQueue()">Land zur Queue hinzufügen</button>
           <button id="build-btn" class="subtle" onclick="startBuild()">Build starten</button>
         </div>
+        <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+          <input type="checkbox" id="auto-promote-enabled" style="width:auto" checked>
+          Nach dem Build automatisch promoten (aktiv schalten)
+        </label>
         <div id="queue-count" class="hint">Keine Länder in der Queue.</div>
-        <div class="hint">Wählt ein Land aus. Der Hinzufügen-Button prüft nur die Verfügbarkeit; der Build-Button schreibt den Auftrag an den Import-Orchestrator.</div>
+        <div class="hint">Wählt ein Land aus. Der Hinzufügen-Button prüft nur die Verfügbarkeit; der Build-Button schreibt den Auftrag an den Import-Orchestrator und führt (wahlweise mit Promotion) TileServer, Nominatim und Valhalla nacheinander aus.</div>
+        <div class="hint" style="margin-top:0.4rem">Einzelne Build-Schritte auslösen (ohne automatische Promotion):</div>
+        <div class="row2" style="grid-template-columns:repeat(3, 1fr)">
+          <button id="build-step-tileserver-btn" class="subtle" onclick="startStepBuild('tileserver')">TileServer bauen</button>
+          <button id="build-step-nominatim-btn" class="subtle" onclick="startStepBuild('nominatim')">Nominatim bauen</button>
+          <button id="build-step-valhalla-btn" class="subtle" onclick="startStepBuild('valhalla')">Valhalla bauen</button>
+        </div>
       </div>
     </div>
 
@@ -1045,6 +1058,10 @@ INDEX_HTML = """<!doctype html>
       '</div>';
     document.getElementById('add-country-btn').disabled = running;
     document.getElementById('build-btn').disabled = running;
+    ['tileserver', 'nominatim', 'valhalla'].forEach(function(step) {
+      var stepBtn = document.getElementById('build-step-' + step + '-btn');
+      if (stepBtn) stepBtn.disabled = running;
+    });
     document.querySelectorAll('.remove-country-btn').forEach(function(btn) {
       btn.disabled = running;
     });
@@ -1161,11 +1178,32 @@ INDEX_HTML = """<!doctype html>
   async function startBuild() {
     var workflowBody = document.getElementById('workflow-body');
     workflowBody.innerHTML = 'Starte Build-Workflow ...';
+    var autoPromote = document.getElementById('auto-promote-enabled').checked;
     try {
       var resp = await fetch('/api/library/build', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: '{}'
+        body: JSON.stringify({auto_promote: autoPromote})
+      });
+      var data = await resp.json();
+      if (!resp.ok) {
+        workflowBody.innerHTML = '<span class="status-pill status-error">fehler</span><pre>' + esc(data.error || 'Unbekannter Fehler') + '</pre>';
+        return;
+      }
+      await refresh();
+    } catch (err) {
+      workflowBody.innerHTML = '<span class="status-pill status-error">fehler</span><pre>' + esc(err) + '</pre>';
+    }
+  }
+
+  async function startStepBuild(step) {
+    var workflowBody = document.getElementById('workflow-body');
+    workflowBody.innerHTML = 'Starte Build-Schritt (' + esc(step) + ') ...';
+    try {
+      var resp = await fetch('/api/library/build-step', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({step: step})
       });
       var data = await resp.json();
       if (!resp.ok) {
@@ -1386,6 +1424,9 @@ INDEX_HTML = """<!doctype html>
 
 
 def now_iso():
+    """Return an ISO 8601 timestamp in the container's local timezone
+    (with UTC offset), not forced to UTC, so logs/timestamps shown on the
+    dashboard match the configured local time."""
     return datetime.now().astimezone().replace(microsecond=0).isoformat()
 
 
@@ -1942,7 +1983,7 @@ def collect_status():
     }
 
 
-def write_import_request(records):
+def write_import_request(records, steps=None, auto_promote=True):
     payload = {
         "requested_at": now_iso(),
         "countries": [
@@ -1956,6 +1997,8 @@ def write_import_request(records):
             if record.get("slug") and record.get("url")
         ],
         "count": len([record for record in records if record.get("slug") and record.get("url")]),
+        "steps": list(steps) if steps else list(BUILD_STEPS),
+        "auto_promote": bool(auto_promote),
     }
     save_json(IMPORT_REQUEST_FILE, payload)
     return payload
@@ -2173,7 +2216,7 @@ def run_queue_workflow(country):
         finish_workflow_thread()
 
 
-def run_build_workflow(country=None):
+def run_build_workflow(country=None, steps=None, auto_promote=True):
     country = country or {"name": "Library", "slug": "library", "url": ""}
     try:
         ensure_dirs()
@@ -2184,13 +2227,18 @@ def run_build_workflow(country=None):
         ]
         if not records:
             raise RuntimeError("No queued or ready countries available for a build.")
-        request = write_import_request(records)
+        request = write_import_request(records, steps=steps, auto_promote=auto_promote)
+        step_label = ", ".join(request["steps"])
+        promote_label = "mit automatischer Promotion" if auto_promote else "ohne automatische Promotion (manuell promoten)"
         write_workflow_state(
             running=False,
             phase="queued",
             progress=50,
             message="Build request handed to the import orchestrator.",
-            detail=f"{request['count']} country/countries queued for download and processing.",
+            detail=(
+                f"{request['count']} country/countries queued for download and processing. "
+                f"Steps: {step_label} ({promote_label})."
+            ),
             country=country["name"],
             error="",
         )
@@ -2232,16 +2280,40 @@ def start_queue_workflow(payload):
     return country
 
 
-def start_build_workflow():
+def start_build_workflow(auto_promote=True):
     if not WORKFLOW_LOCK.acquire(blocking=False):
         raise RuntimeError("Another country library workflow is already running.")
-    thread = threading.Thread(target=run_build_workflow, daemon=True)
+    thread = threading.Thread(
+        target=run_build_workflow, kwargs={"auto_promote": auto_promote}, daemon=True
+    )
     ACTIVE_WORKFLOW["thread"] = thread
     thread.start()
     return {
         "count": len(
             [record for record in list_library_records() if record.get("status") in {"queued", "ready"}]
         )
+    }
+
+
+def start_step_build_workflow(step):
+    if step not in BUILD_STEPS:
+        raise ValueError(f"Unknown build step '{step}'.")
+    if not WORKFLOW_LOCK.acquire(blocking=False):
+        raise RuntimeError("Another country library workflow is already running.")
+    country = {"name": f"Build: {step}", "slug": f"build-{step}", "url": ""}
+    thread = threading.Thread(
+        target=run_build_workflow,
+        args=(country,),
+        kwargs={"steps": [step], "auto_promote": False},
+        daemon=True,
+    )
+    ACTIVE_WORKFLOW["thread"] = thread
+    thread.start()
+    return {
+        "step": step,
+        "count": len(
+            [record for record in list_library_records() if record.get("status") in {"queued", "ready"}]
+        ),
     }
 
 
@@ -2406,7 +2478,21 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path == "/api/library/build":
             try:
-                build = start_build_workflow()
+                auto_promote = bool(payload.get("auto_promote", True))
+                build = start_build_workflow(auto_promote=auto_promote)
+            except RuntimeError as exc:
+                self._send_json({"error": str(exc)}, 409)
+                return
+            self._send_json({"status": "started", "build": build})
+            return
+
+        if self.path == "/api/library/build-step":
+            step = (payload.get("step") or "").strip().lower()
+            try:
+                build = start_step_build_workflow(step)
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 400)
+                return
             except RuntimeError as exc:
                 self._send_json({"error": str(exc)}, 409)
                 return
