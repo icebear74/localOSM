@@ -68,6 +68,7 @@ data:
   app.py: |
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     import concurrent.futures
+    import errno
     import json
     import os
     import re
@@ -1888,6 +1889,45 @@ data:
         raise RuntimeError(f"Timed out waiting for deployment/{name} to become available.")
     
     
+    def _move_directory_replacing(src, dst):
+        """Move directory src to dst, tolerating cross-device mounts.
+    
+        os.replace() (rename(2)) requires src and dst to live on the same
+        filesystem/device. staging_dir (under OSM_TEMP_DIR) and active_dir (under
+        OSM_DATA_DIR) are mounted as separate hostPath volumes in Kubernetes, so
+        even though they may point at paths on the same physical disk, the
+        container sees them as different devices and rename() fails with
+        "[Errno 18] Invalid cross-device link". Fall back to a copy+delete move
+        in that case.
+        """
+        try:
+            os.replace(src, dst)
+        except OSError as exc:
+            if exc.errno != errno.EXDEV:
+                raise
+            shutil.copytree(src, dst)
+            shutil.rmtree(src)
+    
+    
+    def _restore_missing_entries(backup_dir, active_dir):
+        """Copy back entries from backup_dir that are missing in active_dir.
+    
+        Used after promoting tileserver staging data (which only contains the
+        freshly built map.mbtiles) so that files/directories that are not part
+        of the import output - e.g. a customized style.json saved via the style
+        editor, or the fonts directory - are not lost.
+        """
+        for name in os.listdir(backup_dir):
+            src = os.path.join(backup_dir, name)
+            dst = os.path.join(active_dir, name)
+            if os.path.exists(dst):
+                continue
+            if os.path.isdir(src):
+                shutil.copytree(src, dst)
+            else:
+                shutil.copy2(src, dst)
+    
+    
     def promote_status():
         services = {}
         for name, config in PROMOTE_SERVICES.items():
@@ -1926,17 +1966,27 @@ data:
     
         if os.path.isdir(backup_dir):
             shutil.rmtree(backup_dir)
-        if os.path.isdir(active_dir):
-            os.replace(active_dir, backup_dir)
+        had_active = os.path.isdir(active_dir)
+        if had_active:
+            _move_directory_replacing(active_dir, backup_dir)
     
         try:
-            os.replace(staging_dir, active_dir)
+            _move_directory_replacing(staging_dir, active_dir)
         except OSError as exc:
             if os.path.isdir(backup_dir):
                 if os.path.isdir(active_dir):
                     shutil.rmtree(active_dir)
-                os.replace(backup_dir, active_dir)
+                _move_directory_replacing(backup_dir, active_dir)
             raise RuntimeError(f"Could not promote staged {service} data: {exc}") from exc
+    
+        if service == "tileserver" and had_active and os.path.isdir(backup_dir):
+            try:
+                _restore_missing_entries(backup_dir, active_dir)
+            except OSError as exc:
+                raise RuntimeError(
+                    f"Promoted staged tileserver data but failed to restore prior "
+                    f"active files (fonts, style.json, ...): {exc}"
+                ) from exc
     
         if os.path.isdir(backup_dir):
             shutil.rmtree(backup_dir)
