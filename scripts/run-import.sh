@@ -66,7 +66,7 @@ python3 - "$URL" "$DEST" <<'PY'
 import datetime, sys
 url, dest = sys.argv[1], sys.argv[2]
 with open(dest + '.meta', 'w', encoding='utf-8') as fh:
-    timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    timestamp = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
     fh.write(f"downloaded_at={timestamp}\n")
     fh.write(f"source={url}\n")
     fh.write(f"path={dest}\n")
@@ -77,7 +77,7 @@ echo "Downloaded $(du -sh "$DEST" | cut -f1) → $DEST"
 REQUEST_FILE="${BASE_DIR}/status/import-request.json"
 cat > "$REQUEST_FILE" <<EOF
 {
-  "requested_at": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
+  "requested_at": "$(date '+%Y-%m-%dT%H:%M:%S%z')",
   "source": "${URL}",
   "pbf": "${DEST}"
 }

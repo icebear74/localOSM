@@ -36,7 +36,7 @@ cleanup_temp_dir() {
 log() {
   local message="$1"
   local timestamp
-  timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  timestamp="$(date '+%Y-%m-%dT%H:%M:%S%z')"
   printf '%s %s\n' "$timestamp" "$message" | tee -a "${LOG_FILE}"
 }
 
@@ -91,7 +91,7 @@ write_state() {
   python3 - "$STATE_FILE" "$running" "$phase" "$progress" "$message" "$detail" <<'PY'
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 
 path, running, phase, progress, message, detail = sys.argv[1:7]
 payload = {
@@ -100,7 +100,7 @@ payload = {
     'progress': int(progress),
     'message': message,
     'detail': detail,
-    'updated_at': datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z'),
+    'updated_at': datetime.now().astimezone().replace(microsecond=0).isoformat(),
 }
 with open(path, 'w', encoding='utf-8') as handle:
     json.dump(payload, handle, indent=2, sort_keys=True)

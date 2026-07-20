@@ -902,7 +902,7 @@ data:
               Auto-Update aktivieren
             </label>
             <div>
-              <label>Uhrzeit (UTC)</label>
+              <label>Uhrzeit (lokale Zeit)</label>
               <input type="time" id="auto-update-time" value="03:00">
             </div>
             <button onclick="saveAutoUpdate()">Speichern</button>
@@ -1336,7 +1336,7 @@ data:
         var el = document.getElementById('auto-update-status');
         if (!el) return;
         if (cfg.auto_update_enabled) {
-          el.textContent = 'Nächstes Update: täglich um ' + (cfg.auto_update_time || '03:00') + ' UTC';
+          el.textContent = 'Nächstes Update: täglich um ' + (cfg.auto_update_time || '03:00') + ' (lokale Zeit)';
         } else {
           el.textContent = 'Auto-Update deaktiviert.';
         }
@@ -1454,7 +1454,7 @@ data:
     
     
     def now_iso():
-        return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        return datetime.now().astimezone().replace(microsecond=0).isoformat()
     
     
     def clone_default(value):
@@ -1795,7 +1795,7 @@ data:
     
     def _format_mtime(path):
         try:
-            return datetime.fromtimestamp(os.path.getmtime(path), timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            return datetime.fromtimestamp(os.path.getmtime(path)).astimezone().strftime("%Y-%m-%d %H:%M %Z")
         except OSError:
             return ""
     
@@ -1990,7 +1990,7 @@ data:
                 full_path = os.path.join(IMPORT_DIR, entry)
                 try:
                     size_mb = round(os.path.getsize(full_path) / (1024 * 1024), 1)
-                    mtime = datetime.fromtimestamp(os.path.getmtime(full_path), timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+                    mtime = datetime.fromtimestamp(os.path.getmtime(full_path)).astimezone().strftime("%Y-%m-%d %H:%M %Z")
                 except OSError:
                     size_mb, mtime = 0, "?"
                 import_files.append({"name": entry, "size_mb": size_mb, "mtime": mtime})
@@ -2323,9 +2323,9 @@ data:
                 if not cfg.get("auto_update_enabled"):
                     continue
                 schedule_time = cfg.get("auto_update_time", "03:00")
-                now_utc = datetime.now(timezone.utc)
-                now_hm = now_utc.strftime("%H:%M")
-                today = now_utc.strftime("%Y-%m-%d")
+                now_local = datetime.now().astimezone()
+                now_hm = now_local.strftime("%H:%M")
+                today = now_local.strftime("%Y-%m-%d")
                 if now_hm == schedule_time and LAST_AUTO_RUN["date"] != today:
                     LAST_AUTO_RUN["date"] = today
                     records = list_library_records()
