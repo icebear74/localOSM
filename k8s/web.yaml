@@ -607,13 +607,23 @@ data:
                     # Validate as: "[" IPv6 "]" | hostname-label(.hostname-label)*
                     # each followed by an optional ":port". Labels can't start/end
                     # with "-" and consecutive/leading/trailing "." are rejected,
-                    # matching standard hostname syntax rules.
+                    # matching standard hostname syntax rules. This deliberately
+                    # doesn't fully validate IPv6 grouping/segment-count (accepting
+                    # e.g. "[::::]") or reject the syntactically-valid-looking
+                    # port "99999" via regex alone (checked numerically below
+                    # instead) -- this value is only ever placed into a JSON
+                    # string field for the browser's own same-origin tile fetch,
+                    # never parsed/executed server-side, so a merely malformed
+                    # (as opposed to injected) address/port cannot cause harm
+                    # beyond that one client's own tile requests failing.
                     ipv6_part = r"\[[0-9A-Fa-f:]+\]"
                     label_part = r"[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?"
                     hostname_part = rf"{label_part}(\.{label_part})*"
-                    port_part = r"(:\d{1,5})?"
+                    port_part = r"(:(?P<port>\d{1,5}))?"
                     host_re = rf"({ipv6_part}|{hostname_part}){port_part}"
-                    if not re.fullmatch(host_re, host):
+                    match = re.fullmatch(host_re, host)
+                    port = match.group("port") if match else None
+                    if not match or (port is not None and int(port) > 65535):
                         # Malformed/spoofed Host header: fall back to this
                         # HTTPServer's own bind address/port (set at startup,
                         # not client-controlled), so the URL still points back
