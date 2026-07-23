@@ -1,11 +1,17 @@
 # Tunables for the Nominatim import (k8s/nominatim-import-job.yaml) and the
 # running Nominatim deployment (k8s/nominatim.yaml), both of which read
 # NOMINATIM_PASSWORD/THREADS/NOMINATIM_OSM2PGSQL_CACHE from this ConfigMap.
-# To change the number of osm2pgsql worker processes used for the (slow)
-# initial import, edit import_threads (below) to match the CPU cores
-# available to the nominatim-import Job. To change the osm2pgsql cache size
-# (in MB) used during import, edit import_cache_mb to match the RAM
-# available to the Job (osm2pgsql --cache, recommended up to ~75% of RAM).
+# import_threads controls the number of parallel worker threads used by the
+# `nominatim index` step that follows the osm2pgsql load; edit it to match
+# the CPU cores available to the nominatim-import Job. NOTE: the initial
+# osm2pgsql "--create" load always runs with --number-processes 1 no matter
+# how high import_threads is set — Nominatim hard-codes this because
+# osm2pgsql's flex output only supports single-threaded loading, so this is
+# expected and cannot be tuned away. To change the osm2pgsql cache size (in
+# MB) used during import, edit import_cache_mb to match the RAM available to
+# the Job (osm2pgsql --cache, recommended up to ~75% of RAM);
+# k8s/nominatim-import-job.yaml patches the image's init.sh so this value is
+# actually forwarded to osm2pgsql via --osm2pgsql-cache.
 # Re-apply this file (kubectl apply -f k8s/nominatim-import-config.yaml)
 # before starting the next import.
 apiVersion: v1

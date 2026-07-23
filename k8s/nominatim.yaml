@@ -24,8 +24,16 @@ spec:
           args:
             - |
               DB=/nominatim-db/PG_VERSION
-              until [ -f "$DB" ]; do
-                echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for imported Nominatim database at $DB ..."
+              IMPORT_FINISHED=/nominatim-db/import-finished
+              LAST_MISSING=""
+              until [ -f "$DB" ] && [ -f "$IMPORT_FINISHED" ]; do
+                MISSING=""
+                [ -f "$DB" ] || MISSING="$DB"
+                [ -f "$IMPORT_FINISHED" ] || MISSING="${MISSING:+$MISSING, }$IMPORT_FINISHED"
+                if [ "$MISSING" != "$LAST_MISSING" ]; then
+                  echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for imported Nominatim database markers at $MISSING ..."
+                  LAST_MISSING="$MISSING"
+                fi
                 sleep 30
               done
               echo "Database ready — starting Nominatim."
@@ -70,14 +78,44 @@ spec:
             limits:
               memory: "8Gi"
               cpu: "8"
+          startupProbe:
+            httpGet:
+              path: /
+              port: 8080
+            # Nominatim may spend several minutes on cache warming before
+            # serving HTTP, so startup must allow a long grace period.
+            periodSeconds: 10
+            failureThreshold: 90
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+            timeoutSeconds: 5
           volumeMounts:
             - name: nominatim-data
               mountPath: /var/lib/postgresql/16/main
+            # Tunable Postgres settings for the running service (see
+            # k8s/nominatim-postgres-tuning-config.yaml); loaded from conf.d
+            # last, so these values win over any defaults.
+            - name: nominatim-postgres-tuning
+              mountPath: /etc/postgresql/16/main/conf.d/zz-tuning.conf
+              subPath: runtime-tuning.conf
+              readOnly: true
       volumes:
         - name: nominatim-data
           hostPath:
             path: /mnt/data/OSM/nominatim/active
             type: DirectoryOrCreate
+        - name: nominatim-postgres-tuning
+          configMap:
+            name: nominatim-postgres-tuning
+            items:
+              - key: runtime-tuning.conf
+                path: runtime-tuning.conf
 ---
 apiVersion: v1
 kind: Service

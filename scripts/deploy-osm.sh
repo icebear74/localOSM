@@ -5,7 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NAMESPACE="osm"
 BASE_DIR="/mnt/data/OSM"
 TEMP_BASE_DIR="${OSM_TEMP_DIR:-${BASE_DIR}/TempDir}"
-DEPLOYMENTS=(postgres tileserver-gl nominatim valhalla import-orchestrator status web)
+DEPLOYMENTS=(tileserver-gl nominatim valhalla import-orchestrator status web)
 PRESERVE_PATHS=("${BASE_DIR}/library" "${BASE_DIR}/status")
 CLEAN=false
 PRESERVE_DOWNLOADS=false
@@ -101,14 +101,30 @@ clean_data_directory() {
   fi
 }
 
-# The temp dir only ever holds scratch/staging data for an in-progress import, so
-# on a clean start its contents can always be discarded outright. Only the
+# The temp dir only ever holds scratch/staging data for an in-progress
+# import. On a clean start its contents can normally be discarded outright. Only the
 # contents are removed — the directory (mount point) itself, which the user
-# creates and mounts, is left untouched.
+# creates and mounts, is left untouched. When --preserve-downloads is set,
+# the shared merged extract at TEMP_BASE_DIR/import/planet.osm.pbf (+ its
+# .meta sidecar) is kept too, so a "clean" redeploy does not force every
+# subsequent Build to re-download and re-merge the country extracts (only
+# per-service staging dirs and stray intermediate merge artifacts are
+# cleared).
 clean_temp_directory() {
   echo ">>> Deleting contents of temporary scratch directory ${TEMP_BASE_DIR} …"
   if [ -d "${TEMP_BASE_DIR}" ]; then
-    ${SUDO} find "${TEMP_BASE_DIR:?}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    if [ "$PRESERVE_DOWNLOADS" = true ]; then
+      shopt -s nullglob dotglob
+      for entry in "${TEMP_BASE_DIR}"/*; do
+        if [ "$(basename "$entry")" = "import" ]; then
+          ${SUDO} find "${entry}" -mindepth 1 -maxdepth 1 ! -name 'planet.osm.pbf' ! -name 'planet.osm.pbf.meta' -exec rm -rf {} + 2>/dev/null || true
+        else
+          ${SUDO} rm -rf -- "$entry"
+        fi
+      done
+    else
+      ${SUDO} find "${TEMP_BASE_DIR:?}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    fi
   fi
 }
 
@@ -136,7 +152,6 @@ fi
 
 echo ">>> Creating host directories under ${BASE_DIR} …"
 for dir in \
-  "${BASE_DIR}/postgres/data" \
   "${BASE_DIR}/library" \
   "${BASE_DIR}/tileserver/active" \
   "${BASE_DIR}/tileserver/fonts" \
@@ -173,7 +188,6 @@ terminate_existing_pods() {
   done
 }
 
-${SUDO} chown -R 999:999  "${BASE_DIR}/postgres"   2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${BASE_DIR}/tileserver" 2>/dev/null || true
 ${SUDO} chown -R 100:100   "${BASE_DIR}/nominatim"  2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${BASE_DIR}/valhalla"   2>/dev/null || true
@@ -194,7 +208,6 @@ echo ">>> Copying static manifests and orchestrator script …"
 # too, not just by the directories this script creates below.
 for manifest in \
   namespace.yaml \
-  postgres.yaml \
   tileserver.yaml \
   nominatim.yaml \
   valhalla.yaml \
@@ -205,6 +218,7 @@ for manifest in \
   status-config.yaml \
   nominatim-import-config.yaml \
   nominatim-import-job.yaml \
+  nominatim-postgres-tuning-config.yaml \
   tileserver-import-config.yaml \
   tileserver-import-job.yaml \
   import-orchestrator.yaml \
@@ -214,6 +228,11 @@ for manifest in \
 done
 ${SUDO} cp "${REPO_ROOT}/scripts/import-orchestrator.sh" "${BASE_DIR}/scripts/import-orchestrator.sh"
 ${SUDO} chmod +x "${BASE_DIR}/scripts/import-orchestrator.sh"
+
+if [ -d "${REPO_ROOT}/fonts" ]; then
+  ${SUDO} find "${BASE_DIR}/tileserver/fonts" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+  ${SUDO} cp -a "${REPO_ROOT}/fonts/." "${BASE_DIR}/tileserver/fonts/"
+fi
 
 CONFIG_PATH="${BASE_DIR}/status/config.json"
 if [ ! -f "${CONFIG_PATH}" ]; then
@@ -263,12 +282,12 @@ if [ -f "${REPO_ROOT}/k8s/style.json" ]; then
     --dry-run=client -o yaml | kubectl apply -f -
 fi
 
-for manifest in postgres.yaml tileserver.yaml nominatim.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml status-config.yaml status.yaml nominatim-import-config.yaml tileserver-import-config.yaml import-orchestrator.yaml web.yaml style-editor.yaml; do
+for manifest in tileserver.yaml nominatim.yaml nominatim-postgres-tuning-config.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml status-config.yaml status.yaml nominatim-import-config.yaml tileserver-import-config.yaml import-orchestrator.yaml web.yaml style-editor.yaml; do
   kubectl apply -f "${BASE_DIR}/manifests/${manifest}"
 done
 
-echo ">>> Waiting for core services (postgres, status, web, import orchestrator) …"
-for deployment in postgres status web import-orchestrator; do
+echo ">>> Waiting for core services (status, web, import orchestrator) …"
+for deployment in status web import-orchestrator; do
   kubectl -n "${NAMESPACE}" rollout status "deployment/${deployment}" --timeout=120s 2>/dev/null || true
 done
 

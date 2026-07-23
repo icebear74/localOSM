@@ -1,0 +1,49 @@
+# Tunables for the Postgres instance embedded inside the Nominatim container
+# (mediagis/nominatim:4.5 bundles its own Postgres 16, separate from the main
+# `postgres` deployment in k8s/postgres.yaml). Both nominatim-import-job.yaml
+# (the one-off import) and nominatim.yaml (the running service) mount one key
+# from this ConfigMap into Postgres' conf.d directory
+# (/etc/postgresql/16/main/conf.d/zz-tuning.conf), so it is picked up
+# automatically on every Postgres start without editing the image or the
+# Deployment/Job spec. The "zz-" filename ensures it is read last and wins
+# over Nominatim's own conf.d files (e.g. postgres-import.conf).
+#
+# k8s/postgres.yaml's tuned settings (for the main, already-imported database)
+# were used as the baseline/template here, scaled down to the CPU/RAM that
+# nominatim-import-job.yaml and nominatim.yaml actually request/limit. Adjust
+# the values below to match your hardware, then re-apply this file
+# (kubectl apply -f k8s/nominatim-postgres-tuning-config.yaml) and restart the
+# affected Pod/Job for changes to take effect.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nominatim-postgres-tuning
+  namespace: osm
+data:
+  # Applied by nominatim-import-job.yaml. The import job requests 14Gi/8 CPUs
+  # (limit 24Gi/14 CPUs, see k8s/nominatim-import-job.yaml), so these mirror
+  # the main Postgres' import-time tuning at that scale.
+  import-tuning.conf: |
+    shared_buffers = 3GB
+    maintenance_work_mem = 4GB
+    work_mem = 256MB
+    max_wal_size = 10GB
+    checkpoint_timeout = 30min
+    checkpoint_completion_target = 0.9
+    wal_buffers = 64MB
+    random_page_cost = 1.1
+    max_worker_processes = 16
+    max_parallel_workers = 10
+    max_parallel_workers_per_gather = 4
+  # Applied by nominatim.yaml (the running Nominatim service). This deployment
+  # requests 2Gi/2 CPUs (limit 8Gi/8 CPUs, see k8s/nominatim.yaml), so these
+  # are sized for steady-state query serving rather than bulk import.
+  runtime-tuning.conf: |
+    shared_buffers = 512MB
+    effective_cache_size = 2GB
+    maintenance_work_mem = 256MB
+    work_mem = 32MB
+    random_page_cost = 1.1
+    max_worker_processes = 8
+    max_parallel_workers = 6
+    max_parallel_workers_per_gather = 3

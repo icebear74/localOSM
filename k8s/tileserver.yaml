@@ -26,16 +26,38 @@ spec:
                 exit 1
               }
 
-              if [ -d "/data/fonts/Noto Sans Regular" ] && [ ! -d "/data/fonts/NotoSansRegular" ]; then
-                mv "/data/fonts/Noto Sans Regular" "/data/fonts/NotoSansRegular"
-                echo "[INFO] Migrated font directory: 'Noto Sans Regular' -> 'NotoSansRegular'"
-              fi
+              copy_font_stack() {
+                local source_name="$1"
+                local target_name="$2"
+                local source_dir="/fonts-source/${source_name}"
+                local target_dir="/data/fonts/${target_name}"
+                if [ ! -d "${source_dir}" ]; then
+                  return 0
+                fi
+                rm -rf "${target_dir}"
+                mkdir -p "${target_dir}"
+                cp -a "${source_dir}/." "${target_dir}/"
+                echo "[INFO] Installed font stack '${target_name}' from '${source_name}'"
+              }
 
-              FONT_COUNT=$(find /data/fonts/NotoSansRegular -type f \( -name "*.ttf" -o -name "*.otf" \) 2>/dev/null | wc -l)
+              copy_font_stack "KlokanTech Noto Sans Regular" "NotoSansRegular"
+              copy_font_stack "KlokanTech Noto Sans Bold" "NotoSansBold"
+              copy_font_stack "KlokanTech Noto Sans Italic" "NotoSansItalic"
+              copy_font_stack "KlokanTech Noto Sans CJK Regular" "NotoSansCJKRegular"
+              copy_font_stack "KlokanTech Noto Sans CJK Bold" "NotoSansCJKBold"
+
+              EXPECTED_STACKS="NotoSansRegular NotoSansBold NotoSansItalic NotoSansCJKRegular NotoSansCJKBold"
+              for stack in $EXPECTED_STACKS; do
+                if [ ! -d "/data/fonts/$stack" ]; then
+                  echo "[!] WARNING: Missing expected font stack directory /data/fonts/$stack"
+                fi
+              done
+
+              FONT_COUNT=$(find /data/fonts -mindepth 1 -type f \( -name "*.pbf" -o -name "*.ttf" -o -name "*.otf" \) 2>/dev/null | wc -l)
               if [ "$FONT_COUNT" -gt 0 ]; then
-                echo "[✓] Fonts verified: $FONT_COUNT font files found"
+                echo "[✓] Fonts verified: $FONT_COUNT glyph files available"
               else
-                echo "[!] WARNING: No fonts found. Map will render WITHOUT text labels."
+                echo "[!] WARNING: No glyph files found. Map will render WITHOUT text labels."
               fi
 
               if [ -f /style-source/style.json ] && [ ! -f /data/style.json ]; then
@@ -61,6 +83,9 @@ spec:
           volumeMounts:
             - name: tileserver-data
               mountPath: /data
+            - name: tileserver-fonts
+              mountPath: /fonts-source
+              readOnly: true
             - name: tileserver-style
               mountPath: /style-source
               readOnly: true
@@ -71,11 +96,11 @@ spec:
           args: ["/data/config.json"]
           resources:
             requests:
-              cpu: "500m"
-              memory: "512Mi"
-            limits:
-              cpu: "2"
+              cpu: "1"
               memory: "2Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
           env:
             - name: PORT
               value: "80"
@@ -95,6 +120,10 @@ spec:
           configMap:
             name: tileserver-style
             optional: true
+        - name: tileserver-fonts
+          hostPath:
+            path: /mnt/data/OSM/tileserver/fonts
+            type: DirectoryOrCreate
         # TileServer-GL renders raster tiles server-side via MapLibre GL Native's
         # headless GL backend, which needs shared memory to allocate its GL
         # context/framebuffers. Kubernetes containers default to a tiny 64Mi

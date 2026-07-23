@@ -4,8 +4,7 @@ A self-hosted OSM stack on K3s with a read-only status dashboard, a routing web 
 
 ## Components
 
-- PostgreSQL + PostGIS
-- Nominatim
+- Nominatim (with its bundled, configurably-tuned PostgreSQL/PostGIS)
 - Valhalla
 - TileServer GL
 - Status dashboard
