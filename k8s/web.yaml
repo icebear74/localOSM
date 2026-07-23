@@ -574,6 +574,31 @@ data:
                     self.end_headers()
                 return
 
+            if self.path == "/tiles.json":
+                # TileServer-GL's style.json advertises its vector source via a
+                # "url" field pointing at its own TileJSON endpoint (.../data/v3.json).
+                # The /api/style rewriting above turns that absolute URL into
+                # "/tiles.json" on this origin (mirroring the /tiles/{z}/{x}/{y}.pbf
+                # rewrite used for inline "tiles" arrays), so MapLibre GL requests
+                # it here. Proxy TileServer-GL's TileJSON and rewrite its "tiles"
+                # array to point back at the /tiles/{z}/{x}/{y}.pbf proxy above,
+                # instead of TileServer-GL's own (internal, CORS-blocked) URLs.
+                try:
+                    req = urllib.request.Request(
+                        f"{TILESERVER_URL}/data/v3.json",
+                        headers={"User-Agent": "localosm-web/1.0"}
+                    )
+                    with urllib.request.urlopen(req, timeout=10) as response:
+                        tilejson = json.loads(response.read().decode("utf-8"))
+                    # Use an origin-relative path (no scheme/host) so we don't need to
+                    # trust client-supplied Host/X-Forwarded-Proto headers; browsers
+                    # resolve a leading-slash URL against the current page origin.
+                    tilejson["tiles"] = ["/tiles/{z}/{x}/{y}.pbf"]
+                    self._send_json(tilejson)
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": self._friendly_error(exc, "TileServer GL")}, 502)
+                return
+
             if self.path.startswith("/tiles/"):
                 # Proxy vector tile requests to TileServer-GL via the internal K8s service.
                 # This serves tiles from the same origin as the web page, avoiding CORS issues.
