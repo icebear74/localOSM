@@ -23,11 +23,17 @@ spec:
                 configMapKeyRef:
                   name: osm-nominatim-import-config
                   key: import_password
-            # osm2pgsql's initial import step ("nominatim import") maps its
-            # --number-processes / worker thread count directly to THREADS, so
-            # this must be sized to the node's available CPUs (see
-            # k8s/nominatim-import-config.yaml) rather than left at a small,
-            # hardcoded value that leaves most cores idle during import.
+            # THREADS is forwarded by the image's init.sh as `nominatim
+            # import --threads $THREADS`. Nominatim itself hard-codes
+            # osm2pgsql's --number-processes to 1 for the initial ("--create")
+            # load regardless of --threads (osm2pgsql's flex output only
+            # supports single-threaded node/way processing), so the
+            # osm2pgsql process will always show --number-processes 1 no
+            # matter how high THREADS/import_threads is set — that is
+            # expected. THREADS still matters: it is reused for the
+            # `nominatim index --threads $THREADS` step run right after the
+            # osm2pgsql load, which does parallelize, so size it to the
+            # node's available CPUs (see k8s/nominatim-import-config.yaml).
             - name: THREADS
               valueFrom:
                 configMapKeyRef:
@@ -36,7 +42,14 @@ spec:
             # osm2pgsql's --cache (node cache, in MB) during the initial
             # import; sized to the node's available RAM (see
             # k8s/nominatim-import-config.yaml) rather than left at
-            # osm2pgsql's small auto-detected default.
+            # osm2pgsql's auto-detected default. NOTE: NOMINATIM_OSM2PGSQL_CACHE
+            # is not an actual Nominatim setting (it does not appear in
+            # upstream settings/env.defaults and the image's config.sh/init.sh
+            # never read it), so setting only this env var has no effect by
+            # itself — without --osm2pgsql-cache on the CLI, Nominatim
+            # auto-sizes the cache from 75% of the node's (not the pod's!)
+            # available RAM. The command below patches init.sh to actually
+            # pass --osm2pgsql-cache so this value is honored.
             - name: NOMINATIM_OSM2PGSQL_CACHE
               valueFrom:
                 configMapKeyRef:
@@ -58,6 +71,18 @@ spec:
                 echo "user nominatim already exists"
               else
                 useradd -m -p "${NOMINATIM_PASSWORD}" nominatim
+              fi
+              # The image's init.sh calls `nominatim import --osm-file ... --threads
+              # $THREADS` but never passes --osm2pgsql-cache, so
+              # NOMINATIM_OSM2PGSQL_CACHE alone has no effect (see comment on
+              # that env var above). Patch init.sh to add --osm2pgsql-cache so
+              # the configured cache size actually reaches osm2pgsql.
+              if [ -n "${NOMINATIM_OSM2PGSQL_CACHE:-}" ]; then
+                sed -i 's/--threads \$THREADS/--threads \$THREADS --osm2pgsql-cache \$NOMINATIM_OSM2PGSQL_CACHE/g' /app/init.sh
+                if ! grep -q -- '--osm2pgsql-cache \$NOMINATIM_OSM2PGSQL_CACHE' /app/init.sh; then
+                  echo "ERROR: failed to patch /app/init.sh to honor NOMINATIM_OSM2PGSQL_CACHE (upstream image's init.sh may have changed); aborting." >&2
+                  exit 1
+                fi
               fi
               /app/init.sh
               touch /var/lib/postgresql/16/main/import-finished
