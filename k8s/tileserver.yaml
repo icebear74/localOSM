@@ -96,11 +96,11 @@ spec:
           args: ["/data/config.json"]
           resources:
             requests:
-              cpu: "500m"
-              memory: "512Mi"
-            limits:
-              cpu: "2"
+              cpu: "1"
               memory: "2Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
           env:
             - name: PORT
               value: "80"

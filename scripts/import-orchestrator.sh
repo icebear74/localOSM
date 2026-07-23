@@ -211,7 +211,7 @@ check_config_change() {
 
 wait_for_job() {
   local job_name="$1"
-  local deadline_seconds="${2:-86400}"
+  local deadline_seconds="${2:-252200}"
   local start
   start="$(date +%s)"
   while true; do
@@ -276,8 +276,8 @@ spec:
               cpu: "1"
               memory: "2Gi"
             limits:
-              cpu: "2"
-              memory: "6Gi"
+              cpu: "6"
+              memory: "10Gi"
           command: ["/bin/sh", "-c"]
           args:
             - |
