@@ -60,8 +60,8 @@ spec:
               memory: "14Gi"
               cpu: "8"
             limits:
-              memory: "24Gi"
-              cpu: "14"
+              memory: "30Gi"
+              cpu: "20"
           command: ["/bin/bash", "-c"]
           args:
             - |

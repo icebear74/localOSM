@@ -21,6 +21,6 @@ metadata:
   namespace: osm
 data:
   import_mode: import
-  import_threads: "10"
-  import_cache_mb: "12000"
+  import_threads: "15"
+  import_cache_mb: "18000"
   import_password: nominatim

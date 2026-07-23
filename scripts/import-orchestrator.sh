@@ -287,9 +287,9 @@ spec:
           resources:
             requests:
               cpu: "1"
-              memory: "2Gi"
+              memory: "8Gi"
             limits:
-              cpu: "6"
+              cpu: "12"
               memory: "10Gi"
           command: ["/bin/sh", "-c"]
           args:
