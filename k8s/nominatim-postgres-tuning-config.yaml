@@ -24,19 +24,31 @@ data:
   # (limit 24Gi/14 CPUs, see k8s/nominatim-import-job.yaml), so these mirror
   # the main Postgres' import-time tuning at that scale.
   import-tuning.conf: |
-    shared_buffers = 3GB
-    maintenance_work_mem = 8GB
+  # SPEICHER
+    shared_buffers = 8GB
+    maintenance_work_mem = 12GB          # Sehr wichtig für die Index-Erstellung
     work_mem = 128MB
-    max_wal_size = 20GB
+    wal_buffers = 64MB 
+
+  # EXTREME IMPORT-SPEEDUPS (Nur für Erstimport!)
+    fsync = off                          # Schaltet Synchrongarantie ab -> riesiger Boost
+    full_page_writes = off
+    autovacuum = off
     synchronous_commit = off
-    checkpoint_timeout = 30min
+
+  # WAL & CHECKPOINTS
+    max_wal_size = 50GB
+    checkpoint_timeout = 60min
     checkpoint_completion_target = 0.9
-    wal_buffers = 64MB
-    random_page_cost = 1.5
+
+  # PARALLELISIERUNG & I/O
+    random_page_cost = 1.1
+    effective_io_concurrency = 200       # Perfekt für NVMe/SSD
     max_worker_processes = 16
-    max_parallel_workers = 10
+    max_parallel_workers = 16
     max_parallel_workers_per_gather = 4
-  # Applied by nominatim.yaml (the running Nominatim service). This deployment
+    max_parallel_maintenance_workers = 6 
+  # Beschleunigt INDEX-Erstellung massiv  # Applied by nominatim.yaml (the running Nominatim service). This deployment
   # requests 2Gi/2 CPUs (limit 8Gi/8 CPUs, see k8s/nominatim.yaml), so these
   # are sized for steady-state query serving rather than bulk import.
   runtime-tuning.conf: |
