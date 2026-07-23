@@ -101,14 +101,30 @@ clean_data_directory() {
   fi
 }
 
-# The temp dir only ever holds scratch/staging data for an in-progress import, so
-# on a clean start its contents can always be discarded outright. Only the
+# The temp dir only ever holds scratch/staging data for an in-progress
+# import. On a clean start its contents can normally be discarded outright. Only the
 # contents are removed — the directory (mount point) itself, which the user
-# creates and mounts, is left untouched.
+# creates and mounts, is left untouched. When --preserve-downloads is set,
+# the shared merged extract at TEMP_BASE_DIR/import/planet.osm.pbf (+ its
+# .meta sidecar) is kept too, so a "clean" redeploy does not force every
+# subsequent Build to re-download and re-merge the country extracts (only
+# per-service staging dirs and stray intermediate merge artifacts are
+# cleared).
 clean_temp_directory() {
   echo ">>> Deleting contents of temporary scratch directory ${TEMP_BASE_DIR} …"
   if [ -d "${TEMP_BASE_DIR}" ]; then
-    ${SUDO} find "${TEMP_BASE_DIR:?}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    if [ "$PRESERVE_DOWNLOADS" = true ]; then
+      shopt -s nullglob dotglob
+      for entry in "${TEMP_BASE_DIR}"/*; do
+        if [ "$(basename "$entry")" = "import" ]; then
+          ${SUDO} find "${entry}" -mindepth 1 -maxdepth 1 ! -name 'planet.osm.pbf' ! -name 'planet.osm.pbf.meta' -exec rm -rf {} + 2>/dev/null || true
+        else
+          ${SUDO} rm -rf -- "$entry"
+        fi
+      done
+    else
+      ${SUDO} find "${TEMP_BASE_DIR:?}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    fi
   fi
 }
 

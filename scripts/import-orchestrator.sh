@@ -33,6 +33,19 @@ cleanup_temp_dir() {
   find "${dir}" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
 }
 
+# Unlike cleanup_temp_dir, this must NOT delete "${TEMP_DIR}/import" wholesale:
+# that directory holds the merged planet.osm.pbf (+ its .meta sidecar), which
+# is deliberately kept around after an import request finishes so a later
+# Build/step-build can reuse it without re-downloading/re-merging (see
+# prepare_import_data's "reusing existing planet.osm.pbf" check). Only stray
+# intermediate merge artifacts left behind by a crashed/aborted merge are
+# removed here.
+cleanup_import_scratch() {
+  local dir="${TEMP_DIR}/import"
+  [ -d "${dir}" ] || return 0
+  find "${dir}" -mindepth 1 -maxdepth 1 \( -name '*.tmp' -o -name '*.dedup' \) -exec rm -rf {} + 2>/dev/null || true
+}
+
 log() {
   local message="$1"
   local timestamp
@@ -688,7 +701,7 @@ main() {
         else
           log "Import preparation failed; discarding import request to avoid retrying the same failing request in a loop."
         fi
-        cleanup_temp_dir "${TEMP_DIR}/import"
+        cleanup_import_scratch
         rm -f "${REQUEST_FILE}"
         clear_abort_flag
         clear_completed_steps
@@ -709,7 +722,7 @@ main() {
         else
           log "TileServer import failed; discarding import request to avoid retrying the same failing request in a loop."
         fi
-        cleanup_temp_dir "${TEMP_DIR}/import"
+        cleanup_import_scratch
         rm -f "${REQUEST_FILE}"
         clear_abort_flag
         clear_completed_steps
@@ -730,7 +743,7 @@ main() {
         else
           log "Nominatim import failed; discarding import request to avoid retrying the same failing request in a loop."
         fi
-        cleanup_temp_dir "${TEMP_DIR}/import"
+        cleanup_import_scratch
         rm -f "${REQUEST_FILE}"
         clear_abort_flag
         clear_completed_steps
@@ -751,7 +764,7 @@ main() {
         else
           log "Valhalla import failed; discarding import request to avoid retrying the same failing request in a loop."
         fi
-        cleanup_temp_dir "${TEMP_DIR}/import"
+        cleanup_import_scratch
         rm -f "${REQUEST_FILE}"
         clear_abort_flag
         clear_completed_steps
@@ -760,10 +773,11 @@ main() {
       mark_step_done "valhalla"
     fi
 
-    # The shared merged-extract scratch data is only needed while the three
-    # import steps run; once TileServer, Nominatim and Valhalla have all
-    # consumed it, the temp dir must be cleared again.
-    cleanup_temp_dir "${TEMP_DIR}/import"
+    # The merged planet.osm.pbf itself is intentionally kept (see
+    # cleanup_import_scratch) so the next Build/step-build can reuse it
+    # without re-downloading/re-merging; only stray intermediate merge
+    # artifacts are cleared here.
+    cleanup_import_scratch
     rm -f "${REQUEST_FILE}"
     clear_abort_flag
     clear_completed_steps
