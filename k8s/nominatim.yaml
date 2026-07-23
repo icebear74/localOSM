@@ -98,11 +98,24 @@ spec:
           volumeMounts:
             - name: nominatim-data
               mountPath: /var/lib/postgresql/16/main
+            # Tunable Postgres settings for the running service (see
+            # k8s/nominatim-postgres-tuning-config.yaml); loaded from conf.d
+            # last, so these values win over any defaults.
+            - name: nominatim-postgres-tuning
+              mountPath: /etc/postgresql/16/main/conf.d/zz-tuning.conf
+              subPath: runtime-tuning.conf
+              readOnly: true
       volumes:
         - name: nominatim-data
           hostPath:
             path: /mnt/data/OSM/nominatim/active
             type: DirectoryOrCreate
+        - name: nominatim-postgres-tuning
+          configMap:
+            name: nominatim-postgres-tuning
+            items:
+              - key: runtime-tuning.conf
+                path: runtime-tuning.conf
 ---
 apiVersion: v1
 kind: Service

@@ -66,6 +66,13 @@ spec:
               mountPath: /nominatim/data/import
             - name: nominatim-data
               mountPath: /var/lib/postgresql/16/main
+            # Tunable Postgres settings for the import (see
+            # k8s/nominatim-postgres-tuning-config.yaml); loaded from conf.d
+            # after Nominatim's own postgres-import.conf, so these values win.
+            - name: nominatim-postgres-tuning
+              mountPath: /etc/postgresql/16/main/conf.d/zz-tuning.conf
+              subPath: import-tuning.conf
+              readOnly: true
       volumes:
         - name: import-data
           hostPath:
@@ -75,3 +82,9 @@ spec:
           hostPath:
             path: __OSM_TEMP_DIR__/nominatim/staging
             type: DirectoryOrCreate
+        - name: nominatim-postgres-tuning
+          configMap:
+            name: nominatim-postgres-tuning
+            items:
+              - key: import-tuning.conf
+                path: import-tuning.conf

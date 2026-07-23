@@ -205,6 +205,7 @@ for manifest in \
   status-config.yaml \
   nominatim-import-config.yaml \
   nominatim-import-job.yaml \
+  nominatim-postgres-tuning-config.yaml \
   tileserver-import-config.yaml \
   tileserver-import-job.yaml \
   import-orchestrator.yaml \
@@ -268,7 +269,7 @@ if [ -f "${REPO_ROOT}/k8s/style.json" ]; then
     --dry-run=client -o yaml | kubectl apply -f -
 fi
 
-for manifest in postgres.yaml tileserver.yaml nominatim.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml status-config.yaml status.yaml nominatim-import-config.yaml tileserver-import-config.yaml import-orchestrator.yaml web.yaml style-editor.yaml; do
+for manifest in postgres.yaml tileserver.yaml nominatim.yaml nominatim-postgres-tuning-config.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml status-config.yaml status.yaml nominatim-import-config.yaml tileserver-import-config.yaml import-orchestrator.yaml web.yaml style-editor.yaml; do
   kubectl apply -f "${BASE_DIR}/manifests/${manifest}"
 done
 
