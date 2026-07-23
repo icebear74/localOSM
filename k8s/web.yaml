@@ -598,8 +598,14 @@ data:
                     # Build an absolute URL instead, using this same request's own
                     # Host header (this deployment is plain HTTP only, no TLS
                     # termination anywhere in front of it, see k8s/web.yaml) so the
-                    # tiles are always fetched from this same origin/proxy.
+                    # tiles are always fetched from this same origin/proxy. Validate
+                    # the header against a strict hostname[:port]/IPv4[:port]/
+                    # [IPv6][:port] pattern first so a malformed/spoofed Host
+                    # header can't inject an arbitrary scheme or extra URL parts
+                    # into the response; fall back to the Server header default.
                     host = self.headers.get("Host", "")
+                    if not re.fullmatch(r"(\[[0-9A-Fa-f:]+\]|[A-Za-z0-9.-]+)(:\d{1,5})?", host):
+                        host = f"{self.server.server_name}:{self.server.server_port}"
                     tilejson["tiles"] = [f"http://{host}/tiles/{{z}}/{{x}}/{{y}}.pbf"]
                     self._send_json(tilejson)
                 except Exception as exc:  # noqa: BLE001
