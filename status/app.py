@@ -98,7 +98,6 @@ CRON_MONTH_NAMES = {
 }
 
 SERVICES = [
-    ("postgres", "postgres.osm.svc.cluster.local", 5432, "tcp", None),
     ("tileserver", "tileserver-gl.osm.svc.cluster.local", 80, "http", "/"),
     ("nominatim", "nominatim.osm.svc.cluster.local", 8080, "http", "/"),
     ("valhalla", "valhalla.osm.svc.cluster.local", 8002, "http", "/"),
@@ -2923,9 +2922,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path.startswith("/test/"):
             name = self.path.split("/", 2)[-1]
-            if name == "postgres":
-                ok, detail = check_tcp("postgres.osm.svc.cluster.local", 5432)
-            elif name == "tileserver":
+            if name == "tileserver":
                 ok, detail = check_http("http://tileserver-gl.osm.svc.cluster.local/")
             elif name == "nominatim":
                 ok, detail = check_http("http://nominatim.osm.svc.cluster.local:8080/")

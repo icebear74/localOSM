@@ -5,7 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NAMESPACE="osm"
 BASE_DIR="/mnt/data/OSM"
 TEMP_BASE_DIR="${OSM_TEMP_DIR:-${BASE_DIR}/TempDir}"
-DEPLOYMENTS=(postgres tileserver-gl nominatim valhalla import-orchestrator status web)
+DEPLOYMENTS=(tileserver-gl nominatim valhalla import-orchestrator status web)
 PRESERVE_PATHS=("${BASE_DIR}/library" "${BASE_DIR}/status")
 CLEAN=false
 PRESERVE_DOWNLOADS=false
@@ -136,7 +136,6 @@ fi
 
 echo ">>> Creating host directories under ${BASE_DIR} …"
 for dir in \
-  "${BASE_DIR}/postgres/data" \
   "${BASE_DIR}/library" \
   "${BASE_DIR}/tileserver/active" \
   "${BASE_DIR}/tileserver/fonts" \
@@ -173,7 +172,6 @@ terminate_existing_pods() {
   done
 }
 
-${SUDO} chown -R 999:999  "${BASE_DIR}/postgres"   2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${BASE_DIR}/tileserver" 2>/dev/null || true
 ${SUDO} chown -R 100:100   "${BASE_DIR}/nominatim"  2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${BASE_DIR}/valhalla"   2>/dev/null || true
@@ -194,7 +192,6 @@ echo ">>> Copying static manifests and orchestrator script …"
 # too, not just by the directories this script creates below.
 for manifest in \
   namespace.yaml \
-  postgres.yaml \
   tileserver.yaml \
   nominatim.yaml \
   valhalla.yaml \
@@ -269,12 +266,12 @@ if [ -f "${REPO_ROOT}/k8s/style.json" ]; then
     --dry-run=client -o yaml | kubectl apply -f -
 fi
 
-for manifest in postgres.yaml tileserver.yaml nominatim.yaml nominatim-postgres-tuning-config.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml status-config.yaml status.yaml nominatim-import-config.yaml tileserver-import-config.yaml import-orchestrator.yaml web.yaml style-editor.yaml; do
+for manifest in tileserver.yaml nominatim.yaml nominatim-postgres-tuning-config.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml status-config.yaml status.yaml nominatim-import-config.yaml tileserver-import-config.yaml import-orchestrator.yaml web.yaml style-editor.yaml; do
   kubectl apply -f "${BASE_DIR}/manifests/${manifest}"
 done
 
-echo ">>> Waiting for core services (postgres, status, web, import orchestrator) …"
-for deployment in postgres status web import-orchestrator; do
+echo ">>> Waiting for core services (status, web, import orchestrator) …"
+for deployment in status web import-orchestrator; do
   kubectl -n "${NAMESPACE}" rollout status "deployment/${deployment}" --timeout=120s 2>/dev/null || true
 done
 
