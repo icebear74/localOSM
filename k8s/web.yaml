@@ -604,8 +604,20 @@ data:
                     # header can't inject an arbitrary scheme or extra URL parts
                     # into the response; fall back to the Server header default.
                     host = self.headers.get("Host", "")
-                    host_re = r"(\[[0-9A-Fa-f:]+\]|[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*)(:\d{1,5})?"
+                    # Validate as: "[" IPv6 "]" | hostname-label(.hostname-label)*
+                    # each followed by an optional ":port". Labels can't start/end
+                    # with "-" and consecutive/leading/trailing "." are rejected,
+                    # matching standard hostname syntax rules.
+                    ipv6_part = r"\[[0-9A-Fa-f:]+\]"
+                    label_part = r"[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?"
+                    hostname_part = rf"{label_part}(\.{label_part})*"
+                    port_part = r"(:\d{1,5})?"
+                    host_re = rf"({ipv6_part}|{hostname_part}){port_part}"
                     if not re.fullmatch(host_re, host):
+                        # Malformed/spoofed Host header: fall back to this
+                        # HTTPServer's own bind address/port (set at startup,
+                        # not client-controlled), so the URL still points back
+                        # at this same origin/proxy.
                         host = f"{self.server.server_name}:{self.server.server_port}"
                     tilejson["tiles"] = [f"http://{host}/tiles/{{z}}/{{x}}/{{y}}.pbf"]
                     self._send_json(tilejson)
