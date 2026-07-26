@@ -1,19 +1,3 @@
-# Tunables for the Postgres instance embedded inside the Nominatim container
-# (mediagis/nominatim:4.5 bundles its own Postgres 16, separate from the main
-# `postgres` deployment in k8s/postgres.yaml). Both nominatim-import-job.yaml
-# (the one-off import) and nominatim.yaml (the running service) mount one key
-# from this ConfigMap into Postgres' conf.d directory
-# (/etc/postgresql/16/main/conf.d/zz-tuning.conf), so it is picked up
-# automatically on every Postgres start without editing the image or the
-# Deployment/Job spec. The "zz-" filename ensures it is read last and wins
-# over Nominatim's own conf.d files (e.g. postgres-import.conf).
-#
-# k8s/postgres.yaml's tuned settings (for the main, already-imported database)
-# were used as the baseline/template here, scaled down to the CPU/RAM that
-# nominatim-import-job.yaml and nominatim.yaml actually request/limit. Adjust
-# the values below to match your hardware, then re-apply this file
-# (kubectl apply -f k8s/nominatim-postgres-tuning-config.yaml) and restart the
-# affected Pod/Job for changes to take effect.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -24,31 +8,33 @@ data:
   # (limit 24Gi/14 CPUs, see k8s/nominatim-import-job.yaml), so these mirror
   # the main Postgres' import-time tuning at that scale.
   import-tuning.conf: |
-  # SPEICHER
+    # SPEICHER
     shared_buffers = 8GB
-    maintenance_work_mem = 12GB          # Sehr wichtig für die Index-Erstellung
+    maintenance_work_mem = 4GB          # Sehr wichtig für die Index-Erstellung
     work_mem = 128MB
-    wal_buffers = 64MB 
-
-  # EXTREME IMPORT-SPEEDUPS (Nur für Erstimport!)
+    wal_buffers = 64MB
+    effective_cache_size = 20GB          # Signalisiert Postgres den freien Page Cache
+    # EXTREME IMPORT-SPEEDUPS (Nur für Erstimport!)
     fsync = off                          # Schaltet Synchrongarantie ab -> riesiger Boost
     full_page_writes = off
     autovacuum = off
     synchronous_commit = off
+    jit = off                            # Schaltet unnötiges Query-Kompilieren ab
 
-  # WAL & CHECKPOINTS
+    # WAL & CHECKPOINTS
     max_wal_size = 50GB
     checkpoint_timeout = 60min
     checkpoint_completion_target = 0.9
 
-  # PARALLELISIERUNG & I/O
+    # PARALLELISIERUNG & I/O
     random_page_cost = 1.1
     effective_io_concurrency = 200       # Perfekt für NVMe/SSD
     max_worker_processes = 16
     max_parallel_workers = 16
     max_parallel_workers_per_gather = 4
-    max_parallel_maintenance_workers = 6 
-  # Beschleunigt INDEX-Erstellung massiv  # Applied by nominatim.yaml (the running Nominatim service). This deployment
+    max_parallel_maintenance_workers = 3 # Beschleunigt INDEX-Erstellung massiv
+
+  # Applied by nominatim.yaml (the running Nominatim service). This deployment
   # requests 2Gi/2 CPUs (limit 8Gi/8 CPUs, see k8s/nominatim.yaml), so these
   # are sized for steady-state query serving rather than bulk import.
   runtime-tuning.conf: |
