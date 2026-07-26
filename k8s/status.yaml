@@ -2147,6 +2147,36 @@ data:
         raise RuntimeError(f"Timed out waiting for deployment/{name} to become available.")
 
 
+    def _copy_preserving_ownership(src, dst):
+        """shutil.copytree() the tree from src to dst, then restore ownership.
+
+        shutil.copy2()/copytree() preserve mode and timestamps but never call
+        chown(), so every copied file/dir ends up owned by whatever user this
+        process runs as (root in the status pod). For Nominatim's Postgres data
+        directory that broke ownership set up during import (postgres:postgres),
+        causing "Data directory ... must not be owned by root" and a crash-loop
+        right after promoting. Walk src (still present at this point) and mirror
+        its uid/gid onto the corresponding copied path in dst.
+        """
+        shutil.copytree(src, dst)
+        for root, dirs, files in os.walk(src):
+            rel = os.path.relpath(root, src)
+            target_root = dst if rel == "." else os.path.join(dst, rel)
+            for name in dirs + files:
+                src_path = os.path.join(root, name)
+                dst_path = os.path.join(target_root, name)
+                try:
+                    st = os.stat(src_path, follow_symlinks=False)
+                    os.chown(dst_path, st.st_uid, st.st_gid, follow_symlinks=False)
+                except OSError:
+                    pass
+            try:
+                st = os.stat(root)
+                os.chown(target_root, st.st_uid, st.st_gid)
+            except OSError:
+                pass
+
+
     def _move_directory_replacing(src, dst):
         """Move directory src to dst, tolerating cross-device mounts.
 
@@ -2156,14 +2186,14 @@ data:
         even though they may point at paths on the same physical disk, the
         container sees them as different devices and rename() fails with
         "[Errno 18] Invalid cross-device link". Fall back to a copy+delete move
-        in that case.
+        in that case, preserving ownership (see _copy_preserving_ownership).
         """
         try:
             os.replace(src, dst)
         except OSError as exc:
             if exc.errno != errno.EXDEV:
                 raise
-            shutil.copytree(src, dst)
+            _copy_preserving_ownership(src, dst)
             try:
                 shutil.rmtree(src)
             except OSError:
