@@ -121,6 +121,23 @@ spec:
                 GRANT USAGE, CREATE ON SCHEMA public TO ${PHOTON_DB_USER};
                 GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${PHOTON_DB_USER};
                 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ${PHOTON_DB_USER};
+                -- Photon's importer runs "CREATE INDEX ON placex (...)" during
+                -- import, which in Postgres requires table ownership (plain
+                -- SELECT/USAGE grants are not enough, and there is no separate
+                -- "CREATE INDEX" privilege to grant on an existing table).
+                -- Make the Photon role a member of whichever role owns placex
+                -- (the Nominatim import user) so it inherits owner privileges
+                -- on that table without needing superuser access.
+                DO \$\$
+                DECLARE
+                  placex_owner text;
+                BEGIN
+                  SELECT tableowner INTO placex_owner FROM pg_tables WHERE schemaname = 'public' AND tablename = 'placex';
+                  IF placex_owner IS NOT NULL THEN
+                    EXECUTE format('GRANT %I TO %I', placex_owner, '${PHOTON_DB_USER}');
+                  END IF;
+                END
+                \$\$;
               SQL
                 ) || echo "WARNING: could not provision Photon Postgres role (Photon import may fail until this is fixed): ${PSQL_OUTPUT}"
               ) &
