@@ -874,7 +874,7 @@ INDEX_HTML = """<!doctype html>
             <option value="custom">Einzelne Prozesse (siehe Auswahl unten)</option>
           </select>
         </div>
-        <div id="auto-update-steps-wrap" class="row2" style="grid-template-columns:repeat(4, 1fr)">
+        <div id="auto-update-steps-wrap" class="row2" style="grid-template-columns:repeat(2, 1fr)">
           <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.82rem">
             <input type="checkbox" id="auto-update-step-tileserver" style="width:auto" checked> TileServer bauen
           </label>
