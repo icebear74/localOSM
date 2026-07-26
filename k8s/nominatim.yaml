@@ -69,8 +69,64 @@ spec:
             # import-finished marker is missing. Without it the container crash-loops.
             - name: PBF_PATH
               value: /nominatim/data/import/planet.osm.pbf
+            - name: PHOTON_DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-photon-config
+                  key: photon_db_user
+            - name: PHOTON_DB_PASSWORD
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-photon-config
+                  key: photon_db_password
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              # Photon (k8s/photon-import-job.yaml) builds its search index directly
+              # from this running Nominatim's embedded Postgres over the network (via
+              # the nominatim-postgres Service below) instead of downloading OSM data
+              # separately. The stock image only allows local connections, so append a
+              # single additive pg_hba.conf rule (never replacing the file, so
+              # Nominatim's own local/peer auth entries stay untouched) that lets the
+              # dedicated read-only "${PHOTON_DB_USER}" role connect over TCP.
+              HBA_FILE=/etc/postgresql/16/main/pg_hba.conf
+              HBA_LINE="host nominatim ${PHOTON_DB_USER} 0.0.0.0/0 scram-sha-256"
+              mkdir -p "$(dirname "${HBA_FILE}")"
+              touch "${HBA_FILE}"
+              if ! grep -qxF "${HBA_LINE}" "${HBA_FILE}"; then
+                echo "${HBA_LINE}" >> "${HBA_FILE}"
+              fi
+              # Postgres itself is only started by /app/start.sh below, so create/
+              # update the Photon role in the background once it becomes reachable
+              # (this never blocks startup of the normal Nominatim service).
+              (
+                for _ in $(seq 1 60); do
+                  if pg_isready -q; then
+                    break
+                  fi
+                  sleep 5
+                done
+                sudo -u postgres psql -v ON_ERROR_STOP=1 -d nominatim <<SQL || echo "WARNING: could not provision Photon Postgres role (Photon import may fail until this is fixed)."
+                DO \$\$
+                BEGIN
+                  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${PHOTON_DB_USER}') THEN
+                    EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', '${PHOTON_DB_USER}', '${PHOTON_DB_PASSWORD}');
+                  ELSE
+                    EXECUTE format('ALTER ROLE %I PASSWORD %L', '${PHOTON_DB_USER}', '${PHOTON_DB_PASSWORD}');
+                  END IF;
+                END
+                \$\$;
+                GRANT CONNECT ON DATABASE nominatim TO ${PHOTON_DB_USER};
+                GRANT USAGE, CREATE ON SCHEMA public TO ${PHOTON_DB_USER};
+                GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${PHOTON_DB_USER};
+                ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ${PHOTON_DB_USER};
+              SQL
+              ) &
+              exec /app/start.sh
           ports:
             - containerPort: 8080
+            - containerPort: 5432
           resources:
             requests:
               memory: "2Gi"
@@ -131,3 +187,22 @@ spec:
       port: 8080
       targetPort: 8080
       nodePort: 30081
+---
+# Internal-only (ClusterIP, no NodePort) access to Nominatim's embedded
+# Postgres so the Photon import job (k8s/photon-import-job.yaml) can build
+# its search index directly from the live database instead of downloading
+# OSM data separately. See the pg_hba.conf/role provisioning wrapper in the
+# nominatim Deployment above.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nominatim-postgres
+  namespace: osm
+spec:
+  type: ClusterIP
+  selector:
+    app: nominatim
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432

@@ -61,7 +61,7 @@ clear_abort_flag() {
   rm -f "${ABORT_FILE}" 2>/dev/null || true
 }
 
-# Tracks which import steps (tileserver/nominatim/valhalla) have already been
+# Tracks which import steps (tileserver/nominatim/valhalla/photon) have already been
 # completed for the *current* request, so that a container/pod restart in the
 # middle of a multi-step import (e.g. after Valhalla finished but before the
 # loop reached its end) resumes instead of redoing already-promoted steps.
@@ -482,10 +482,10 @@ sys.exit(0 if request.get('countries') else 1)
 PY
 }
 
-# Space-separated list of steps (subset of "tileserver nominatim valhalla")
-# that should be executed for the current request. Missing/empty "steps"
-# means "run all three", which keeps older/manual requests (e.g. written by
-# scripts/run-import.sh) working unchanged.
+# Space-separated list of steps (subset of "tileserver nominatim valhalla
+# photon") that should be executed for the current request. Missing/empty
+# "steps" means "run all four", which keeps older/manual requests (e.g.
+# written by scripts/run-import.sh) working unchanged.
 request_steps() {
   python3 - "${REQUEST_FILE}" <<'PY'
 import json
@@ -494,14 +494,14 @@ import sys
 path = sys.argv[1]
 with open(path, 'r', encoding='utf-8') as handle:
     request = json.load(handle)
-# Missing "steps" key means "run all three" (back-compat with older/manual
+# Missing "steps" key means "run all four" (back-compat with older/manual
 # requests); an explicitly empty list means "run no build steps at all"
 # (used by the dedicated Download & Merge / download-only workflows) and
 # must NOT fall back to the default here.
 if 'steps' in request:
     steps = request.get('steps') or []
 else:
-    steps = ['tileserver', 'nominatim', 'valhalla']
+    steps = ['tileserver', 'nominatim', 'valhalla', 'photon']
 print(' '.join(steps))
 PY
 }
@@ -683,7 +683,7 @@ main() {
     fi
 
     log "Detected import request at ${REQUEST_FILE}."
-    write_state true "queued" 5 "Import request received." "Running TileServer, Nominatim and Valhalla sequentially."
+    write_state true "queued" 5 "Import request received." "Running TileServer, Nominatim, Valhalla and Photon sequentially."
     # Reconcile the completed-steps tracker with this request so that a
     # container/pod restart in the middle of the sequential pipeline resumes
     # at the next pending step instead of redoing already-promoted ones.
@@ -771,6 +771,32 @@ main() {
         continue
       fi
       mark_step_done "valhalla"
+    fi
+
+    local prc2=0
+    if ! step_requested "photon"; then
+      log "Photon step not requested for this import request; skipping."
+    elif step_already_done "photon"; then
+      log "Photon already promoted for this request (resumed after restart); skipping re-import."
+    else
+      # Photon builds its full-text search index directly from the running
+      # Nominatim Postgres instance (see the nominatim-postgres Service and
+      # k8s/photon-import-job.yaml), so it must run after the nominatim step
+      # above rather than in parallel with it.
+      run_step "photon" "photon-import" "photon-import-job.yaml" "${DATA_DIR}/photon/active" "${TEMP_DIR}/photon/staging" "photon" "${AUTO_PROMOTE}" || prc2=$?
+      if [ "${prc2}" -ne 0 ]; then
+        if [ "${prc2}" -eq 2 ]; then
+          log "Import aborted by user during Photon import; discarding import request."
+        else
+          log "Photon import failed; discarding import request to avoid retrying the same failing request in a loop."
+        fi
+        cleanup_import_scratch
+        rm -f "${REQUEST_FILE}"
+        clear_abort_flag
+        clear_completed_steps
+        continue
+      fi
+      mark_step_done "photon"
     fi
 
     # The merged planet.osm.pbf itself is intentionally kept (see

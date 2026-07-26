@@ -53,7 +53,7 @@ IMPORT_REQUEST_FILE = os.path.join(STATUS_DIR, "import-request.json")
 # ABORT_FLAG_FILE to cancel whatever it is currently doing.
 ORCHESTRATOR_STATE_FILE = os.path.join(STATUS_DIR, "import-orchestrator.json")
 ABORT_FLAG_FILE = os.path.join(STATUS_DIR, "import-abort.flag")
-IMPORT_JOB_NAMES = ("import-prep", "tileserver-import", "nominatim-import", "valhalla-import")
+IMPORT_JOB_NAMES = ("import-prep", "tileserver-import", "nominatim-import", "valhalla-import", "photon-import")
 PROMOTE_POD_TERMINATION_TIMEOUT_SECONDS = 240
 PROMOTE_READY_TIMEOUT_SECONDS = 900
 PROMOTE_NOMINATIM_READY_TIMEOUT_SECONDS = 1200
@@ -73,10 +73,15 @@ PROMOTE_SERVICES = {
         "active_dir": os.path.join(DATA_DIR, "valhalla", "active"),
         "staging_dir": os.path.join(TEMP_DIR, "valhalla", "staging"),
     },
+    "photon": {
+        "deployment": "photon",
+        "active_dir": os.path.join(DATA_DIR, "photon", "active"),
+        "staging_dir": os.path.join(TEMP_DIR, "photon", "staging"),
+    },
 }
 
 # Fixed pipeline order the import-orchestrator always runs these steps in.
-BUILD_STEPS = ("tileserver", "nominatim", "valhalla")
+BUILD_STEPS = ("tileserver", "nominatim", "valhalla", "photon")
 
 CONFIG_DEFAULTS = {
     "node_url": "",
@@ -101,6 +106,7 @@ SERVICES = [
     ("tileserver", "tileserver-gl.osm.svc.cluster.local", 80, "http", "/"),
     ("nominatim", "nominatim.osm.svc.cluster.local", 8080, "http", "/"),
     ("valhalla", "valhalla.osm.svc.cluster.local", 8002, "http", "/"),
+    ("photon", "photon.osm.svc.cluster.local", 2322, "http", "/status"),
     ("web", "web.osm.svc.cluster.local", 8080, "http", "/healthz"),
 ]
 
@@ -867,7 +873,7 @@ INDEX_HTML = """<!doctype html>
             <option value="custom">Einzelne Prozesse (siehe Auswahl unten)</option>
           </select>
         </div>
-        <div id="auto-update-steps-wrap" class="row2" style="grid-template-columns:repeat(3, 1fr)">
+        <div id="auto-update-steps-wrap" class="row2" style="grid-template-columns:repeat(4, 1fr)">
           <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.82rem">
             <input type="checkbox" id="auto-update-step-tileserver" style="width:auto" checked> TileServer bauen
           </label>
@@ -876,6 +882,9 @@ INDEX_HTML = """<!doctype html>
           </label>
           <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.82rem">
             <input type="checkbox" id="auto-update-step-valhalla" style="width:auto" checked> Valhalla bauen
+          </label>
+          <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.82rem">
+            <input type="checkbox" id="auto-update-step-photon" style="width:auto" checked> Photon bauen
           </label>
         </div>
         <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
@@ -913,12 +922,13 @@ INDEX_HTML = """<!doctype html>
           Nach dem Build automatisch promoten (aktiv schalten)
         </label>
         <div id="queue-count" class="hint">Keine Länder in der Queue.</div>
-        <div class="hint">Wählt ein Land aus. Der Hinzufügen-Button prüft nur die Verfügbarkeit. "Download &amp; Merge" lädt neuere Extracts herunter und führt sie zusammen; "Build" verwendet dafür bereits vorhandene, zusammengeführte Kartendaten und lädt/merged nur automatisch, falls noch keine vorhanden sind. Danach führt Build (wahlweise mit Promotion) TileServer, Nominatim und Valhalla nacheinander aus.</div>
+        <div class="hint">Wählt ein Land aus. Der Hinzufügen-Button prüft nur die Verfügbarkeit. "Download &amp; Merge" lädt neuere Extracts herunter und führt sie zusammen; "Build" verwendet dafür bereits vorhandene, zusammengeführte Kartendaten und lädt/merged nur automatisch, falls noch keine vorhanden sind. Danach führt Build (wahlweise mit Promotion) TileServer, Nominatim, Valhalla und Photon nacheinander aus.</div>
         <div class="hint" style="margin-top:0.4rem">Einzelne Build-Schritte auslösen (ohne automatische Promotion):</div>
-        <div class="row2" style="grid-template-columns:repeat(3, 1fr)">
+        <div class="row2" style="grid-template-columns:repeat(4, 1fr)">
           <button id="build-step-tileserver-btn" class="subtle" onclick="startStepBuild('tileserver')">TileServer bauen</button>
           <button id="build-step-nominatim-btn" class="subtle" onclick="startStepBuild('nominatim')">Nominatim bauen</button>
           <button id="build-step-valhalla-btn" class="subtle" onclick="startStepBuild('valhalla')">Valhalla bauen</button>
+          <button id="build-step-photon-btn" class="subtle" onclick="startStepBuild('photon')">Photon bauen</button>
         </div>
       </div>
     </div>
@@ -1111,7 +1121,7 @@ INDEX_HTML = """<!doctype html>
     document.getElementById('download-merge-btn').disabled = running;
     document.getElementById('download-only-btn').disabled = running;
     document.getElementById('check-updates-btn').disabled = running;
-    ['tileserver', 'nominatim', 'valhalla'].forEach(function(step) {
+    ['tileserver', 'nominatim', 'valhalla', 'photon'].forEach(function(step) {
       var stepBtn = document.getElementById('build-step-' + step + '-btn');
       if (stepBtn) stepBtn.disabled = running;
     });
@@ -1127,7 +1137,7 @@ INDEX_HTML = """<!doctype html>
   function renderPromote(promote) {
     var el = document.getElementById('promote-list');
     var services = promote && promote.services ? promote.services : {};
-    var keys = ['tileserver', 'nominatim', 'valhalla'];
+    var keys = ['tileserver', 'nominatim', 'valhalla', 'photon'];
     var html = '<div class="stack">';
     keys.forEach(function(name) {
       var row = services[name] || {};
@@ -1405,8 +1415,8 @@ INDEX_HTML = """<!doctype html>
       document.getElementById('auto-update-cron').value = cfg.auto_update_cron || '0 3 * * *';
       document.getElementById('auto-update-mode').value = cfg.auto_update_mode || 'download_merge';
       document.getElementById('auto-update-auto-promote').checked = !!cfg.auto_update_auto_promote;
-      var autoSteps = cfg.auto_update_steps || ['tileserver', 'nominatim', 'valhalla'];
-      ['tileserver', 'nominatim', 'valhalla'].forEach(function(step) {
+      var autoSteps = cfg.auto_update_steps || ['tileserver', 'nominatim', 'valhalla', 'photon'];
+      ['tileserver', 'nominatim', 'valhalla', 'photon'].forEach(function(step) {
         var box = document.getElementById('auto-update-step-' + step);
         if (box) box.checked = autoSteps.indexOf(step) !== -1;
       });
@@ -1451,7 +1461,7 @@ INDEX_HTML = """<!doctype html>
     var cron = document.getElementById('auto-update-cron').value.trim();
     var mode = document.getElementById('auto-update-mode').value;
     var autoPromote = document.getElementById('auto-update-auto-promote').checked;
-    var steps = ['tileserver', 'nominatim', 'valhalla'].filter(function(step) {
+    var steps = ['tileserver', 'nominatim', 'valhalla', 'photon'].filter(function(step) {
       var box = document.getElementById('auto-update-step-' + step);
       return box && box.checked;
     });
@@ -2928,6 +2938,8 @@ class Handler(BaseHTTPRequestHandler):
                 ok, detail = check_http("http://nominatim.osm.svc.cluster.local:8080/")
             elif name == "valhalla":
                 ok, detail = check_http("http://valhalla.osm.svc.cluster.local:8002/")
+            elif name == "photon":
+                ok, detail = check_http("http://photon.osm.svc.cluster.local:2322/status")
             elif name == "web":
                 ok, detail = check_http("http://web.osm.svc.cluster.local:8080/healthz")
             else:

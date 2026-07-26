@@ -1,0 +1,115 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: photon-import
+  namespace: osm
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: fetch-photon-jar
+          image: curlimages/curl:8.10.1
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          env:
+            - name: PHOTON_VERSION
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-photon-config
+                  key: photon_version
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              JAR="/photon/bin/photon-${PHOTON_VERSION}.jar"
+              if [ -s "${JAR}" ]; then
+                echo "Photon ${PHOTON_VERSION} jar already present at ${JAR}."
+              else
+                echo "Downloading Photon ${PHOTON_VERSION} release jar ..."
+                curl -fsSL -o "${JAR}.part" "https://github.com/komoot/photon/releases/download/${PHOTON_VERSION}/photon-${PHOTON_VERSION}.jar"
+                mv "${JAR}.part" "${JAR}"
+                echo "Downloaded Photon ${PHOTON_VERSION}."
+              fi
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: photon-bin
+              mountPath: /photon/bin
+      containers:
+        - name: photon-import
+          image: eclipse-temurin:21-jre
+          env:
+            - name: PHOTON_VERSION
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-photon-config
+                  key: photon_version
+            # Photon builds its search index directly from Nominatim's own,
+            # already-imported Postgres database over the network (the
+            # nominatim-postgres ClusterIP Service in k8s/nominatim.yaml)
+            # instead of downloading a separate OSM data dump/extract.
+            - name: NOMINATIM_DB_HOST
+              value: "nominatim-postgres.osm.svc.cluster.local"
+            - name: NOMINATIM_DB_PORT
+              value: "5432"
+            - name: NOMINATIM_DB_NAME
+              value: "nominatim"
+            - name: PHOTON_DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-photon-config
+                  key: photon_db_user
+            - name: PHOTON_DB_PASSWORD
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-photon-config
+                  key: photon_db_password
+            - name: PHOTON_LANGUAGES
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-photon-config
+                  key: photon_languages
+          resources:
+            requests:
+              memory: "4Gi"
+              cpu: "2"
+            limits:
+              memory: "12Gi"
+              cpu: "6"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              echo '=== Photon Import Job ==='
+              echo "Building the Photon full-text search index from the running Nominatim database at ${NOMINATIM_DB_HOST}:${NOMINATIM_DB_PORT} (no separate OSM data download)."
+              rm -rf /photon/data/photon_data
+              mkdir -p /photon/data
+              cd /photon/data
+              java -jar "/photon/bin/photon-${PHOTON_VERSION}.jar" import \
+                -host "${NOMINATIM_DB_HOST}" -port "${NOMINATIM_DB_PORT}" \
+                -database "${NOMINATIM_DB_NAME}" -user "${PHOTON_DB_USER}" -password "${PHOTON_DB_PASSWORD}" \
+                -languages "${PHOTON_LANGUAGES}" -data-dir /photon/data
+              echo '=== Photon import complete. Index stored at /photon/data/photon_data ==='
+          volumeMounts:
+            - name: photon-bin
+              mountPath: /photon/bin
+            - name: photon-data
+              mountPath: /photon/data
+      volumes:
+        - name: photon-bin
+          hostPath:
+            path: /mnt/data/OSM/photon/bin
+            type: DirectoryOrCreate
+        - name: photon-data
+          hostPath:
+            path: __OSM_TEMP_DIR__/photon/staging
+            type: DirectoryOrCreate

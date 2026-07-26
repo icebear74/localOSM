@@ -18,6 +18,7 @@ data:
     PORT = int(os.environ.get("WEB_PORT", "8080"))
     VALHALLA_URL = os.environ.get("VALHALLA_URL", "http://valhalla.osm.svc.cluster.local:8002")
     NOMINATIM_URL = os.environ.get("NOMINATIM_URL", "http://nominatim.osm.svc.cluster.local:8080")
+    PHOTON_URL = os.environ.get("PHOTON_URL", "http://photon.osm.svc.cluster.local:2322")
     TILESERVER_URL = os.environ.get("TILESERVER_URL", "http://tileserver-gl.osm.svc.cluster.local")
     STATUS_URL = os.environ.get("STATUS_URL", "")
 
@@ -55,6 +56,13 @@ data:
         .geocode-row { display: flex; gap: 4px; }
         .geocode-row input { flex: 1; }
         .geocode-row button { white-space: nowrap; padding: 0 0.6rem; border: 1px solid #ccc; border-radius: 4px; background: #e9ecef; cursor: pointer; font-size: 0.8rem; }
+        .photon-search { position: relative; }
+        .photon-search input { border-color: #2c7ab5; }
+        .photon-results { position: absolute; z-index: 20; left: 0; right: 0; top: 100%; background: #fff; border: 1px solid #ccc;
+                          border-top: none; border-radius: 0 0 4px 4px; max-height: 220px; overflow-y: auto; box-shadow: 0 4px 8px rgba(0,0,0,.15); display: none; }
+        .photon-results div { padding: 0.4rem 0.5rem; font-size: 0.8rem; cursor: pointer; border-bottom: 1px solid #eee; }
+        .photon-results div:last-child { border-bottom: none; }
+        .photon-results div:hover, .photon-results div.active { background: #eaf2f8; }
         #zoom-display { position: absolute; bottom: 10px; right: 10px; background: rgba(0,0,0,0.6); color: #fff; padding: 6px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 600; z-index: 10; pointer-events: none; }
       </style>
     </head>
@@ -66,6 +74,12 @@ data:
     <div id="main">
       <div id="sidebar">
         <div class="section-title">Start</div>
+        <div class="photon-search">
+          <label>Volltextsuche (Photon)</label>
+          <input id="startPhoton" placeholder="Ab 3 Zeichen tippen ..." autocomplete="off"
+                 oninput="onPhotonInput('start')" onkeydown="onPhotonKeydown(event, 'start')">
+          <div id="startPhotonResults" class="photon-results"></div>
+        </div>
         <div>
           <label>Adresse suchen</label>
           <div class="geocode-row">
@@ -79,6 +93,12 @@ data:
         </div>
 
         <div class="section-title">Ziel</div>
+        <div class="photon-search">
+          <label>Volltextsuche (Photon)</label>
+          <input id="endPhoton" placeholder="Ab 3 Zeichen tippen ..." autocomplete="off"
+                 oninput="onPhotonInput('end')" onkeydown="onPhotonKeydown(event, 'end')">
+          <div id="endPhotonResults" class="photon-results"></div>
+        </div>
         <div>
           <label>Adresse suchen</label>
           <div class="geocode-row">
@@ -417,6 +437,161 @@ data:
         box.innerHTML = '<span class="err">Geocoding-Fehler: ' + err + '</span>';
       }
     }
+
+    // --- Photon full-text search-as-you-type ---------------------------------
+    // Extra fields (startPhoton/endPhoton) query Photon (a full search engine
+    // on top of the OSM data) starting at the 3rd typed character and show a
+    // suggestion dropdown. Picking a suggestion resolves its OSM id/type via
+    // Nominatim's /lookup so the normal address/lat/lon fields end up filled
+    // exactly like a manual Nominatim search would ("Alternativ geocoding
+    // direkt ueber Photon"): if the Nominatim lookup fails, Photon's own
+    // coordinates/name are used directly as a fallback so the search still
+    // succeeds.
+    var photonState = {
+      start: { timer: null, requestId: 0, items: [], active: -1 },
+      end: { timer: null, requestId: 0, items: [], active: -1 }
+    };
+
+    function closePhotonResults(which) {
+      var box = document.getElementById(which + 'PhotonResults');
+      box.style.display = 'none';
+      box.innerHTML = '';
+      photonState[which].items = [];
+      photonState[which].active = -1;
+    }
+
+    function onPhotonInput(which) {
+      var state = photonState[which];
+      var query = document.getElementById(which + 'Photon').value.trim();
+      clearTimeout(state.timer);
+      if (query.length < 3) {
+        closePhotonResults(which);
+        return;
+      }
+      // Small debounce so we do not fire a request on every single keystroke.
+      state.timer = setTimeout(function() { runPhotonSearch(which, query); }, 250);
+    }
+
+    async function runPhotonSearch(which, query) {
+      var state = photonState[which];
+      var myRequestId = ++state.requestId;
+      try {
+        var resp = await fetch('/api/photon-search?q=' + encodeURIComponent(query) + '&limit=8');
+        var data = await resp.json();
+        // Ignore stale responses from a previous, slower request.
+        if (myRequestId !== state.requestId) return;
+        var features = (data.features || []);
+        state.items = features;
+        renderPhotonResults(which, features);
+      } catch (e) {
+        if (myRequestId !== state.requestId) return;
+        closePhotonResults(which);
+      }
+    }
+
+    function photonLabel(props) {
+      props = props || {};
+      var parts = [props.name, props.street, props.city, props.state, props.country].filter(function(p) { return !!p; });
+      return parts.join(', ') || 'Unbenannt';
+    }
+
+    function renderPhotonResults(which, features) {
+      var box = document.getElementById(which + 'PhotonResults');
+      var state = photonState[which];
+      state.active = -1;
+      if (!features.length) {
+        box.innerHTML = '<div>Keine Treffer</div>';
+        box.style.display = 'block';
+        return;
+      }
+      box.innerHTML = '';
+      features.forEach(function(feature, idx) {
+        var entry = document.createElement('div');
+        entry.textContent = photonLabel(feature.properties);
+        entry.dataset.index = idx;
+        entry.onclick = function() { selectPhotonResult(which, idx); };
+        box.appendChild(entry);
+      });
+      box.style.display = 'block';
+    }
+
+    function onPhotonKeydown(event, which) {
+      var state = photonState[which];
+      if (!state.items.length) return;
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        state.active = Math.min(state.active + 1, state.items.length - 1);
+        highlightPhotonResult(which);
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        state.active = Math.max(state.active - 1, 0);
+        highlightPhotonResult(which);
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        if (state.active >= 0) selectPhotonResult(which, state.active);
+      } else if (event.key === 'Escape') {
+        closePhotonResults(which);
+      }
+    }
+
+    function highlightPhotonResult(which) {
+      var box = document.getElementById(which + 'PhotonResults');
+      var state = photonState[which];
+      Array.prototype.forEach.call(box.children, function(child, idx) {
+        child.classList.toggle('active', idx === state.active);
+      });
+    }
+
+    // Selecting a suggestion takes over its OSM id/type and looks it up in
+    // Nominatim to populate the normal address field the same way the
+    // "Adresse suchen" button does. If that lookup does not succeed (e.g.
+    // Nominatim does not carry the object for some reason), Photon's own
+    // coordinates/name are used as a direct-geocoding fallback.
+    async function selectPhotonResult(which, idx) {
+      var state = photonState[which];
+      var feature = state.items[idx];
+      closePhotonResults(which);
+      document.getElementById(which + 'Photon').value = photonLabel(feature.properties);
+      var box = document.getElementById('result-box');
+      var props = feature.properties || {};
+      var coords = (feature.geometry && feature.geometry.coordinates) || null;
+      box.innerHTML = '&#128269; Löse Photon-Treffer über Nominatim auf ...';
+      try {
+        if (!props.osm_type || !props.osm_id) throw new Error('kein osm_id/osm_type in Photon-Ergebnis');
+        var resp = await fetch('/api/nominatim-lookup?osm_type=' + encodeURIComponent(props.osm_type) + '&osm_id=' + encodeURIComponent(props.osm_id));
+        var data = await resp.json();
+        if (data.error || !data.result) throw new Error(data.error || 'keine Nominatim-Entsprechung gefunden');
+        var r = data.result;
+        document.getElementById(which + 'Addr').value = r.display_name || photonLabel(props);
+        setMarker(which, parseFloat(r.lat), parseFloat(r.lon));
+        map.flyTo({center: [parseFloat(r.lon), parseFloat(r.lat)], zoom: 15});
+        box.innerHTML = '<span class="ok">&#10003; ' + (which === 'start' ? 'Start' : 'Ziel') + ' via Photon+Nominatim gesetzt</span><br>' + (r.display_name || '');
+      } catch (err) {
+        // Alternative geocoding directly via Photon's own result/coordinates.
+        if (coords && coords.length === 2) {
+          document.getElementById(which + 'Addr').value = photonLabel(props);
+          setMarker(which, coords[1], coords[0]);
+          map.flyTo({center: [coords[0], coords[1]], zoom: 15});
+          box.innerHTML = '<span class="ok">&#10003; ' + (which === 'start' ? 'Start' : 'Ziel') + ' direkt via Photon gesetzt</span><br>' + photonLabel(props) +
+            '<div class="hint">Nominatim-Abgleich nicht möglich (' + esc(String(err)) + '), Photon-Koordinaten direkt übernommen.</div>';
+        } else {
+          box.innerHTML = '<span class="err">Photon-Auswahl konnte nicht übernommen werden: ' + esc(String(err)) + '</span>';
+        }
+      }
+    }
+
+    document.addEventListener('click', function(event) {
+      ['start', 'end'].forEach(function(which) {
+        var wrap = document.getElementById(which + 'Photon').closest('.photon-search');
+        if (wrap && !wrap.contains(event.target)) closePhotonResults(which);
+      });
+    });
+
+    function esc(value) {
+      return String(value).replace(/[&<>"']/g, function(c) {
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+      });
+    }
     </script>
     </body>
     </html>
@@ -726,7 +901,7 @@ data:
                 return
 
             if self.path == "/api/status":
-                self._send_json({"status": "ok", "valhalla": VALHALLA_URL, "nominatim": NOMINATIM_URL})
+                self._send_json({"status": "ok", "valhalla": VALHALLA_URL, "nominatim": NOMINATIM_URL, "photon": PHOTON_URL})
                 return
 
             if self.path == "/api/bounds":
@@ -786,6 +961,55 @@ data:
                     self._send_json({"display_name": data.get("display_name", "")})
                 except Exception as exc:  # noqa: BLE001
                     self._send_json({"error": self._friendly_error(exc, "Nominatim (Reverse Geocoding)")}, 502)
+                return
+
+            if self.path.startswith("/api/photon-search"):
+                # Search-as-you-type suggestions for the extra Photon fields;
+                # Photon is a dedicated full-text search engine on top of the
+                # imported OSM data (separate from Nominatim's own geocoder).
+                query = self.path.split("?", 1)[1] if "?" in self.path else ""
+                params = urllib.parse.parse_qs(query)
+                q = params.get("q", [""])[0]
+                if not q or len(q) < 3:
+                    self._send_json({"error": "query parameter q must be at least 3 characters"}, 400)
+                    return
+                limit = params.get("limit", ["8"])[0]
+                try:
+                    req = urllib.request.Request(
+                        f"{PHOTON_URL}/api?q={urllib.parse.quote(q)}&limit={urllib.parse.quote(limit)}&lang=de",
+                        headers={"User-Agent": "localosm-web/1.0"}
+                    )
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        data = json.loads(response.read().decode("utf-8"))
+                    self._send_json({"features": data.get("features", [])})
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": self._friendly_error(exc, "Photon (Volltextsuche)")}, 502)
+                return
+
+            if self.path.startswith("/api/nominatim-lookup"):
+                # Resolves a Photon result's OSM id/type via Nominatim's
+                # /lookup so the normal address/lat/lon fields end up with the
+                # same data a manual Nominatim search would have produced.
+                query = self.path.split("?", 1)[1] if "?" in self.path else ""
+                params = urllib.parse.parse_qs(query)
+                osm_type = params.get("osm_type", [""])[0].strip().upper()
+                osm_id = params.get("osm_id", [""])[0].strip()
+                if osm_type not in {"N", "W", "R"} or not osm_id:
+                    self._send_json({"error": "osm_type (N/W/R) and osm_id are required"}, 400)
+                    return
+                try:
+                    req = urllib.request.Request(
+                        f"{NOMINATIM_URL}/lookup?osm_ids={osm_type}{urllib.parse.quote(osm_id)}&format=jsonv2",
+                        headers={"User-Agent": "localosm-web/1.0"}
+                    )
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        data = json.loads(response.read().decode("utf-8"))
+                    if not data:
+                        self._send_json({"error": "no matching Nominatim object found", "result": None})
+                        return
+                    self._send_json({"result": data[0]})
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": self._friendly_error(exc, "Nominatim (Lookup)")}, 502)
                 return
 
             self._send_json({"error": "not found"}, 404)
@@ -960,6 +1184,8 @@ spec:
               value: "http://valhalla.osm.svc.cluster.local:8002"
             - name: NOMINATIM_URL
               value: "http://nominatim.osm.svc.cluster.local:8080"
+            - name: PHOTON_URL
+              value: "http://photon.osm.svc.cluster.local:2322"
             - name: TILESERVER_URL
               value: "http://tileserver-gl.osm.svc.cluster.local"
             - name: STATUS_URL

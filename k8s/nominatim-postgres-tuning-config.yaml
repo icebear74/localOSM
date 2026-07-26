@@ -47,3 +47,11 @@ data:
     max_worker_processes = 8
     max_parallel_workers = 6
     max_parallel_workers_per_gather = 3
+    # Nominatim's embedded Postgres only listens on localhost by default.
+    # The Photon import job (k8s/photon-import-job.yaml) builds its search
+    # index straight from this running instance over the network (via the
+    # nominatim-postgres ClusterIP Service in k8s/nominatim.yaml) instead of
+    # downloading OSM data separately, so Postgres must accept TCP
+    # connections from other pods too. Access itself is still restricted by
+    # pg_hba.conf (see the photon role/host rule appended in nominatim.yaml).
+    listen_addresses = '*'

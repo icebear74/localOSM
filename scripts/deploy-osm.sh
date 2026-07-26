@@ -5,7 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NAMESPACE="osm"
 BASE_DIR="/mnt/data/OSM"
 TEMP_BASE_DIR="${OSM_TEMP_DIR:-${BASE_DIR}/TempDir}"
-DEPLOYMENTS=(tileserver-gl nominatim valhalla import-orchestrator status web)
+DEPLOYMENTS=(tileserver-gl nominatim valhalla photon import-orchestrator status web)
 PRESERVE_PATHS=("${BASE_DIR}/library" "${BASE_DIR}/status")
 CLEAN=false
 PRESERVE_DOWNLOADS=false
@@ -157,6 +157,8 @@ for dir in \
   "${BASE_DIR}/tileserver/fonts" \
   "${BASE_DIR}/nominatim/active" \
   "${BASE_DIR}/valhalla/active" \
+  "${BASE_DIR}/photon/active" \
+  "${BASE_DIR}/photon/bin" \
   "${BASE_DIR}/cache" \
   "${BASE_DIR}/status" \
   "${BASE_DIR}/manifests" \
@@ -169,7 +171,8 @@ for dir in \
   "${TEMP_BASE_DIR}/import" \
   "${TEMP_BASE_DIR}/tileserver/staging" \
   "${TEMP_BASE_DIR}/nominatim/staging" \
-  "${TEMP_BASE_DIR}/valhalla/staging"; do
+  "${TEMP_BASE_DIR}/valhalla/staging" \
+  "${TEMP_BASE_DIR}/photon/staging"; do
   ${SUDO} mkdir -p "$dir"
 done
 
@@ -191,6 +194,7 @@ terminate_existing_pods() {
 ${SUDO} chown -R 1000:1000 "${BASE_DIR}/tileserver" 2>/dev/null || true
 ${SUDO} chown -R 100:100   "${BASE_DIR}/nominatim"  2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${BASE_DIR}/valhalla"   2>/dev/null || true
+${SUDO} chown -R 0:0       "${BASE_DIR}/photon"     2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${BASE_DIR}/cache"      2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${BASE_DIR}/status"     2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${BASE_DIR}/manifests"  2>/dev/null || true
@@ -200,6 +204,7 @@ ${SUDO} chown -R 1000:1000 "${TEMP_BASE_DIR}/import"              2>/dev/null ||
 ${SUDO} chown -R 1000:1000 "${TEMP_BASE_DIR}/tileserver"          2>/dev/null || true
 ${SUDO} chown -R 100:100   "${TEMP_BASE_DIR}/nominatim"           2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${TEMP_BASE_DIR}/valhalla"            2>/dev/null || true
+${SUDO} chown -R 0:0       "${TEMP_BASE_DIR}/photon"              2>/dev/null || true
 
 echo ">>> Copying static manifests and orchestrator script …"
 # Manifests that hardcode the OSM_TEMP_DIR mount use the placeholder
@@ -214,6 +219,9 @@ for manifest in \
   valhalla-config.yaml \
   valhalla-import-config.yaml \
   valhalla-import-job.yaml \
+  photon-config.yaml \
+  photon.yaml \
+  photon-import-job.yaml \
   status.yaml \
   status-config.yaml \
   nominatim-import-config.yaml \
@@ -282,7 +290,7 @@ if [ -f "${REPO_ROOT}/k8s/style.json" ]; then
     --dry-run=client -o yaml | kubectl apply -f -
 fi
 
-for manifest in tileserver.yaml nominatim.yaml nominatim-postgres-tuning-config.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml status-config.yaml status.yaml nominatim-import-config.yaml tileserver-import-config.yaml import-orchestrator.yaml web.yaml style-editor.yaml; do
+for manifest in tileserver.yaml nominatim.yaml nominatim-postgres-tuning-config.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml photon-config.yaml photon.yaml status-config.yaml status.yaml nominatim-import-config.yaml tileserver-import-config.yaml import-orchestrator.yaml web.yaml style-editor.yaml; do
   kubectl apply -f "${BASE_DIR}/manifests/${manifest}"
 done
 
