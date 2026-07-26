@@ -107,7 +107,7 @@ spec:
                   fi
                   sleep 5
                 done
-                sudo -u postgres psql -v ON_ERROR_STOP=1 -d nominatim <<SQL || echo "WARNING: could not provision Photon Postgres role (Photon import may fail until this is fixed)."
+                PSQL_OUTPUT=$(sudo -u postgres psql -v ON_ERROR_STOP=1 -d nominatim 2>&1 <<SQL
                 DO \$\$
                 BEGIN
                   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${PHOTON_DB_USER}') THEN
@@ -122,6 +122,7 @@ spec:
                 GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${PHOTON_DB_USER};
                 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ${PHOTON_DB_USER};
               SQL
+                ) || echo "WARNING: could not provision Photon Postgres role (Photon import may fail until this is fixed): ${PSQL_OUTPUT}"
               ) &
               exec /app/start.sh
           ports:
