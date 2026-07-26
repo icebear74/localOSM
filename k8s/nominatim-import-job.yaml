@@ -76,11 +76,20 @@ spec:
               # $THREADS` but never passes --osm2pgsql-cache, so
               # NOMINATIM_OSM2PGSQL_CACHE alone has no effect (see comment on
               # that env var above). Patch init.sh to add --osm2pgsql-cache so
-              # the configured cache size actually reaches osm2pgsql.
+              # the configured cache size actually reaches osm2pgsql. Only the
+              # two `nominatim import ...` lines accept --osm2pgsql-cache; the
+              # later `nominatim index --threads $THREADS` line does NOT (that
+              # subcommand has no --osm2pgsql-cache option and errors out with
+              # "unrecognized arguments" if it is appended there), so the sed
+              # is restricted to lines containing "nominatim import".
               if [ -n "${NOMINATIM_OSM2PGSQL_CACHE:-}" ]; then
-                sed -i 's/--threads \$THREADS/--threads \$THREADS --osm2pgsql-cache \$NOMINATIM_OSM2PGSQL_CACHE/g' /app/init.sh
+                sed -i '/nominatim import/ s/--threads \$THREADS/--threads \$THREADS --osm2pgsql-cache \$NOMINATIM_OSM2PGSQL_CACHE/g' /app/init.sh
                 if ! grep -q -- '--osm2pgsql-cache \$NOMINATIM_OSM2PGSQL_CACHE' /app/init.sh; then
                   echo "ERROR: failed to patch /app/init.sh to honor NOMINATIM_OSM2PGSQL_CACHE (upstream image's init.sh may have changed); aborting." >&2
+                  exit 1
+                fi
+                if grep -q -- 'nominatim index --threads \$THREADS --osm2pgsql-cache' /app/init.sh; then
+                  echo "ERROR: /app/init.sh patch incorrectly added --osm2pgsql-cache to the 'nominatim index' step, which does not support it; aborting." >&2
                   exit 1
                 fi
               fi
