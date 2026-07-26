@@ -105,7 +105,7 @@ CRON_MONTH_NAMES = {
 
 SERVICES = [
     ("tileserver", "tileserver-gl.osm.svc.cluster.local", 80, "http", "/"),
-    ("nominatim", "nominatim.osm.svc.cluster.local", 8080, "http", "/"),
+    ("nominatim", "nominatim.osm.svc.cluster.local", 8080, "http", "/status"),
     ("valhalla", "valhalla.osm.svc.cluster.local", 8002, "http", "/"),
     ("photon", "photon.osm.svc.cluster.local", 2322, "http", "/status"),
     ("web", "web.osm.svc.cluster.local", 8080, "http", "/healthz"),
@@ -2967,7 +2967,7 @@ class Handler(BaseHTTPRequestHandler):
             if name == "tileserver":
                 ok, detail = check_http("http://tileserver-gl.osm.svc.cluster.local/")
             elif name == "nominatim":
-                ok, detail = check_http("http://nominatim.osm.svc.cluster.local:8080/")
+                ok, detail = check_http("http://nominatim.osm.svc.cluster.local:8080/status")
             elif name == "valhalla":
                 ok, detail = check_http("http://valhalla.osm.svc.cluster.local:8002/")
             elif name == "photon":

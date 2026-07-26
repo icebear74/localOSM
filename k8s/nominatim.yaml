@@ -137,7 +137,10 @@ spec:
               cpu: "8"
           startupProbe:
             httpGet:
-              path: /
+              # Nominatim's Falcon API has no route at "/" (always 404); use
+              # the dedicated /status endpoint so the probe can actually
+              # succeed once the service is serving requests.
+              path: /status
               port: 8080
             # Nominatim may spend several minutes on cache warming before
             # serving HTTP, so startup must allow a long grace period.
@@ -146,7 +149,7 @@ spec:
             timeoutSeconds: 5
           readinessProbe:
             httpGet:
-              path: /
+              path: /status
               port: 8080
             initialDelaySeconds: 10
             periodSeconds: 10
