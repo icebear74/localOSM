@@ -1,6 +1,7 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import concurrent.futures
 import errno
+import itertools
 import json
 import os
 import re
@@ -2094,7 +2095,7 @@ def _copy_preserving_ownership(src, dst):
     for root, dirs, files in os.walk(src):
         rel = os.path.relpath(root, src)
         target_root = dst if rel == "." else os.path.join(dst, rel)
-        for name in dirs + files:
+        for name in itertools.chain(dirs, files):
             src_path = os.path.join(root, name)
             dst_path = os.path.join(target_root, name)
             try:
