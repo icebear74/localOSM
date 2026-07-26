@@ -820,6 +820,7 @@ INDEX_HTML = """<!doctype html>
     .muted { color: #7c8a97; }
     .stack { display: grid; gap: 0.5rem; }
     .row2 { display: grid; gap: 0.5rem; grid-template-columns: 1fr 1fr; }
+    .row2 > * { min-width: 0; }
     .message { font-size: 0.82rem; line-height: 1.4; }
     pre { white-space: pre-wrap; word-break: break-word; font-size: 0.75rem; color: #5f6b76; }
   </style>
@@ -924,7 +925,7 @@ INDEX_HTML = """<!doctype html>
         <div id="queue-count" class="hint">Keine Länder in der Queue.</div>
         <div class="hint">Wählt ein Land aus. Der Hinzufügen-Button prüft nur die Verfügbarkeit. "Download &amp; Merge" lädt neuere Extracts herunter und führt sie zusammen; "Build" verwendet dafür bereits vorhandene, zusammengeführte Kartendaten und lädt/merged nur automatisch, falls noch keine vorhanden sind. Danach führt Build (wahlweise mit Promotion) TileServer, Nominatim, Valhalla und Photon nacheinander aus.</div>
         <div class="hint" style="margin-top:0.4rem">Einzelne Build-Schritte auslösen (ohne automatische Promotion):</div>
-        <div class="row2" style="grid-template-columns:repeat(4, 1fr)">
+        <div class="row2" style="grid-template-columns:repeat(2, 1fr)">
           <button id="build-step-tileserver-btn" class="subtle" onclick="startStepBuild('tileserver')">TileServer bauen</button>
           <button id="build-step-nominatim-btn" class="subtle" onclick="startStepBuild('nominatim')">Nominatim bauen</button>
           <button id="build-step-valhalla-btn" class="subtle" onclick="startStepBuild('valhalla')">Valhalla bauen</button>
