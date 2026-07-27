@@ -7,6 +7,18 @@ metadata:
     app: nominatim
 spec:
   replicas: 1
+  # Nominatim runs its own embedded Postgres directly on a hostPath directory
+  # (no locking/exclusion between pods). The default RollingUpdate strategy
+  # starts the new pod (with maxSurge) before the old one has fully
+  # terminated, so both instances' Postgres processes end up racing for the
+  # same data directory: the old instance's shutdown (which can itself take
+  # up to terminationGracePeriodSeconds) deletes postmaster.pid out from
+  # under the new instance's still-in-progress crash-recovery replay,
+  # producing "could not open file postmaster.pid"/"data directory lock file
+  # is invalid"/"pg_ctl: could not start server". Recreate guarantees the old
+  # pod is fully gone before the new one is created.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: nominatim
