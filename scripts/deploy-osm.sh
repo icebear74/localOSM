@@ -97,7 +97,7 @@ clean_data_directory() {
       fi
     done
   else
-    ${SUDO} find "${BASE_DIR:?}" -mindepth 1 -maxdepth 10 -delete
+    ${SUDO} find "${BASE_DIR:?}" -mindepth 1 -delete
   fi
 }
 
