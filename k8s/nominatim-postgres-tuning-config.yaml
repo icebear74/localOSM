@@ -38,10 +38,10 @@ data:
   # requests 2Gi/2 CPUs (limit 8Gi/8 CPUs, see k8s/nominatim.yaml), so these
   # are sized for steady-state query serving rather than bulk import.
   runtime-tuning.conf: |
-    shared_buffers = 512MB
+    shared_buffers = 2GB
     effective_cache_size = 2GB
     maintenance_work_mem = 256MB
-    work_mem = 32MB
+    work_mem = 64MB
     random_page_cost = 1.1
     max_worker_processes = 8
     max_parallel_workers = 6
