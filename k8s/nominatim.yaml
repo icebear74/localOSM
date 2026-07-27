@@ -102,6 +102,21 @@ spec:
           args:
             - |
               set -euo pipefail
+              # start.sh invokes `service postgresql start`, which runs
+              # pg_ctlcluster(1) (Debian's postgresql-common wrapper). That
+              # wrapper unconditionally replaces its *entire* inherited
+              # environment with only the contents of the cluster's
+              # /etc/postgresql/16/main/environment file (plus LANG), so the
+              # PGCTLTIMEOUT container env var above never actually reaches
+              # pg_ctl and the crash-recovery timeout fix silently has no
+              # effect (pg_ctl keeps using its 60s default, still causing
+              # "pg_ctl: server did not start in time" on long WAL replays).
+              # pg_ctlcluster does honor a separate pg_ctl.conf file though,
+              # whose "pg_ctl_options" value is appended verbatim to the
+              # pg_ctl command line, so set the timeout there instead.
+              PG_CTL_CONF=/etc/postgresql/16/main/pg_ctl.conf
+              mkdir -p "$(dirname "${PG_CTL_CONF}")"
+              echo "pg_ctl_options = '-t ${PGCTLTIMEOUT}'" > "${PG_CTL_CONF}"
               # Photon (k8s/photon-import-job.yaml) builds its search index directly
               # from this running Nominatim's embedded Postgres over the network (via
               # the nominatim-postgres Service below) instead of downloading OSM data
