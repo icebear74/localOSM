@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NAMESPACE="osm"
-BASE_DIR="/mnt/data/OSM"
+BASE_DIR="/mnt/OSM"
 TEMP_BASE_DIR="${OSM_TEMP_DIR:-${BASE_DIR}/TempDir}"
 DEPLOYMENTS=(tileserver-gl nominatim valhalla photon import-orchestrator status web)
 PRESERVE_PATHS=("${BASE_DIR}/library" "${BASE_DIR}/status")
@@ -53,7 +53,7 @@ is_safe_basedir() {
   done
   local depth
   depth="$(echo "${dir}" | tr -cd '/' | wc -c)"
-  [ "${depth}" -ge 3 ] || return 1
+  [ "${depth}" -ge 2 ] || return 1
 }
 
 if ! is_safe_basedir "${BASE_DIR}"; then

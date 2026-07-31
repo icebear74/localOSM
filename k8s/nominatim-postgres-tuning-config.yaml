@@ -9,11 +9,11 @@ data:
   # the main Postgres' import-time tuning at that scale.
   import-tuning.conf: |
     # SPEICHER
-    shared_buffers = 8GB
-    maintenance_work_mem = 4GB          # Sehr wichtig für die Index-Erstellung
-    work_mem = 128MB
+    shared_buffers = 48GB
+    maintenance_work_mem = 24GB          # Sehr wichtig für die Index-Erstellung
+    work_mem = 256MB
     wal_buffers = 64MB
-    effective_cache_size = 20GB          # Signalisiert Postgres den freien Page Cache
+    effective_cache_size = 80GB          # Signalisiert Postgres den freien Page Cache
     # EXTREME IMPORT-SPEEDUPS (Nur für Erstimport!)
     fsync = off                          # Schaltet Synchrongarantie ab -> riesiger Boost
     full_page_writes = off
@@ -32,20 +32,22 @@ data:
     max_worker_processes = 16
     max_parallel_workers = 16
     max_parallel_workers_per_gather = 4
-    max_parallel_maintenance_workers = 3 # Beschleunigt INDEX-Erstellung massiv
+    max_parallel_maintenance_workers = 4 # Beschleunigt INDEX-Erstellung massiv
 
   # Applied by nominatim.yaml (the running Nominatim service). This deployment
   # requests 2Gi/2 CPUs (limit 8Gi/8 CPUs, see k8s/nominatim.yaml), so these
   # are sized for steady-state query serving rather than bulk import.
   runtime-tuning.conf: |
-    shared_buffers = 2GB
-    effective_cache_size = 2GB
-    maintenance_work_mem = 256MB
-    work_mem = 64MB
+    shared_buffers = 16GB
+    effective_cache_size = 16GB
+    maintenance_work_mem = 2GB
+    autovacuum_vacuum_cost_limit = 1000 # <--- Lockert die künstliche Bremse (Default ist 200)
+    work_mem = 128MB
     random_page_cost = 1.1
-    max_worker_processes = 8
-    max_parallel_workers = 6
+    max_worker_processes = 4
+    max_parallel_workers = 4
     max_parallel_workers_per_gather = 3
+    autovacuum_max_workers = 4
     # Nominatim's embedded Postgres only listens on localhost by default.
     # The Photon import job (k8s/photon-import-job.yaml) builds its search
     # index straight from this running instance over the network (via the

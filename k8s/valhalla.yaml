@@ -65,7 +65,7 @@ spec:
       volumes:
         - name: valhalla-data
           hostPath:
-            path: /mnt/data/OSM/valhalla/active
+            path: /mnt/OSM/valhalla/active
             type: DirectoryOrCreate
 ---
 apiVersion: v1

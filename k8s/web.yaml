@@ -1203,7 +1203,7 @@ spec:
             name: osm-web-app
         - name: web-static
           hostPath:
-            path: /mnt/data/OSM/web-static
+            path: /mnt/OSM/web-static
             type: DirectoryOrCreate
 ---
 apiVersion: v1

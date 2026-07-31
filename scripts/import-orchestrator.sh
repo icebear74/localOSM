@@ -2,8 +2,8 @@
 set -euo pipefail
 
 NAMESPACE="${OSM_NAMESPACE:-osm}"
-DATA_DIR="${OSM_DATA_DIR:-/mnt/data/OSM}"
-TEMP_DIR="${OSM_TEMP_DIR:-/mnt/data/OSM/TempDir}"
+DATA_DIR="${OSM_DATA_DIR:-/mnt/OSM}"
+TEMP_DIR="${OSM_TEMP_DIR:-/mnt/OSM/TempDir}"
 MANIFEST_DIR="${OSM_MANIFEST_DIR:-/manifests}"
 STATE_DIR="${OSM_STATE_DIR:-/state}"
 CONFIG_DIR="${OSM_CONFIG_DIR:-/config}"

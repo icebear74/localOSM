@@ -33,8 +33,8 @@ def parse_int_env(name, default):
 
 HOST = os.environ.get("STATUS_HOST", "0.0.0.0")
 PORT = parse_int_env("STATUS_PORT", 8080)
-DATA_DIR = os.environ.get("OSM_DATA_DIR", "/mnt/data/OSM")
-TEMP_DIR = os.environ.get("OSM_TEMP_DIR", "/mnt/data/OSM/TempDir")
+DATA_DIR = os.environ.get("OSM_DATA_DIR", "/mnt/OSM")
+TEMP_DIR = os.environ.get("OSM_TEMP_DIR", "/mnt/OSM/TempDir")
 NAMESPACE = os.environ.get("OSM_NAMESPACE", "osm")
 OSM_NODE_URL = os.environ.get("OSM_NODE_URL", "").strip()
 

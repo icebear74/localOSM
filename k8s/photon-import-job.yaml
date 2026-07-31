@@ -83,8 +83,8 @@ spec:
               memory: "4Gi"
               cpu: "2"
             limits:
-              memory: "12Gi"
-              cpu: "6"
+              memory: "64Gi"
+              cpu: "16"
           command: ["/bin/bash", "-c"]
           args:
             - |
@@ -94,7 +94,7 @@ spec:
               rm -rf /photon/data/photon_data
               mkdir -p /photon/data
               cd /photon/data
-              java -jar "/photon/bin/photon-${PHOTON_VERSION}.jar" import \
+              java -Xms16g -Xmx32g -XX:+UseG1GC -jar "/photon/bin/photon-${PHOTON_VERSION}.jar" import \
                 -host "${NOMINATIM_DB_HOST}" -port "${NOMINATIM_DB_PORT}" \
                 -database "${NOMINATIM_DB_NAME}" -user "${PHOTON_DB_USER}" -password "${PHOTON_DB_PASSWORD}" \
                 -languages "${PHOTON_LANGUAGES}" -data-dir /photon/data
@@ -107,7 +107,7 @@ spec:
       volumes:
         - name: photon-bin
           hostPath:
-            path: /mnt/data/OSM/photon/bin
+            path: /mnt/OSM/photon/bin
             type: DirectoryOrCreate
         - name: photon-data
           hostPath:

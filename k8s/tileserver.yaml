@@ -114,7 +114,7 @@ spec:
       volumes:
         - name: tileserver-data
           hostPath:
-            path: /mnt/data/OSM/tileserver/active
+            path: /mnt/OSM/tileserver/active
             type: DirectoryOrCreate
         - name: tileserver-style
           configMap:
@@ -122,7 +122,7 @@ spec:
             optional: true
         - name: tileserver-fonts
           hostPath:
-            path: /mnt/data/OSM/tileserver/fonts
+            path: /mnt/OSM/tileserver/fonts
             type: DirectoryOrCreate
         # TileServer-GL renders raster tiles server-side via MapLibre GL Native's
         # headless GL backend, which needs shared memory to allocate its GL

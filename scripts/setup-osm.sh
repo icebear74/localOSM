@@ -13,7 +13,7 @@
 # Called by: scripts/deploy-osm.sh
 # Usage: setup-osm.sh
 #   Environment variables:
-#     DATA_DIR: Base data directory (default: /mnt/data/OSM)
+#     DATA_DIR: Base data directory (default: /mnt/OSM)
 #     VERBOSE: Enable verbose output (set to 1 for debug output)
 #
 # Exit codes:
@@ -23,7 +23,7 @@
 set -o pipefail
 
 # Configuration
-DATA_DIR="${DATA_DIR:-/mnt/data/OSM}"
+DATA_DIR="${DATA_DIR:-/mnt/OSM}"
 TILESERVER_DIR="${DATA_DIR}/tileserver"
 FONTS_DIR="${TILESERVER_DIR}/fonts"
 FONTS_NAME="NotoSansRegular"

@@ -64,18 +64,18 @@ spec:
           imagePullPolicy: Always
           resources:
             requests:
-              memory: "6Gi"
+              memory: "16Gi"
               cpu: "5"
             limits:
-              memory: "20Gi"
-              cpu: "14"
+              memory: "80Gi"
+              cpu: "20"
           env:
             - name: JAVA_OPTS
 #              value: "-Xms6g -Xmx8g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
-              value: "-Xms4g -Xmx7g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"
+              value: "-Xms16g -Xmx64g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"
  
             - name: JAVA_TOOL_OPTIONS
-              value: "-Xms4g -Xmx7g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"
+              value: "-Xms16g -Xmx64g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"
 
 #          args:
 #            - --osm-path=/data/import/planet.osm.pbf
@@ -96,9 +96,9 @@ spec:
             - --fetch-wikidata
             # ÄNDRUNG: Wechsel auf Disk-Speicher für Nodes, um den RAM zu schonen
             - --nodemap-type=sparsearray
-            - --nodemap-storage=mmap
+            - --nodemap-storage=ram
             # ÄNDERUNG: Threads auf 14 hochgeschraubt
-            - --threads=14
+            - --threads=18
             - --arguments=journal_mode=WAL,synchronous=OFF,mmap_size=268435456            
             - --lake_centerlines_path=/data/sources/lake_centerline.shp.zip
             - --water_polygons_path=/data/sources/water-polygons-split-3857.zip

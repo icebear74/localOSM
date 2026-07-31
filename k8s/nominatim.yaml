@@ -43,6 +43,7 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
+              trap 'echo "Terminating wait script..."; exit 0' TERM INT
               DB=/nominatim-db/PG_VERSION
               IMPORT_FINISHED=/nominatim-db/import-finished
               LAST_MISSING=""
@@ -54,7 +55,7 @@ spec:
                   echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for imported Nominatim database markers at $MISSING ..."
                   LAST_MISSING="$MISSING"
                 fi
-                sleep 30
+                sleep 5
               done
               echo "Database ready — starting Nominatim."
           resources:
@@ -196,8 +197,8 @@ spec:
               memory: "2Gi"
               cpu: "2"
             limits:
-              memory: "8Gi"
-              cpu: "8"
+              memory: "24Gi"
+              cpu: "16"
           startupProbe:
             httpGet:
               # Nominatim's Falcon API has no route at "/" (always 404); use
@@ -235,7 +236,7 @@ spec:
       volumes:
         - name: nominatim-data
           hostPath:
-            path: /mnt/data/OSM/nominatim/active
+            path: /mnt/OSM/nominatim/active
             type: DirectoryOrCreate
         - name: nominatim-postgres-tuning
           configMap:

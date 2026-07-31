@@ -14,8 +14,8 @@ data:
         "admin": "/data/admin.sqlite",
         "default_speeds_config": "/usr/local/share/valhalla/mjolnir/default_speeds.lua",
         "max_speed": 150,
-        "num_threads": 4,
-        "max_cache_size": 200000000,
+        "num_threads": 16,
+        "max_cache_size": 34359738368,
         "lru_mem_cache_hard_control": true,
         "logging": {
           "type": "std_out",

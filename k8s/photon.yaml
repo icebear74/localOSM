@@ -118,11 +118,11 @@ spec:
       volumes:
         - name: photon-bin
           hostPath:
-            path: /mnt/data/OSM/photon/bin
+            path: /mnt/OSM/photon/bin
             type: DirectoryOrCreate
         - name: photon-data
           hostPath:
-            path: /mnt/data/OSM/photon/active
+            path: /mnt/OSM/photon/active
             type: DirectoryOrCreate
 ---
 apiVersion: v1

@@ -57,10 +57,10 @@ spec:
                   key: import_cache_mb
           resources:
             requests:
-              memory: "14Gi"
+              memory: "48Gi"
               cpu: "8"
             limits:
-              memory: "36Gi"
+              memory: "96Gi"
               cpu: "20"
           command: ["/bin/bash", "-c"]
           args:
