@@ -1,0 +1,141 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: photon
+  namespace: osm
+  labels:
+    app: photon
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: photon
+  template:
+    metadata:
+      labels:
+        app: photon
+    spec:
+      initContainers:
+        - name: fetch-photon-jar
+          image: curlimages/curl:8.10.1
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          env:
+            - name: PHOTON_VERSION
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-photon-config
+                  key: photon_version
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              JAR="/photon/bin/photon-${PHOTON_VERSION}.jar"
+              if [ -s "${JAR}" ]; then
+                echo "Photon ${PHOTON_VERSION} jar already present at ${JAR}."
+              else
+                echo "Downloading Photon ${PHOTON_VERSION} release jar ..."
+                curl -fsSL -o "${JAR}.part" "https://github.com/komoot/photon/releases/download/${PHOTON_VERSION}/photon-${PHOTON_VERSION}.jar"
+                mv "${JAR}.part" "${JAR}"
+                echo "Downloaded Photon ${PHOTON_VERSION}."
+              fi
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: photon-bin
+              mountPath: /photon/bin
+        - name: wait-for-data
+          image: busybox:1.36
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              until [ -d /photon/data/photon_data ]; do
+                echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for the Photon search index at /photon/data/photon_data ..."
+                sleep 30
+              done
+              echo "Photon search index found — starting Photon service."
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "16Mi"
+            limits:
+              cpu: "50m"
+              memory: "64Mi"
+          volumeMounts:
+            - name: photon-data
+              mountPath: /photon/data
+      containers:
+        - name: photon
+          image: eclipse-temurin:21-jre
+          env:
+            - name: PHOTON_VERSION
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-photon-config
+                  key: photon_version
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              exec java -jar "/photon/bin/photon-${PHOTON_VERSION}.jar" serve \
+                -listen-ip 0.0.0.0 -listen-port 2322 -cors-any -data-dir /photon/data
+          ports:
+            - containerPort: 2322
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "1"
+            limits:
+              memory: "6Gi"
+              cpu: "4"
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: 2322
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 30
+            timeoutSeconds: 5
+          startupProbe:
+            httpGet:
+              path: /status
+              port: 2322
+            periodSeconds: 10
+            failureThreshold: 60
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: photon-bin
+              mountPath: /photon/bin
+              readOnly: true
+            - name: photon-data
+              mountPath: /photon/data
+      volumes:
+        - name: photon-bin
+          hostPath:
+            path: /mnt/OSM/photon/bin
+            type: DirectoryOrCreate
+        - name: photon-data
+          hostPath:
+            path: /mnt/OSM/photon/active
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: photon
+  namespace: osm
+spec:
+  type: NodePort
+  selector:
+    app: photon
+  ports:
+    - name: http
+      port: 2322
+      targetPort: 2322
+      nodePort: 30087

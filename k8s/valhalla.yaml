@@ -55,7 +55,7 @@ spec:
               memory: "4Gi"
               cpu: "4"
             limits:
-              memory: "8Gi"
+              memory: "16Gi"
               cpu: "8"
           ports:
             - containerPort: 8002
@@ -65,7 +65,7 @@ spec:
       volumes:
         - name: valhalla-data
           hostPath:
-            path: /mnt/data/OSM/valhalla/active
+            path: /mnt/OSM/valhalla/active
             type: DirectoryOrCreate
 ---
 apiVersion: v1

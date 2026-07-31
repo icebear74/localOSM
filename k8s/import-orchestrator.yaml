@@ -68,7 +68,7 @@ spec:
             - name: OSM_CONFIG_DIR
               value: /config
             - name: OSM_DATA_DIR
-              value: /mnt/data/OSM
+              value: /mnt/OSM
             - name: OSM_TEMP_DIR
               value: __OSM_TEMP_DIR__
           resources:
@@ -94,21 +94,21 @@ spec:
             - name: tileserver-config
               mountPath: /config/tileserver
             - name: data
-              mountPath: /mnt/data/OSM
+              mountPath: /mnt/OSM
             - name: temp-data
               mountPath: __OSM_TEMP_DIR__
       volumes:
         - name: orchestrator-script
           hostPath:
-            path: /mnt/data/OSM/scripts
+            path: /mnt/OSM/scripts
             type: DirectoryOrCreate
         - name: manifests
           hostPath:
-            path: /mnt/data/OSM/manifests
+            path: /mnt/OSM/manifests
             type: DirectoryOrCreate
         - name: state
           hostPath:
-            path: /mnt/data/OSM/status
+            path: /mnt/OSM/status
             type: DirectoryOrCreate
         - name: status-config
           configMap:
@@ -124,7 +124,7 @@ spec:
             name: osm-tileserver-import-config
         - name: data
           hostPath:
-            path: /mnt/data/OSM
+            path: /mnt/OSM
             type: DirectoryOrCreate
         - name: temp-data
           hostPath:

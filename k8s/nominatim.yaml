@@ -7,6 +7,18 @@ metadata:
     app: nominatim
 spec:
   replicas: 1
+  # Nominatim runs its own embedded Postgres directly on a hostPath directory
+  # (no locking/exclusion between pods). The default RollingUpdate strategy
+  # starts the new pod (with maxSurge) before the old one has fully
+  # terminated, so both instances' Postgres processes end up racing for the
+  # same data directory: the old instance's shutdown (which can itself take
+  # up to terminationGracePeriodSeconds) deletes postmaster.pid out from
+  # under the new instance's still-in-progress crash-recovery replay,
+  # producing "could not open file postmaster.pid"/"data directory lock file
+  # is invalid"/"pg_ctl: could not start server". Recreate guarantees the old
+  # pod is fully gone before the new one is created.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: nominatim
@@ -17,16 +29,33 @@ spec:
     spec:
       securityContext:
         fsGroup: 100
+      # Postgres' embedded shutdown checkpoint on this planet-scale database
+      # can take minutes (observed: over 2 minutes for a single routine
+      # checkpoint), and an unclean shutdown forces a WAL crash-recovery
+      # replay on the next start that can take much longer still. The default
+      # 30s grace period is nowhere near enough, so SIGKILL would otherwise
+      # hit Postgres mid-checkpoint on every pod restart/redeploy, causing
+      # exactly the crash-recovery/timeout loop this is meant to avoid.
+      terminationGracePeriodSeconds: 3660
       initContainers:
         - name: wait-for-data
           image: busybox:1.36
           command: ["/bin/sh", "-c"]
           args:
             - |
+              trap 'echo "Terminating wait script..."; exit 0' TERM INT
               DB=/nominatim-db/PG_VERSION
-              until [ -f "$DB" ]; do
-                echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for imported Nominatim database at $DB ..."
-                sleep 30
+              IMPORT_FINISHED=/nominatim-db/import-finished
+              LAST_MISSING=""
+              until [ -f "$DB" ] && [ -f "$IMPORT_FINISHED" ]; do
+                MISSING=""
+                [ -f "$DB" ] || MISSING="$DB"
+                [ -f "$IMPORT_FINISHED" ] || MISSING="${MISSING:+$MISSING, }$IMPORT_FINISHED"
+                if [ "$MISSING" != "$LAST_MISSING" ]; then
+                  echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for imported Nominatim database markers at $MISSING ..."
+                  LAST_MISSING="$MISSING"
+                fi
+                sleep 5
               done
               echo "Database ready — starting Nominatim."
           resources:
@@ -61,23 +90,160 @@ spec:
             # import-finished marker is missing. Without it the container crash-loops.
             - name: PBF_PATH
               value: /nominatim/data/import/planet.osm.pbf
+            - name: PHOTON_DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-photon-config
+                  key: photon_db_user
+            - name: PHOTON_DB_PASSWORD
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-photon-config
+                  key: photon_db_password
+            # pg_ctl (invoked internally by `service postgresql start`/`stop`
+            # via pg_ctlcluster) defaults to only waiting 60 seconds for
+            # Postgres to become ready/stop. On this planet-scale database a
+            # routine checkpoint alone can take minutes, and a WAL
+            # crash-recovery replay after an unclean shutdown can take much
+            # longer, so the default causes "pg_ctl: server did not start in
+            # time" and crash-loops the whole container (start.sh runs with
+            # `set -e`). Raise it well above worst-case recovery time; must
+            # stay below terminationGracePeriodSeconds above.
+            - name: PGCTLTIMEOUT
+              value: "3600"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              # start.sh invokes `service postgresql start`, which runs
+              # pg_ctlcluster(1) (Debian's postgresql-common wrapper). That
+              # wrapper unconditionally replaces its *entire* inherited
+              # environment with only the contents of the cluster's
+              # /etc/postgresql/16/main/environment file (plus LANG), so the
+              # PGCTLTIMEOUT container env var above never actually reaches
+              # pg_ctl and the crash-recovery timeout fix silently has no
+              # effect (pg_ctl keeps using its 60s default, still causing
+              # "pg_ctl: server did not start in time" on long WAL replays).
+              # pg_ctlcluster does honor a separate pg_ctl.conf file though,
+              # whose "pg_ctl_options" value is appended verbatim to the
+              # pg_ctl command line, so set the timeout there instead.
+              PG_CTL_CONF=/etc/postgresql/16/main/pg_ctl.conf
+              mkdir -p "$(dirname "${PG_CTL_CONF}")"
+              echo "pg_ctl_options = '-t ${PGCTLTIMEOUT}'" > "${PG_CTL_CONF}"
+              # Photon (k8s/photon-import-job.yaml) builds its search index directly
+              # from this running Nominatim's embedded Postgres over the network (via
+              # the nominatim-postgres Service below) instead of downloading OSM data
+              # separately. The stock image only allows local connections, so append a
+              # single additive pg_hba.conf rule (never replacing the file, so
+              # Nominatim's own local/peer auth entries stay untouched) that lets the
+              # dedicated read-only "${PHOTON_DB_USER}" role connect over TCP.
+              HBA_FILE=/etc/postgresql/16/main/pg_hba.conf
+              HBA_LINE="host nominatim ${PHOTON_DB_USER} 0.0.0.0/0 scram-sha-256"
+              mkdir -p "$(dirname "${HBA_FILE}")"
+              touch "${HBA_FILE}"
+              if ! grep -qxF "${HBA_LINE}" "${HBA_FILE}"; then
+                echo "${HBA_LINE}" >> "${HBA_FILE}"
+              fi
+              # Postgres itself is only started by /app/start.sh below, so create/
+              # update the Photon role in the background once it becomes reachable
+              # (this never blocks startup of the normal Nominatim service).
+              (
+                for _ in $(seq 1 60); do
+                  if pg_isready -q; then
+                    break
+                  fi
+                  sleep 5
+                done
+                PSQL_OUTPUT=$(sudo -u postgres psql -v ON_ERROR_STOP=1 -d nominatim 2>&1 <<SQL
+                DO \$\$
+                BEGIN
+                  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${PHOTON_DB_USER}') THEN
+                    EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', '${PHOTON_DB_USER}', '${PHOTON_DB_PASSWORD}');
+                  ELSE
+                    EXECUTE format('ALTER ROLE %I PASSWORD %L', '${PHOTON_DB_USER}', '${PHOTON_DB_PASSWORD}');
+                  END IF;
+                END
+                \$\$;
+                GRANT CONNECT ON DATABASE nominatim TO ${PHOTON_DB_USER};
+                GRANT USAGE, CREATE ON SCHEMA public TO ${PHOTON_DB_USER};
+                GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${PHOTON_DB_USER};
+                ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ${PHOTON_DB_USER};
+                -- Photon's importer runs "CREATE INDEX ON placex (...)" during
+                -- import, which in Postgres requires table ownership (plain
+                -- SELECT/USAGE grants are not enough, and there is no separate
+                -- "CREATE INDEX" privilege to grant on an existing table).
+                -- Make the Photon role a member of whichever role owns placex
+                -- (the Nominatim import user) so it inherits owner privileges
+                -- on that table without needing superuser access.
+                DO \$\$
+                DECLARE
+                  placex_owner text;
+                BEGIN
+                  SELECT tableowner INTO placex_owner FROM pg_tables WHERE schemaname = 'public' AND tablename = 'placex';
+                  IF placex_owner IS NOT NULL THEN
+                    EXECUTE format('GRANT %I TO %I', placex_owner, '${PHOTON_DB_USER}');
+                  END IF;
+                END
+                \$\$;
+              SQL
+                ) || echo "WARNING: could not provision Photon Postgres role (Photon import may fail until this is fixed): ${PSQL_OUTPUT}"
+              ) &
+              exec /app/start.sh
           ports:
             - containerPort: 8080
+            - containerPort: 5432
           resources:
             requests:
               memory: "2Gi"
               cpu: "2"
             limits:
-              memory: "8Gi"
-              cpu: "8"
+              memory: "24Gi"
+              cpu: "16"
+          startupProbe:
+            httpGet:
+              # Nominatim's Falcon API has no route at "/" (always 404); use
+              # the dedicated /status endpoint so the probe can actually
+              # succeed once the service is serving requests.
+              path: /status
+              port: 8080
+            # Nominatim may spend several minutes on cache warming, and on
+            # top of that a WAL crash-recovery replay after an unclean
+            # shutdown can take up to PGCTLTIMEOUT (see env above) before
+            # Postgres itself is even ready, so startup must allow a very
+            # long grace period here too, or Kubernetes would restart the
+            # pod mid-recovery and restart the whole recovery from scratch.
+            periodSeconds: 10
+            failureThreshold: 540
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+            timeoutSeconds: 5
           volumeMounts:
             - name: nominatim-data
               mountPath: /var/lib/postgresql/16/main
+            # Tunable Postgres settings for the running service (see
+            # k8s/nominatim-postgres-tuning-config.yaml); loaded from conf.d
+            # last, so these values win over any defaults.
+            - name: nominatim-postgres-tuning
+              mountPath: /etc/postgresql/16/main/conf.d/zz-tuning.conf
+              subPath: runtime-tuning.conf
+              readOnly: true
       volumes:
         - name: nominatim-data
           hostPath:
-            path: /mnt/data/OSM/nominatim/active
+            path: /mnt/OSM/nominatim/active
             type: DirectoryOrCreate
+        - name: nominatim-postgres-tuning
+          configMap:
+            name: nominatim-postgres-tuning
+            items:
+              - key: runtime-tuning.conf
+                path: runtime-tuning.conf
 ---
 apiVersion: v1
 kind: Service
@@ -93,3 +259,22 @@ spec:
       port: 8080
       targetPort: 8080
       nodePort: 30081
+---
+# Internal-only (ClusterIP, no NodePort) access to Nominatim's embedded
+# Postgres so the Photon import job (k8s/photon-import-job.yaml) can build
+# its search index directly from the live database instead of downloading
+# OSM data separately. See the pg_hba.conf/role provisioning wrapper in the
+# nominatim Deployment above.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nominatim-postgres
+  namespace: osm
+spec:
+  type: ClusterIP
+  selector:
+    app: nominatim
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
