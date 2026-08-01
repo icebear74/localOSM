@@ -94,6 +94,17 @@ spec:
                 fi
               fi
               /app/init.sh
+              # Nach erfolgreichem Import: Warte auf Background-PostgreSQL-Prozesse,
+              # erzwinge einen CHECKPOINT und stelle sicher, dass alle WAL-Einträge
+              # auf die Festplatte geschrieben wurden, bevor der Marker gesetzt wird.
+              # Dies verhindert Datenbankkorruption beim nächsten Pod-Start.
+              echo "Nominatim-Import abgeschlossen. Warte 10 Sekunden auf Background-PostgreSQL-Prozesse..."
+              sleep 10
+              echo "Erzwinge PostgreSQL CHECKPOINT, um alle Daten auf Disk zu schreiben..."
+              su -c "psql -c 'CHECKPOINT;'" postgres
+              echo "Warte 5 Sekunden auf WAL-Flush..."
+              sleep 5
+              echo "WAL-Flush abgeschlossen. Setze import-finished Marker..."
               touch /var/lib/postgresql/16/main/import-finished
           volumeMounts:
             - name: import-data
