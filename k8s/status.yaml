@@ -13,9 +13,15 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "pods/log"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "patch", "update"]
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "list", "watch", "patch", "update"]
@@ -84,8 +90,8 @@ data:
     import urllib.request
     import email.utils
     from datetime import datetime, timezone
-
-
+    
+    
     def parse_int_env(name, default):
         value = os.environ.get(name)
         if value is None:
@@ -97,15 +103,15 @@ data:
             return int(value)
         except ValueError:
             return default
-
-
+    
+    
     HOST = os.environ.get("STATUS_HOST", "0.0.0.0")
     PORT = parse_int_env("STATUS_PORT", 8080)
     DATA_DIR = os.environ.get("OSM_DATA_DIR", "/mnt/OSM")
     TEMP_DIR = os.environ.get("OSM_TEMP_DIR", "/mnt/OSM/TempDir")
     NAMESPACE = os.environ.get("OSM_NAMESPACE", "osm")
     OSM_NODE_URL = os.environ.get("OSM_NODE_URL", "").strip()
-
+    
     STATUS_DIR = os.path.join(DATA_DIR, "status")
     LIBRARY_DIR = os.path.join(DATA_DIR, "library")
     IMPORT_DIR = os.path.join(TEMP_DIR, "import")
@@ -117,6 +123,9 @@ data:
     # Live style used by TileServer-GL (k8s/tileserver.yaml mounts the same hostPath).
     TILESERVER_STYLE_PATH = os.path.join(DATA_DIR, "tileserver", "active", "style.json")
     IMPORT_REQUEST_FILE = os.path.join(STATUS_DIR, "import-request.json")
+    PLANET_FILE = os.path.join(DATA_DIR, "planet-latest.osm.pbf")
+    PLANET_FINAL_FILE = os.path.join(DATA_DIR, "europa_mitte_final.osm.pbf")
+    PRIVATE_OSM_FILE = os.path.join(DATA_DIR, "privat.osm")
     # import-orchestrator.sh writes its own live progress here (same hostPath as
     # STATUS_DIR, see k8s/import-orchestrator.yaml "state" volume) and watches for
     # ABORT_FLAG_FILE to cancel whatever it is currently doing.
@@ -148,10 +157,22 @@ data:
             "staging_dir": os.path.join(TEMP_DIR, "photon", "staging"),
         },
     }
-
+    
     # Fixed pipeline order the import-orchestrator always runs these steps in.
     BUILD_STEPS = ("tileserver", "nominatim", "valhalla", "photon")
-
+    PIPELINE_CONFIGMAPS = {
+        "geojson": {"name": "cm-extract-polygon", "key": "polygon.geojson"},
+        "filter": {"name": "cm-worldmap-filter", "key": "filter.txt"},
+    }
+    PIPELINE_TRIGGER_TARGETS = {
+        "planet-update": {"kind": "cronjob", "name": "planet-update", "prefix": "planet-update"},
+        "osmium-pipeline": {"kind": "job", "name": "osmium-pipeline", "prefix": "osmium-pipeline"},
+        "nominatim-import": {"kind": "job", "name": "nominatim-import", "prefix": "nominatim-import"},
+        "valhalla-import": {"kind": "job", "name": "valhalla-import", "prefix": "valhalla-import"},
+        "tileserver-import": {"kind": "job", "name": "tileserver-import", "prefix": "tileserver-import"},
+        "photon-import": {"kind": "job", "name": "photon-import", "prefix": "photon-import"},
+    }
+    
     CONFIG_DEFAULTS = {
         "node_url": "",
         "auto_update_enabled": False,
@@ -164,13 +185,13 @@ data:
         "auto_update_steps": list(BUILD_STEPS),
         "auto_update_auto_promote": True,
     }
-
+    
     CRON_WEEKDAY_NAMES = {"sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6}
     CRON_MONTH_NAMES = {
         "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
         "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
     }
-
+    
     SERVICES = [
         ("tileserver", "tileserver-gl.osm.svc.cluster.local", 80, "http", "/"),
         ("nominatim", "nominatim.osm.svc.cluster.local", 8080, "http", "/status"),
@@ -178,7 +199,7 @@ data:
         ("photon", "photon.osm.svc.cluster.local", 2322, "http", "/status"),
         ("web", "web.osm.svc.cluster.local", 8080, "http", "/healthz"),
     ]
-
+    
     COUNTRY_LIBRARY_GROUPS = [
         (
             "Africa",
@@ -396,7 +417,7 @@ data:
             ],
         ),
     ]
-
+    
     COUNTRY_LIBRARY = [
         {
             "slug": slug,
@@ -407,7 +428,7 @@ data:
         for continent, continent_path, countries in COUNTRY_LIBRARY_GROUPS
         for slug, name in countries
     ]
-
+    
     # Approximate bounding boxes (min_lon, min_lat, max_lon, max_lat) for each Geofabrik slug.
     # Used to compute the geographic center of all downloaded regions for the map initial view.
     COUNTRY_BBOX = {
@@ -592,7 +613,7 @@ data:
         "uruguay": (-58.44, -34.95, -53.09, -30.09),
         "venezuela": (-73.35, 0.64, -59.76, 12.20),
     }
-
+    
     # MapLibre GL base style – kept in sync with k8s/tileserver.yaml init container.
     _STYLE_JSON = (
         '{"version":8,"name":"LocalOSM","sources":{"openmaptiles":{"type":"vector","url":"mbtiles://{v3}"}},'
@@ -624,7 +645,7 @@ data:
         '{"id":"place-hamlet","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["in","class","hamlet","isolated_dwelling"],"minzoom":13,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["NotoSansRegular"],"text-size":10},"paint":{"text-color":"#666","text-halo-color":"rgba(255,255,255,0.9)","text-halo-width":1.5}}'
         "]}"
     )
-
+    
     def compute_map_center(records):
         """Return (center_lon, center_lat, zoom) from the bounding union of all non-error country records."""
         slugs = [r.get("slug", "") for r in records if r.get("status") != "error"]
@@ -651,7 +672,7 @@ data:
         else:
             zoom = 8
         return round(center_lon, 4), round(center_lat, 4), zoom
-
+    
     def build_style_json(center_lon=None, center_lat=None, zoom=6):
         """Return the MapLibre GL style dict, optionally with initial center and zoom."""
         style = json.loads(_STYLE_JSON)
@@ -659,19 +680,19 @@ data:
             style["center"] = [center_lon, center_lat]
             style["zoom"] = zoom
         return style
-
+    
     WORKFLOW_LOCK = threading.Lock()
     ACTIVE_WORKFLOW = {"thread": None}
     SCHEDULER_LOCK = threading.Lock()
     LAST_AUTO_RUN = {"key": ""}
-
-
+    
+    
     _SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount"
-
-
+    
+    
     class KubeClient:
         """Minimal Kubernetes REST API client using in-cluster credentials."""
-
+    
         def __init__(self, namespace, timeout=30):
             self.namespace = namespace
             self.timeout = timeout
@@ -689,7 +710,7 @@ data:
             if not os.path.exists(ca_path):
                 self._ssl.check_hostname = False
                 self._ssl.verify_mode = ssl.CERT_NONE
-
+    
         def _request(self, method, path, body=None, params=None, content_type="application/json"):
             url = self._base + path
             if params:
@@ -707,13 +728,13 @@ data:
             except urllib.error.HTTPError as exc:
                 body_text = exc.read().decode(errors="replace")
                 raise RuntimeError(f"K8s API {method} {path} → {exc.code}: {body_text}") from exc
-
+    
         def get_job(self, name):
             return self._request("GET", f"/apis/batch/v1/namespaces/{self.namespace}/jobs/{name}")
-
+    
         def create_job(self, manifest):
             return self._request("POST", f"/apis/batch/v1/namespaces/{self.namespace}/jobs", body=manifest)
-
+    
         def delete_job(self, name):
             try:
                 self._request(
@@ -724,7 +745,30 @@ data:
             except RuntimeError as exc:
                 if "404" not in str(exc):
                     raise
-
+    
+        def list_jobs(self):
+            return self._request("GET", f"/apis/batch/v1/namespaces/{self.namespace}/jobs")
+    
+        def get_cronjob(self, name):
+            return self._request("GET", f"/apis/batch/v1/namespaces/{self.namespace}/cronjobs/{name}")
+    
+        def get_configmap(self, name):
+            return self._request("GET", f"/api/v1/namespaces/{self.namespace}/configmaps/{name}")
+    
+        def apply_configmap(self, name, data):
+            body = {"metadata": {"name": name, "namespace": self.namespace}, "data": data}
+            try:
+                return self._request(
+                    "PATCH",
+                    f"/api/v1/namespaces/{self.namespace}/configmaps/{name}",
+                    body={"data": data},
+                    content_type="application/merge-patch+json",
+                )
+            except RuntimeError as exc:
+                if "404" not in str(exc):
+                    raise
+            return self._request("POST", f"/api/v1/namespaces/{self.namespace}/configmaps", body=body)
+    
         def get_job_logs(self, name, tail_lines=80):
             pods = self._request(
                 "GET",
@@ -745,7 +789,7 @@ data:
                     return resp.read().decode(errors="replace")
             except urllib.error.HTTPError:
                 return ""
-
+    
         def get_pod_logs(self, name, tail_lines=80):
             url = self._base + f"/api/v1/namespaces/{self.namespace}/pods/{name}/log?tailLines={tail_lines}"
             headers = {}
@@ -757,10 +801,10 @@ data:
                     return resp.read().decode(errors="replace")
             except urllib.error.HTTPError:
                 return ""
-
+    
         def get_deployment(self, name):
             return self._request("GET", f"/apis/apps/v1/namespaces/{self.namespace}/deployments/{name}")
-
+    
         def scale_deployment(self, name, replicas):
             self._request(
                 "PATCH",
@@ -768,7 +812,7 @@ data:
                 body={"spec": {"replicas": replicas}},
                 content_type="application/merge-patch+json",
             )
-
+    
         def rollout_restart(self, name):
             ts = datetime.now(timezone.utc).isoformat()
             self._request(
@@ -785,14 +829,14 @@ data:
                 },
                 content_type="application/merge-patch+json",
             )
-
+    
         def list_pods(self, label_selector):
             return self._request(
                 "GET",
                 f"/api/v1/namespaces/{self.namespace}/pods",
                 params={"labelSelector": label_selector},
             )
-
+    
         def get_node_ips(self):
             """Return a list of InternalIP addresses for all cluster nodes."""
             try:
@@ -805,19 +849,19 @@ data:
                 return ips
             except Exception:  # noqa: BLE001
                 return []
-
-
-
+    
+    
+    
     KUBE = KubeClient(NAMESPACE)
-
+    
     _detected_node_url_cache: "str | None" = None
     _detected_node_url_cache_time: float = 0.0
     _NODE_URL_EMPTY_CACHE_TTL = 30.0  # seconds to suppress retries after a failed lookup
-
-
+    
+    
     def detect_node_url():
         """Return a node URL for service links, or empty string if unavailable.
-
+    
         Priority: OSM_NODE_URL env var → first InternalIP from the K8s node list.
         Successful results are cached permanently; failed lookups are suppressed for
         _NODE_URL_EMPTY_CACHE_TTL seconds to avoid a K8s API round-trip on every page load.
@@ -835,8 +879,8 @@ data:
         if result:
             _detected_node_url_cache = result
         return result
-
-
+    
+    
     INDEX_HTML = """<!doctype html>
     <html lang="de">
     <head>
@@ -892,12 +936,13 @@ data:
         .row2 > * { min-width: 0; }
         .message { font-size: 0.82rem; line-height: 1.4; }
         pre { white-space: pre-wrap; word-break: break-word; font-size: 0.75rem; color: #5f6b76; }
+        textarea { width: 100%; min-height: 120px; padding: 0.55rem 0.65rem; border-radius: 4px; border: 1px solid #cfd7df; font-size: 0.8rem; }
       </style>
     </head>
     <body>
       <h1>&#127757; localOSM – Status-Dashboard</h1>
       <p class="refresh">Automatische Aktualisierung alle 5 Sekunden. <span id="ts"></span></p>
-
+    
       <div class="links" id="links">
         <a href="#" id="web-link" data-port="30084">&#128205; Routing-UI</a>
         <a href="#" id="valhalla-link" data-port="30082">Valhalla API</a>
@@ -905,7 +950,7 @@ data:
         <a href="#" id="tileserver-link" data-port="30085">TileServer GL</a>
         <a href="#" id="style-editor-link" data-port="30086" target="_blank" rel="noopener" aria-label="Style-Editor">&#127912; Style-Editor</a>
       </div>
-
+    
       <div class="grid">
         <div class="card">
           <h2>Node-Konfiguration</h2>
@@ -918,7 +963,7 @@ data:
             <div id="node-url-hint" class="hint">Optional: explizite Node-URL für alle Service-Links.</div>
           </div>
         </div>
-
+    
         <div class="card">
           <h2>Auto-Update</h2>
           <div class="controls">
@@ -965,7 +1010,7 @@ data:
             <div id="auto-update-status" class="hint"></div>
           </div>
         </div>
-
+    
         <div class="card">
           <h2>Country Library</h2>
           <div class="controls">
@@ -1002,38 +1047,94 @@ data:
             </div>
           </div>
         </div>
-
+    
         <div class="card">
           <h2>Workflow Fortschritt</h2>
           <div id="workflow-body">Lade ...</div>
           <button id="abort-btn" class="danger" onclick="abortImport()" style="display:none;margin-top:0.6rem">Import abbrechen</button>
         </div>
-
+    
+        <div class="card">
+          <h2>Planet &amp; Pipeline</h2>
+          <div class="controls">
+            <div id="pipeline-summary" class="hint">Lade ...</div>
+            <div class="row2">
+              <button class="subtle" onclick="triggerPipelineJob('planet-update')">Planet-Update starten</button>
+              <button class="subtle" onclick="showPipelineLogs('planet-update')">Planet-Logs</button>
+            </div>
+            <div class="row2">
+              <button class="subtle" onclick="triggerPipelineJob('osmium-pipeline')">Osmium-Pipeline starten</button>
+              <button class="subtle" onclick="showPipelineLogs('osmium-pipeline')">Pipeline-Logs</button>
+            </div>
+            <div id="pipeline-action-status" class="hint"></div>
+            <pre id="pipeline-logs">Noch keine Logs geladen.</pre>
+          </div>
+        </div>
+    
+        <div class="card">
+          <h2>ConfigMap Uploads</h2>
+          <div class="controls">
+            <div>
+              <label>GeoJSON Polygon</label>
+              <input id="geojson-upload-input" type="file" accept=".json,.geojson,application/json">
+              <button class="subtle" onclick="uploadPipelineConfig('geojson')">GeoJSON hochladen</button>
+            </div>
+            <div>
+              <label>Worldmap Filter</label>
+              <input id="filter-upload-input" type="file" accept=".txt,text/plain">
+              <button class="subtle" onclick="uploadPipelineConfig('filter')">Filter hochladen</button>
+            </div>
+            <div id="config-upload-status" class="hint">Die Endpunkte aktualisieren direkt die ConfigMaps im Cluster.</div>
+          </div>
+        </div>
+    
+        <div class="card">
+          <h2>Manuelle Import-Jobs</h2>
+          <div class="controls">
+            <div class="row2">
+              <button class="subtle" onclick="triggerPipelineJob('nominatim-import')">Nominatim Import</button>
+              <button class="subtle" onclick="showPipelineLogs('nominatim-import')">Nominatim Logs</button>
+            </div>
+            <div class="row2">
+              <button class="subtle" onclick="triggerPipelineJob('valhalla-import')">Valhalla Import</button>
+              <button class="subtle" onclick="showPipelineLogs('valhalla-import')">Valhalla Logs</button>
+            </div>
+            <div class="row2">
+              <button class="subtle" onclick="triggerPipelineJob('tileserver-import')">TileServer Import</button>
+              <button class="subtle" onclick="showPipelineLogs('tileserver-import')">TileServer Logs</button>
+            </div>
+            <div class="row2">
+              <button class="subtle" onclick="triggerPipelineJob('photon-import')">Photon Import</button>
+              <button class="subtle" onclick="showPipelineLogs('photon-import')">Photon Logs</button>
+            </div>
+          </div>
+        </div>
+    
         <div class="card">
           <h2>Manuelle Promotion (Staging → Active)</h2>
           <div id="promote-list" class="hint">Lade ...</div>
         </div>
-
+    
         <div class="card">
           <h2>Hinzugefügte Länder</h2>
           <div id="country-list">Lade ...</div>
         </div>
-
+    
         <div class="card">
           <h2>Services</h2>
           <div id="svc-list">Lade ...</div>
         </div>
-
+    
         <div class="card">
           <h2>Import-Dateien</h2>
           <div id="import-list">Lade ...</div>
         </div>
-
+    
         <div class="card">
           <h2>Valhalla Tiles</h2>
           <div id="tiles-info">Lade ...</div>
         </div>
-
+    
         <div class="card">
           <h2><span aria-hidden="true">&#127912;</span> Style-Editor</h2>
           <div class="controls">
@@ -1052,14 +1153,14 @@ data:
           </div>
         </div>
       </div>
-
+    
       <script>
       var NODE_URL = "{{NODE_URL}}";
       var ALL_COUNTRIES = [];
       var refreshTimer = null;
       var WORKFLOW_RUNNING = false;
       var CURRENT_STYLE_API_URL = '';
-
+    
       function updateLinks() {
         var baseUrl = (NODE_URL || (location.protocol + '//' + location.hostname)).replace(/\\/+$/, '');
         ['web-link','valhalla-link','nominatim-link','tileserver-link'].forEach(function(id) {
@@ -1084,7 +1185,7 @@ data:
         });
       }
       updateLinks();
-
+    
       // Maputnik's "?style=" auto-load requires the user to accept a native
       // confirm() popup; if that popup is missed/declined, Maputnik silently
       // falls back to its own cached/default demo style (a raster world map),
@@ -1104,7 +1205,7 @@ data:
           statusEl.textContent = CURRENT_STYLE_API_URL;
         }
       }
-
+    
       function esc(value) {
         return String(value == null ? '' : value)
           .replace(/&/g, '&amp;')
@@ -1113,7 +1214,7 @@ data:
           .replace(/"/g, '&quot;')
           .replace(/'/g, '&#39;');
       }
-
+    
       function renderContinentOptions(countries) {
         var select = document.getElementById('continent-select');
         var current = select.value;
@@ -1134,7 +1235,7 @@ data:
         select.innerHTML = html;
         if (current && seen[current]) select.value = current;
       }
-
+    
       function renderCountryOptions(countries) {
         var select = document.getElementById('country-select');
         var current = select.value;
@@ -1149,11 +1250,11 @@ data:
         select.innerHTML = html;
         if (current) select.value = current;
       }
-
+    
       function filterCountriesByContinent() {
         renderCountryOptions(ALL_COUNTRIES);
       }
-
+    
       function renderWorkflow(workflow) {
         var body = document.getElementById('workflow-body');
         var running = !!(workflow && workflow.running);
@@ -1203,7 +1304,7 @@ data:
         abortBtn.style.display = canAbort ? 'inline-block' : 'none';
         abortBtn.disabled = false;
       }
-
+    
       function renderPromote(promote) {
         var el = document.getElementById('promote-list');
         var services = promote && promote.services ? promote.services : {};
@@ -1229,7 +1330,7 @@ data:
         html += '</div>';
         el.innerHTML = html;
       }
-
+    
       function renderCountries(countries) {
         var el = document.getElementById('country-list');
         if (!countries || countries.length === 0) {
@@ -1269,7 +1370,7 @@ data:
         html += '</div>';
         el.innerHTML = html;
       }
-
+    
       function renderQueuedCount(countries) {
         var count = (countries || []).filter(function(country) { return country.status === 'queued'; }).length;
         var el = document.getElementById('queue-count');
@@ -1278,7 +1379,7 @@ data:
           ? count + ' Land/Länder warten aktuell auf den Build.'
           : 'Keine Länder in der Queue.';
       }
-
+    
       function buildCountryPayload() {
         return {
           country: document.getElementById('country-select').value,
@@ -1286,12 +1387,12 @@ data:
           url: document.getElementById('custom-url').value.trim()
         };
       }
-
+    
       function clearCountryInputs() {
         document.getElementById('custom-name').value = '';
         document.getElementById('custom-url').value = '';
       }
-
+    
       async function startLibraryQueue() {
         var workflowBody = document.getElementById('workflow-body');
         workflowBody.innerHTML = 'Starte Queue-Workflow ...';
@@ -1312,11 +1413,11 @@ data:
           workflowBody.innerHTML = '<span class="status-pill status-error">fehler</span><pre>' + esc(err) + '</pre>';
         }
       }
-
+    
       async function startLibraryAdd() {
         return startLibraryQueue();
       }
-
+    
       async function startBuild() {
         var workflowBody = document.getElementById('workflow-body');
         workflowBody.innerHTML = 'Starte Build-Workflow ...';
@@ -1337,7 +1438,7 @@ data:
           workflowBody.innerHTML = '<span class="status-pill status-error">fehler</span><pre>' + esc(err) + '</pre>';
         }
       }
-
+    
       async function startDownloadMerge(downloadOnly) {
         var workflowBody = document.getElementById('workflow-body');
         workflowBody.innerHTML = downloadOnly ? 'Starte Download ...' : 'Starte Download &amp; Merge ...';
@@ -1357,7 +1458,7 @@ data:
           workflowBody.innerHTML = '<span class="status-pill status-error">fehler</span><pre>' + esc(err) + '</pre>';
         }
       }
-
+    
       async function checkForUpdates() {
         var btn = document.getElementById('check-updates-btn');
         btn.disabled = true;
@@ -1381,7 +1482,7 @@ data:
           btn.disabled = WORKFLOW_RUNNING;
         }
       }
-
+    
       async function startStepBuild(step) {
         var workflowBody = document.getElementById('workflow-body');
         workflowBody.innerHTML = 'Starte Build-Schritt (' + esc(step) + ') ...';
@@ -1401,7 +1502,7 @@ data:
           workflowBody.innerHTML = '<span class="status-pill status-error">fehler</span><pre>' + esc(err) + '</pre>';
         }
       }
-
+    
       async function abortImport() {
         if (!confirm('Laufenden Import wirklich abbrechen?\\nAlle laufenden Import-Jobs und -Pods werden gelöscht.')) return;
         var abortBtn = document.getElementById('abort-btn');
@@ -1424,7 +1525,7 @@ data:
           abortBtn.disabled = false;
         }
       }
-
+    
       async function promoteService(service) {
         if (!confirm('Staging-Daten für ' + service + ' wirklich aktiv schalten?')) return;
         try {
@@ -1443,7 +1544,7 @@ data:
           alert('Fehler: ' + err);
         }
       }
-
+    
       async function removeCountry(slug) {
         if (!confirm('Land wirklich aus der Library entfernen?\\nAlle verbleibenden Länder werden anschließend für einen Rebuild markiert.')) return;
         try {
@@ -1462,7 +1563,7 @@ data:
           alert('Fehler: ' + err);
         }
       }
-
+    
       async function loadConfig() {
         try {
           var resp = await fetch('/api/config');
@@ -1495,7 +1596,7 @@ data:
           updateNextRunDisplay(cfg);
         } catch(e) {}
       }
-
+    
       function updateAutoUpdateModeVisibility() {
         var mode = document.getElementById('auto-update-mode').value;
         var stepsWrap = document.getElementById('auto-update-steps-wrap');
@@ -1505,7 +1606,7 @@ data:
         var modeSelect = document.getElementById('auto-update-mode');
         if (modeSelect) modeSelect.addEventListener('change', updateAutoUpdateModeVisibility);
       });
-
+    
       function updateNextRunDisplay(cfg) {
         var el = document.getElementById('auto-update-status');
         if (!el) return;
@@ -1515,17 +1616,17 @@ data:
           el.textContent = 'Auto-Update deaktiviert.';
         }
       }
-
+    
       async function saveNodeUrl() {
         var nodeUrl = document.getElementById('node-url-input').value.trim();
         var resp = await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({node_url: nodeUrl})});
         if (resp.ok) { NODE_URL = nodeUrl; updateLinks(); location.reload(); }
       }
-
+    
       async function saveConfig() {
         return saveNodeUrl();
       }
-
+    
       async function saveAutoUpdate() {
         var enabled = document.getElementById('auto-update-enabled').checked;
         var cron = document.getElementById('auto-update-cron').value.trim();
@@ -1555,7 +1656,7 @@ data:
           statusEl.textContent = 'Fehler: ' + (data.error || 'Unbekannter Fehler');
         }
       }
-
+    
       async function activateStyle() {
         var input = document.getElementById('style-upload-input');
         var statusEl = document.getElementById('style-upload-status');
@@ -1573,7 +1674,89 @@ data:
           statusEl.textContent = 'Fehler: ' + err;
         }
       }
-
+    
+      async function uploadPipelineConfig(kind) {
+        var inputId = kind === 'geojson' ? 'geojson-upload-input' : 'filter-upload-input';
+        var input = document.getElementById(inputId);
+        var statusEl = document.getElementById('config-upload-status');
+        if (!input.files || !input.files.length) {
+          statusEl.textContent = 'Bitte zuerst eine Datei auswählen.';
+          return;
+        }
+        statusEl.textContent = 'Upload läuft ...';
+        try {
+          var content = await input.files[0].text();
+          var resp = await fetch('/api/config/upload/' + encodeURIComponent(kind), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({content: content})
+          });
+          var data = await resp.json();
+          statusEl.textContent = resp.ok ? (data.message || 'Upload erfolgreich.') : ('Fehler: ' + (data.error || 'Unbekannter Fehler'));
+        } catch (err) {
+          statusEl.textContent = 'Fehler: ' + err;
+        }
+      }
+    
+      async function triggerPipelineJob(name) {
+        var statusEl = document.getElementById('pipeline-action-status');
+        statusEl.textContent = 'Starte ' + name + ' ...';
+        try {
+          var resp = await fetch('/api/jobs/' + encodeURIComponent(name) + '/trigger', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: '{}'
+          });
+          var data = await resp.json();
+          statusEl.textContent = resp.ok ? (data.message || (name + ' gestartet.')) : ('Fehler: ' + (data.error || 'Unbekannter Fehler'));
+          await refresh();
+        } catch (err) {
+          statusEl.textContent = 'Fehler: ' + err;
+        }
+      }
+    
+      async function showPipelineLogs(name) {
+        var logsEl = document.getElementById('pipeline-logs');
+        var statusEl = document.getElementById('pipeline-action-status');
+        logsEl.textContent = 'Lade Logs für ' + name + ' ...';
+        try {
+          var resp = await fetch('/api/jobs/' + encodeURIComponent(name) + '/logs');
+          var data = await resp.json();
+          if (!resp.ok) {
+            logsEl.textContent = data.error || 'Keine Logs verfügbar.';
+            return;
+          }
+          statusEl.textContent = (data.resource_name || name) + ' · Status: ' + (data.status || 'unbekannt');
+          logsEl.textContent = data.logs || 'Noch keine Logs vorhanden.';
+        } catch (err) {
+          logsEl.textContent = 'Fehler: ' + err;
+        }
+      }
+    
+      function renderPipelineSummary(files, jobs) {
+        var el = document.getElementById('pipeline-summary');
+        if (!el) return;
+        function fmtFile(label, entry) {
+          if (!entry || !entry.exists) return '<div><b>' + esc(label) + ':</b> fehlt</div>';
+          return '<div><b>' + esc(label) + ':</b> ' + esc(entry.size_mb) + ' MB · ' + esc(entry.mtime || '') + '</div>';
+        }
+        function fmtJob(label, entry) {
+          var status = entry && entry.status ? entry.status : 'missing';
+          return '<div><b>' + esc(label) + ':</b> ' + esc(status) + (entry && entry.resource_name ? ' · ' + esc(entry.resource_name) : '') + '</div>';
+        }
+        el.innerHTML =
+          fmtFile('planet-latest.osm.pbf', files.planet) +
+          fmtFile('europa_mitte_final.osm.pbf', files.final_pbf) +
+          fmtFile('privat.osm', files.private_osm) +
+          '<hr style="border:none;border-top:1px solid #eef2f5;margin:.5rem 0">' +
+          fmtJob('Planet Update', jobs['planet-update']) +
+          fmtJob('Osmium Pipeline', jobs['osmium-pipeline']) +
+          fmtJob('Nominatim Import', jobs['nominatim-import']) +
+          fmtJob('Valhalla Import', jobs['valhalla-import']) +
+          fmtJob('TileServer Import', jobs['tileserver-import']) +
+          fmtJob('Photon Import', jobs['photon-import']);
+      }
+    
       async function refresh() {
         try {
           var resp = await fetch('/api/status');
@@ -1586,7 +1769,8 @@ data:
           renderCountries(d.selected_countries || []);
           renderQueuedCount(d.selected_countries || []);
           renderPromote(d.promote || {});
-
+          renderPipelineSummary(d.pipeline_files || {}, d.pipeline_jobs || {});
+    
           var svcs = d.services || [];
           var okCount = svcs.filter(function(s){ return s.ok; }).length;
           var html = '';
@@ -1603,7 +1787,7 @@ data:
               okCount + '/' + svcs.length + ' OK</span></div>' + html;
           }
           document.getElementById('svc-list').innerHTML = html || 'Keine Services.';
-
+    
           var files = d.import_files || [];
           if (files.length === 0) {
             document.getElementById('import-list').innerHTML =
@@ -1619,7 +1803,7 @@ data:
             fhtml += '</div>';
             document.getElementById('import-list').innerHTML = fhtml;
           }
-
+    
           var tMB = d.valhalla_tiles_mb;
           document.getElementById('tiles-info').innerHTML =
             '<div class="stat-big">' + esc(tMB) + ' MB</div>' +
@@ -1638,26 +1822,26 @@ data:
         if (refreshTimer) clearTimeout(refreshTimer);
         refreshTimer = setTimeout(refresh, 5000);
       }
-
+    
       loadConfig();
       refresh();
       </script>
     </body>
     </html>
     """
-
-
+    
+    
     def now_iso():
         """Return an ISO 8601 timestamp in the container's local timezone
         (with UTC offset), not forced to UTC, so logs/timestamps shown on the
         dashboard match the configured local time."""
         return datetime.now().astimezone().replace(microsecond=0).isoformat()
-
-
+    
+    
     def clone_default(value):
         return json.loads(json.dumps(value))
-
-
+    
+    
     def ensure_dirs():
         for path in (
             STATUS_DIR,
@@ -1665,24 +1849,24 @@ data:
             IMPORT_DIR,
         ):
             os.makedirs(path, exist_ok=True)
-
-
+    
+    
     def load_json(path, default):
         try:
             with open(path, encoding="utf-8") as handle:
                 return json.load(handle)
         except (OSError, json.JSONDecodeError):
             return clone_default(default)
-
-
+    
+    
     def save_json(path, payload):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         tmp_path = f"{path}.{threading.get_ident()}.tmp"
         with open(tmp_path, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2, sort_keys=True)
         os.replace(tmp_path, path)
-
-
+    
+    
     def _cron_token_value(token, names):
         token = token.strip().lower()
         if names and token in names:
@@ -1690,8 +1874,8 @@ data:
         if not re.fullmatch(r"-?\d+", token):
             raise ValueError(f"invalid value '{token}'")
         return int(token)
-
-
+    
+    
     def _parse_cron_field(field, min_v, max_v, names=None):
         values = set()
         for part in field.split(","):
@@ -1718,8 +1902,8 @@ data:
         if not values:
             raise ValueError("field has no values")
         return values
-
-
+    
+    
     def parse_cron_expression(expr):
         """Parse a standard 5-field crond expression (Minute Stunde Tag Monat
         Wochentag). Supports '*', lists ('1,2,3'), ranges ('1-5'), steps
@@ -1734,16 +1918,16 @@ data:
         months = _parse_cron_field(month_f, 1, 12, CRON_MONTH_NAMES)
         dows = _parse_cron_field(dow_f, 0, 6, CRON_WEEKDAY_NAMES)
         return minutes, hours, doms, months, dows, dom_f.strip() != "*", dow_f.strip() != "*"
-
-
+    
+    
     def valid_cron_expression(expr):
         try:
             parse_cron_expression(expr)
             return True
         except ValueError:
             return False
-
-
+    
+    
     def cron_matches(expr, dt):
         try:
             minutes, hours, doms, months, dows, dom_restricted, dow_restricted = parse_cron_expression(expr)
@@ -1762,8 +1946,8 @@ data:
         if dow_restricted:
             return weekday in dows
         return True
-
-
+    
+    
     def load_config():
         data = load_json(CONFIG_FILE, CONFIG_DEFAULTS)
         config = clone_default(CONFIG_DEFAULTS)
@@ -1787,15 +1971,15 @@ data:
         config["auto_update_auto_promote"] = bool(config.get("auto_update_auto_promote"))
         config["detected_node_url"] = detect_node_url() if not config["node_url"] else ""
         return config
-
-
+    
+    
     def save_config(data):
         config = clone_default(CONFIG_DEFAULTS)
         config.update({key: data.get(key, value) for key, value in CONFIG_DEFAULTS.items()})
         save_json(CONFIG_FILE, config)
         return config
-
-
+    
+    
     def apply_config_update(payload):
         config = load_config()
         if "node_url" in payload:
@@ -1822,8 +2006,8 @@ data:
         if "auto_update_auto_promote" in payload:
             config["auto_update_auto_promote"] = bool(payload.get("auto_update_auto_promote"))
         return save_config(config)
-
-
+    
+    
     def slugify(value):
         cleaned = []
         last_dash = False
@@ -1836,15 +2020,15 @@ data:
                 last_dash = True
         slug = "".join(cleaned).strip("-")
         return slug or "custom-country"
-
-
+    
+    
     def file_size_mb(path):
         try:
             return round(os.path.getsize(path) / (1024 * 1024), 1)
         except OSError:
             return None
-
-
+    
+    
     def dir_size_mb(path):
         total = 0
         try:
@@ -1858,8 +2042,8 @@ data:
         except OSError:
             pass
         return round(total / (1024 * 1024), 1)
-
-
+    
+    
     def read_tileserver_style():
         """Return the raw bytes of the live style.json, or None if it does not exist yet."""
         try:
@@ -1867,11 +2051,11 @@ data:
                 return handle.read()
         except OSError:
             return None
-
-
+    
+    
     def write_tileserver_style(raw_body):
         """Validate and atomically persist a new style.json, then restart TileServer-GL.
-
+    
         Returns a tuple (ok: bool, message: str (user-facing, German), restarted: bool).
         """
         try:
@@ -1884,7 +2068,7 @@ data:
             or not isinstance(style.get("version"), (int, float))
         ):
             return False, "Kein gültiger MapLibre-Style (version/layers fehlen oder ungültig).", False
-
+    
         os.makedirs(os.path.dirname(TILESERVER_STYLE_PATH), exist_ok=True)
         tmp_path = TILESERVER_STYLE_PATH + ".tmp"
         try:
@@ -1899,23 +2083,23 @@ data:
                     os.remove(tmp_path)
                 except OSError:
                     pass
-
+    
         try:
             KUBE.rollout_restart("tileserver-gl")
             restarted = True
         except Exception as exc:  # noqa: BLE001
             return True, f"Style gespeichert, TileServer-GL Neustart fehlgeschlagen: {exc}", False
         return True, "Style gespeichert, TileServer-GL wird neu gestartet.", restarted
-
-
+    
+    
     def check_tcp(host, port, timeout=2):
         try:
             with socket.create_connection((host, port), timeout=timeout):
                 return True, f"TCP ok ({host}:{port})"
         except Exception as exc:  # noqa: BLE001
             return False, str(exc)
-
-
+    
+    
     def check_http(url, timeout=3):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "osm-status/1.0"})
@@ -1925,8 +2109,8 @@ data:
             return True, f"HTTP {exc.code}"
         except Exception as exc:  # noqa: BLE001
             return False, str(exc)
-
-
+    
+    
     def list_library_records():
         records = load_json(COUNTRIES_FILE, [])
         enriched = []
@@ -1938,12 +2122,12 @@ data:
                     item["pbf_size_mb"] = size_mb
             enriched.append(item)
         return enriched
-
-
+    
+    
     def save_library_records(records):
         save_json(COUNTRIES_FILE, records)
-
-
+    
+    
     def upsert_country_record(country, **updates):
         records = list_library_records()
         for record in records:
@@ -1966,8 +2150,8 @@ data:
             record.update(updates)
             records.append(record)
         save_library_records(records)
-
-
+    
+    
     def delete_country_record(slug):
         records = list_library_records()
         to_delete = next((r for r in records if r.get("slug") == slug), None)
@@ -1981,8 +2165,8 @@ data:
             if record.get("status") == "ready":
                 record["status"] = "queued"
         save_library_records(records)
-
-
+    
+    
     def mark_library_ready():
         records = list_library_records()
         timestamp = now_iso()
@@ -1996,8 +2180,8 @@ data:
             if size_mb is not None:
                 record["pbf_size_mb"] = size_mb
         save_library_records(records)
-
-
+    
+    
     def read_workflow_state():
         return load_json(
             STATE_FILE,
@@ -2012,15 +2196,15 @@ data:
                 "updated_at": now_iso(),
             },
         )
-
-
+    
+    
     def write_workflow_state(**updates):
         state = read_workflow_state()
         state.update(updates)
         state["updated_at"] = now_iso()
         save_json(STATE_FILE, state)
-
-
+    
+    
     def read_orchestrator_state():
         """Return the import-orchestrator's own live progress (see
         scripts/import-orchestrator.sh write_state()), separate from this app's
@@ -2036,8 +2220,8 @@ data:
                 "updated_at": "",
             },
         )
-
-
+    
+    
     def combined_workflow_state():
         """Merge the local library workflow with the orchestrator's live import
         progress so the dashboard reflects what is actually happening once a
@@ -2054,11 +2238,11 @@ data:
         state = read_workflow_state()
         state["request_pending"] = False
         return state
-
-
+    
+    
     def abort_import_workflow():
         """Abort whatever the import-orchestrator is currently doing.
-
+    
         Signals the orchestrator (via ABORT_FLAG_FILE) to stop waiting on its
         current job and discard the request, discards the pending import request
         so it is not picked up again, and proactively deletes any running import
@@ -2070,19 +2254,19 @@ data:
         orchestrator_running = read_orchestrator_state().get("running")
         if not request_pending and not orchestrator_running:
             raise RuntimeError("No import is currently running.")
-
+    
         with open(ABORT_FLAG_FILE, "w", encoding="utf-8") as handle:
             handle.write(now_iso())
-
+    
         if os.path.exists(IMPORT_REQUEST_FILE):
             os.remove(IMPORT_REQUEST_FILE)
-
+    
         for job_name in IMPORT_JOB_NAMES:
             try:
                 KUBE.delete_job(job_name)
             except RuntimeError as exc:  # noqa: BLE001
                 print(f"Failed to delete job {job_name} during abort: {exc}", flush=True)
-
+    
         write_workflow_state(
             running=False,
             phase="aborted",
@@ -2092,15 +2276,15 @@ data:
             error="",
         )
         return True
-
-
+    
+    
     def _format_mtime(path):
         try:
             return datetime.fromtimestamp(os.path.getmtime(path)).astimezone().strftime("%Y-%m-%d %H:%M %Z")
         except OSError:
             return ""
-
-
+    
+    
     def _describe_data_dir(path):
         exists = os.path.isdir(path)
         payload = {
@@ -2110,16 +2294,176 @@ data:
             "mtime": _format_mtime(path) if exists else "",
         }
         return payload
-
-
+    
+    
+    def _describe_file(path):
+        exists = os.path.isfile(path)
+        payload = {
+            "path": path,
+            "exists": exists,
+            "size_mb": round(os.path.getsize(path) / (1024 * 1024), 1) if exists else 0.0,
+            "mtime": _format_mtime(path) if exists else "",
+        }
+        return payload
+    
+    
+    def _safe_job_name_suffix():
+        return datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    
+    
+    def _clone_job_manifest(job_manifest, *, new_name=None):
+        cloned = json.loads(json.dumps(job_manifest))
+        cloned["apiVersion"] = "batch/v1"
+        cloned["kind"] = "Job"
+        metadata = cloned.setdefault("metadata", {})
+        metadata["name"] = new_name or metadata.get("name", "")
+        metadata.pop("uid", None)
+        metadata.pop("resourceVersion", None)
+        metadata.pop("generation", None)
+        metadata.pop("creationTimestamp", None)
+        metadata.pop("managedFields", None)
+        metadata.pop("selfLink", None)
+        metadata.pop("annotations", None)
+        metadata.pop("ownerReferences", None)
+        cloned.pop("status", None)
+        return cloned
+    
+    
+    def _job_sort_key(job):
+        metadata = job.get("metadata", {})
+        return metadata.get("creationTimestamp", ""), metadata.get("name", "")
+    
+    
+    def _list_jobs():
+        try:
+            return KUBE.list_jobs().get("items", [])
+        except Exception:  # noqa: BLE001
+            return []
+    
+    
+    def _find_latest_job(job_name):
+        jobs = _list_jobs()
+        target = PIPELINE_TRIGGER_TARGETS.get(job_name, {"prefix": job_name})
+        prefix = target.get("prefix", job_name)
+        candidates = []
+        for job in jobs:
+            name = job.get("metadata", {}).get("name", "")
+            if name == job_name or name == prefix or name.startswith(prefix + "-"):
+                candidates.append(job)
+        if not candidates:
+            return None
+        candidates.sort(key=_job_sort_key)
+        return candidates[-1]
+    
+    
+    def _summarize_job(job_name):
+        job = _find_latest_job(job_name)
+        if not job:
+            return {
+                "name": job_name,
+                "exists": False,
+                "active": 0,
+                "succeeded": 0,
+                "failed": 0,
+                "status": "missing",
+                "created_at": "",
+                "completed_at": "",
+            }
+        metadata = job.get("metadata", {})
+        status = job.get("status", {})
+        active = int(status.get("active", 0) or 0)
+        succeeded = int(status.get("succeeded", 0) or 0)
+        failed = int(status.get("failed", 0) or 0)
+        state = "pending"
+        if active:
+            state = "running"
+        elif failed:
+            state = "failed"
+        elif succeeded:
+            state = "completed"
+        return {
+            "name": job_name,
+            "resource_name": metadata.get("name", job_name),
+            "exists": True,
+            "active": active,
+            "succeeded": succeeded,
+            "failed": failed,
+            "status": state,
+            "created_at": metadata.get("creationTimestamp", ""),
+            "completed_at": status.get("completionTime", ""),
+            "start_time": status.get("startTime", ""),
+        }
+    
+    
+    def _collect_pipeline_jobs():
+        return {name: _summarize_job(name) for name in PIPELINE_TRIGGER_TARGETS}
+    
+    
+    def _collect_pipeline_files():
+        return {
+            "planet": _describe_file(PLANET_FILE),
+            "final_pbf": _describe_file(PLANET_FINAL_FILE),
+            "private_osm": _describe_file(PRIVATE_OSM_FILE),
+        }
+    
+    
+    def _prepare_configmap_payload(kind, raw_body):
+        target = PIPELINE_CONFIGMAPS.get(kind)
+        if not target:
+            raise ValueError(f"Unsupported config upload kind: {kind}")
+        content_type = (raw_body or b"").strip()
+        try:
+            payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+        except Exception:  # noqa: BLE001
+            payload = None
+        if isinstance(payload, dict) and "content" in payload:
+            content = str(payload.get("content", ""))
+        else:
+            content = raw_body.decode("utf-8")
+        content = content.strip()
+        if not content:
+            raise ValueError("Uploaded content is empty.")
+        if kind == "geojson":
+            try:
+                geojson = json.loads(content)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Invalid GeoJSON: {exc}") from exc
+            if not isinstance(geojson, dict) or "type" not in geojson:
+                raise ValueError("GeoJSON must be a JSON object with a 'type' field.")
+            content = json.dumps(geojson, indent=2, ensure_ascii=False) + "\n"
+        else:
+            content = content + "\n"
+        return target["name"], {target["key"]: content}
+    
+    
+    def _trigger_pipeline_job(job_name):
+        target = PIPELINE_TRIGGER_TARGETS.get(job_name)
+        if not target:
+            raise ValueError(f"Unsupported job trigger: {job_name}")
+        kind = target["kind"]
+        if kind == "cronjob":
+            cronjob = KUBE.get_cronjob(target["name"])
+            manifest = {
+                "apiVersion": "batch/v1",
+                "kind": "Job",
+                "metadata": {"name": f"{target['prefix']}-manual-{_safe_job_name_suffix()}"},
+                "spec": cronjob.get("spec", {}).get("jobTemplate", {}).get("spec", {}),
+            }
+            return KUBE.create_job(manifest)
+        job = KUBE.get_job(target["name"])
+        manifest = _clone_job_manifest(job, new_name=target["name"])
+        KUBE.delete_job(target["name"])
+        return KUBE.create_job(manifest)
+    
+    
     def _deployment_selector(name):
         deployment = KUBE.get_deployment(name)
         match_labels = deployment.get("spec", {}).get("selector", {}).get("matchLabels", {})
         if not match_labels:
             raise RuntimeError(f"Deployment {name} has no selector labels.")
         return ",".join(f"{key}={value}" for key, value in sorted(match_labels.items()))
-
-
+    
+    
     def _wait_for_pods_terminated(label_selector, timeout_seconds=240):
         deadline = time.time() + timeout_seconds
         while time.time() < deadline:
@@ -2128,8 +2472,8 @@ data:
                 return
             time.sleep(2)
         raise RuntimeError(f"Timed out waiting for pods ({label_selector}) to terminate.")
-
-
+    
+    
     def _wait_for_deployment_available(name, timeout_seconds=900):
         deadline = time.time() + timeout_seconds
         while time.time() < deadline:
@@ -2146,11 +2490,11 @@ data:
                 return
             time.sleep(3)
         raise RuntimeError(f"Timed out waiting for deployment/{name} to become available.")
-
-
+    
+    
     def _copy_preserving_ownership(src, dst):
         """shutil.copytree() the tree from src to dst, then restore ownership.
-
+    
         shutil.copy2()/copytree() preserve mode and timestamps but never call
         chown(), so every copied file/dir ends up owned by whatever user this
         process runs as (root in the status pod). For Nominatim's Postgres data
@@ -2176,11 +2520,11 @@ data:
                 os.chown(target_root, st.st_uid, st.st_gid)
             except OSError:
                 pass
-
-
+    
+    
     def _move_directory_replacing(src, dst):
         """Move directory src to dst, tolerating cross-device mounts.
-
+    
         os.replace() (rename(2)) requires src and dst to live on the same
         filesystem/device. staging_dir (under OSM_TEMP_DIR) and active_dir (under
         OSM_DATA_DIR) are mounted as separate hostPath volumes in Kubernetes, so
@@ -2202,11 +2546,11 @@ data:
                 # behind is safe to ignore, it will simply be cleaned up (or
                 # overwritten) on the next promote attempt.
                 pass
-
-
+    
+    
     def _restore_missing_entries(backup_dir, active_dir):
         """Copy back entries from backup_dir that are missing in active_dir.
-
+    
         Used after promoting tileserver staging data (which only contains the
         freshly built map.mbtiles) so that files/directories that are not part
         of the import output - e.g. a customized style.json saved via the style
@@ -2223,8 +2567,8 @@ data:
                 shutil.copytree(src, dst)
             else:
                 shutil.copy2(src, dst)
-
-
+    
+    
     def promote_status():
         services = {}
         for name, config in PROMOTE_SERVICES.items():
@@ -2238,35 +2582,35 @@ data:
                 "can_promote": staged["exists"],
             }
         return {"services": services}
-
-
+    
+    
     def promote_service(service):
         if service not in PROMOTE_SERVICES:
             raise ValueError("Unknown service.")
-
+    
         workflow = combined_workflow_state()
         if workflow.get("request_pending") or workflow.get("running"):
             raise RuntimeError("A running import is active. Try manual promote again when it is finished.")
-
+    
         config = PROMOTE_SERVICES[service]
         active_dir = config["active_dir"]
         staging_dir = config["staging_dir"]
         backup_dir = f"{active_dir}.old"
         deployment = config["deployment"]
-
+    
         if not os.path.isdir(staging_dir):
             raise RuntimeError(f"No staged data found for {service} at {staging_dir}.")
-
+    
         selector = _deployment_selector(deployment)
         KUBE.scale_deployment(deployment, 0)
         _wait_for_pods_terminated(selector, timeout_seconds=PROMOTE_POD_TERMINATION_TIMEOUT_SECONDS)
-
+    
         if os.path.isdir(backup_dir):
             shutil.rmtree(backup_dir)
         had_active = os.path.isdir(active_dir)
         if had_active:
             _move_directory_replacing(active_dir, backup_dir)
-
+    
         try:
             _move_directory_replacing(staging_dir, active_dir)
         except OSError as exc:
@@ -2275,7 +2619,7 @@ data:
                     shutil.rmtree(active_dir)
                 _move_directory_replacing(backup_dir, active_dir)
             raise RuntimeError(f"Could not promote staged {service} data: {exc}") from exc
-
+    
         if service == "tileserver" and had_active and os.path.isdir(backup_dir):
             try:
                 _restore_missing_entries(backup_dir, active_dir)
@@ -2284,16 +2628,16 @@ data:
                     f"Promoted staged tileserver data but failed to restore prior "
                     f"active files (fonts, style.json, ...): {exc}"
                 ) from exc
-
+    
         if os.path.isdir(backup_dir):
             shutil.rmtree(backup_dir)
-
+    
         KUBE.scale_deployment(deployment, 1)
         wait_seconds = PROMOTE_NOMINATIM_READY_TIMEOUT_SECONDS if service == "nominatim" else PROMOTE_READY_TIMEOUT_SECONDS
         _wait_for_deployment_available(deployment, timeout_seconds=wait_seconds)
         return promote_status()["services"][service]
-
-
+    
+    
     def country_catalog_with_flags(records):
         selected = {record.get("slug") for record in records}
         catalog = []
@@ -2302,26 +2646,26 @@ data:
             item["selected"] = item["slug"] in selected
             catalog.append(item)
         return catalog
-
-
+    
+    
     def resolve_country_request(payload):
         slug = (payload.get("country") or "").strip()
         custom_name = (payload.get("name") or "").strip()
         custom_url = (payload.get("url") or "").strip()
-
+    
         if custom_name or custom_url:
             if not custom_name or not custom_url:
                 raise ValueError("Custom imports require both a name and a URL.")
             if not custom_url.startswith(("http://", "https://")):
                 raise ValueError("Custom URL must start with http:// or https://.")
             return {"slug": slugify(custom_name), "name": custom_name, "url": custom_url, "continent": "Custom"}
-
+    
         for country in COUNTRY_LIBRARY:
             if country["slug"] == slug:
                 return dict(country)
         raise ValueError("Choose a country or provide custom country details.")
-
-
+    
+    
     def verify_country_url(country):
         request = urllib.request.Request(
             country["url"],
@@ -2335,8 +2679,8 @@ data:
             return exc.code in {200, 301, 302, 303, 307, 308}
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise RuntimeError(f"Could not verify {country['name']} ({country['url']}): {exc}")
-
-
+    
+    
     def fetch_remote_last_modified(url):
         """HEAD the extract URL and return its "Last-Modified" header as a local
         ISO 8601 timestamp, or None if the server does not send one."""
@@ -2352,15 +2696,15 @@ data:
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.astimezone().replace(microsecond=0).isoformat()
-
-
+    
+    
     def _parse_iso(value):
         try:
             return datetime.fromisoformat(value)
         except (TypeError, ValueError):
             return None
-
-
+    
+    
     def check_country_updates(target_slugs=None):
         """Check every selected country's source URL for a newer file than the
         one currently downloaded, so the region list can show whether a fresher
@@ -2396,14 +2740,14 @@ data:
             updated.append(item)
         save_library_records(updated)
         return updated
-
-
+    
+    
     def collect_status():
         try:
             ensure_dirs()
         except OSError:
             pass
-
+    
         def _check_service(svc):
             name, host, port, kind, path = svc
             if kind == "tcp":
@@ -2411,7 +2755,7 @@ data:
             else:
                 ok, detail = check_http(f"http://{host}:{port}{path or '/'}")
             return {"name": name, "ok": ok, "detail": detail}
-
+    
         # Use wait() with an explicit timeout so a hung DNS lookup cannot block the
         # entire /api/status response indefinitely.  The executor is shut down
         # without waiting so that the few threads that are still resolving DNS can
@@ -2432,7 +2776,7 @@ data:
             services = [{"name": svc[0], "ok": False, "detail": "unavailable"} for svc in SERVICES]
         finally:
             svc_pool.shutdown(wait=False)
-
+    
         import_files = []
         if os.path.isdir(IMPORT_DIR):
             for entry in sorted(os.listdir(IMPORT_DIR)):
@@ -2443,7 +2787,7 @@ data:
                 except OSError:
                     size_mb, mtime = 0, "?"
                 import_files.append({"name": entry, "size_mb": size_mb, "mtime": mtime})
-
+    
         records = list_library_records()
         return {
             "timestamp": now_iso(),
@@ -2451,14 +2795,16 @@ data:
             "import_dir": IMPORT_DIR,
             "import_files": import_files,
             "valhalla_tiles_mb": dir_size_mb(VALHALLA_TILE_DIR),
+            "pipeline_files": _collect_pipeline_files(),
+            "pipeline_jobs": _collect_pipeline_jobs(),
             "available_countries": country_catalog_with_flags(records),
             "selected_countries": records,
             "queued_count": len([record for record in records if record.get("status") == "queued"]),
             "workflow": combined_workflow_state(),
             "promote": promote_status(),
         }
-
-
+    
+    
     def write_import_request(
         records,
         steps=None,
@@ -2496,8 +2842,8 @@ data:
         }
         save_json(IMPORT_REQUEST_FILE, payload)
         return payload
-
-
+    
+    
     def run_command(args, *, input_text=None, check=True, timeout=60):
         try:
             result = subprocess.run(
@@ -2516,16 +2862,16 @@ data:
             output = (result.stderr or result.stdout or "").strip()
             raise RuntimeError(output or f"Command failed: {' '.join(args)}")
         return result.stdout.strip()
-
-
+    
+    
     def validate_pbf_file(path, *, label="OSM extract"):
         if not os.path.isfile(path):
             raise RuntimeError(f"{label} not found: {path}")
         if os.path.getsize(path) <= 0:
             raise RuntimeError(f"{label} is empty: {path}")
         run_command(["osmium", "fileinfo", "-F", "pbf", path], timeout=120)
-
-
+    
+    
     def clear_directory(path):
         os.makedirs(path, exist_ok=True)
         for entry in os.listdir(path):
@@ -2534,8 +2880,8 @@ data:
                 shutil.rmtree(full_path)
             else:
                 os.unlink(full_path)
-
-
+    
+    
     def wait_for_job_deletion(name, timeout_seconds=60):
         deadline = time.time() + timeout_seconds
         while time.time() < deadline:
@@ -2546,8 +2892,8 @@ data:
                     return
             time.sleep(2)
         raise RuntimeError(f"Timed out waiting for job deletion: {name}")
-
-
+    
+    
     def download_country_file(country):
         destination = os.path.join(LIBRARY_DIR, f"{country['slug']}.osm.pbf")
         temp_path = f"{destination}.part"
@@ -2568,7 +2914,7 @@ data:
                 )
                 upsert_country_record(country, pbf_path=destination, pbf_size_mb=file_size_mb(destination))
                 return destination
-
+    
         request = urllib.request.Request(country["url"], headers={"User-Agent": "localosm-status/1.0"})
         os.makedirs(os.path.dirname(destination), exist_ok=True)
         downloaded = 0
@@ -2610,8 +2956,8 @@ data:
             last_error="",
         )
         return destination
-
-
+    
+    
     def merge_library_files(country, records=None):
         merge_records = records or [
             record for record in list_library_records() if record.get("pbf_path") and record.get("status") != "error"
@@ -2619,7 +2965,7 @@ data:
         input_paths = [record.get("pbf_path") for record in merge_records if record.get("pbf_path")]
         if not input_paths:
             raise RuntimeError("No downloaded country extracts available to merge.")
-
+    
         tmp_path = f"{MERGED_PBF}.tmp"
         os.makedirs(IMPORT_DIR, exist_ok=True)
         write_workflow_state(
@@ -2653,7 +2999,7 @@ data:
             os.replace(dedup_output_path, tmp_path)
         validate_pbf_file(tmp_path, label="Merged library extract")
         os.replace(tmp_path, MERGED_PBF)
-
+    
         meta_path = f"{MERGED_PBF}.meta"
         with open(meta_path, "w", encoding="utf-8") as handle:
             handle.write(f"downloaded_at={now_iso()}\n")
@@ -2661,14 +3007,14 @@ data:
             handle.write(f"countries={','.join(record['slug'] for record in merge_records)}\n")
             for record in merge_records:
                 handle.write(f"source[{record['slug']}]={record['url']}\n")
-
-
+    
+    
     def finish_workflow_thread():
         ACTIVE_WORKFLOW["thread"] = None
         if WORKFLOW_LOCK.locked():
             WORKFLOW_LOCK.release()
-
-
+    
+    
     def run_queue_workflow(country):
         try:
             ensure_dirs()
@@ -2708,8 +3054,8 @@ data:
             )
         finally:
             finish_workflow_thread()
-
-
+    
+    
     def run_build_workflow(country=None, steps=None, auto_promote=True):
         country = country or {"name": "Library", "slug": "library", "url": ""}
         try:
@@ -2761,8 +3107,8 @@ data:
             )
         finally:
             finish_workflow_thread()
-
-
+    
+    
     def run_download_merge_workflow(auto_promote=False, download_only=False):
         country = {
             "name": "Download" if download_only else "Download & Merge",
@@ -2833,12 +3179,12 @@ data:
             )
         finally:
             finish_workflow_thread()
-
-
+    
+    
     def run_country_workflow(country):
         run_queue_workflow(country)
-
-
+    
+    
     def start_country_workflow(payload):
         country = resolve_country_request(payload)
         if not WORKFLOW_LOCK.acquire(blocking=False):
@@ -2847,8 +3193,8 @@ data:
         ACTIVE_WORKFLOW["thread"] = thread
         thread.start()
         return country
-
-
+    
+    
     def start_queue_workflow(payload):
         country = resolve_country_request(payload)
         if not WORKFLOW_LOCK.acquire(blocking=False):
@@ -2857,8 +3203,8 @@ data:
         ACTIVE_WORKFLOW["thread"] = thread
         thread.start()
         return country
-
-
+    
+    
     def start_build_workflow(auto_promote=True):
         if not WORKFLOW_LOCK.acquire(blocking=False):
             raise RuntimeError("Another country library workflow is already running.")
@@ -2872,8 +3218,8 @@ data:
                 [record for record in list_library_records() if record.get("status") in {"queued", "ready"}]
             )
         }
-
-
+    
+    
     def start_step_build_workflow(step):
         if step not in BUILD_STEPS:
             raise ValueError(f"Unknown build step '{step}'.")
@@ -2894,8 +3240,8 @@ data:
                 [record for record in list_library_records() if record.get("status") in {"queued", "ready"}]
             ),
         }
-
-
+    
+    
     def start_download_merge_workflow(payload=None):
         payload = payload or {}
         if not WORKFLOW_LOCK.acquire(blocking=False):
@@ -2914,14 +3260,14 @@ data:
                 [record for record in list_library_records() if record.get("status") in {"queued", "ready"}]
             ),
         }
-
-
+    
+    
     def start_check_updates():
         if WORKFLOW_LOCK.locked():
             raise RuntimeError("Another country library workflow is currently running.")
         return check_country_updates()
-
-
+    
+    
     def run_scheduler_loop():
         while True:
             time.sleep(30)
@@ -2971,8 +3317,8 @@ data:
                 print(f"Auto-update scheduler error: {exc}", flush=True)
             finally:
                 SCHEDULER_LOCK.release()
-
-
+    
+    
     class Handler(BaseHTTPRequestHandler):
         def _send_json(self, payload, status=200):
             body = json.dumps(payload, indent=2).encode("utf-8")
@@ -2981,9 +3327,11 @@ data:
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-
+    
         def do_GET(self):
-            if self.path in {"/", "/index.html"}:
+            path = urllib.parse.urlparse(self.path).path
+    
+            if path in {"/", "/index.html"}:
                 cfg = load_config()
                 effective_url = cfg.get("node_url") or cfg.get("detected_node_url", "")
                 body = INDEX_HTML.replace("{{NODE_URL}}", effective_url).encode("utf-8")
@@ -2993,30 +3341,30 @@ data:
                 self.end_headers()
                 self.wfile.write(body)
                 return
-
-            if self.path == "/healthz":
+    
+            if path == "/healthz":
                 self._send_json({"status": "ok"})
                 return
-
-            if self.path == "/api/status":
+    
+            if path == "/api/status":
                 try:
                     self._send_json(collect_status())
                 except Exception as exc:  # noqa: BLE001
                     self._send_json({"error": str(exc)}, 500)
                 return
-
-            if self.path == "/api/promote/status":
+    
+            if path == "/api/promote/status":
                 try:
                     self._send_json(promote_status())
                 except Exception as exc:  # noqa: BLE001
                     self._send_json({"error": str(exc)}, 500)
                 return
-
-            if self.path == "/api/config":
+    
+            if path == "/api/config":
                 self._send_json(load_config())
                 return
-
-            if self.path == "/api/style":
+    
+            if path == "/api/style":
                 raw = read_tileserver_style()
                 if raw is None:
                     self._send_json({"error": "style.json not found"}, 404)
@@ -3029,9 +3377,30 @@ data:
                 self.end_headers()
                 self.wfile.write(raw)
                 return
-
-            if self.path.startswith("/test/"):
-                name = self.path.split("/", 2)[-1]
+    
+            if path.startswith("/api/jobs/") and path.endswith("/status"):
+                job_name = path[len("/api/jobs/") : -len("/status")].strip("/")
+                if not job_name:
+                    self._send_json({"error": "job name is required"}, 400)
+                    return
+                self._send_json(_summarize_job(job_name))
+                return
+    
+            if path.startswith("/api/jobs/") and path.endswith("/logs"):
+                job_name = path[len("/api/jobs/") : -len("/logs")].strip("/")
+                if not job_name:
+                    self._send_json({"error": "job name is required"}, 400)
+                    return
+                summary = _summarize_job(job_name)
+                if not summary.get("exists"):
+                    self._send_json({"error": f"Job '{job_name}' not found."}, 404)
+                    return
+                logs = KUBE.get_job_logs(summary.get("resource_name", job_name), tail_lines=200)
+                self._send_json({**summary, "logs": logs})
+                return
+    
+            if path.startswith("/test/"):
+                name = path.split("/", 2)[-1]
                 if name == "tileserver":
                     ok, detail = check_http("http://tileserver-gl.osm.svc.cluster.local/")
                 elif name == "nominatim":
@@ -3047,25 +3416,57 @@ data:
                     return
                 self._send_json({"test": name, "ok": ok, "detail": detail})
                 return
-
+    
             self._send_json({"error": "not found"}, 404)
-
+    
         def do_POST(self):
+            path = urllib.parse.urlparse(self.path).path
             content_length = int(self.headers.get("Content-Length", "0"))
             raw_body = self.rfile.read(content_length) if content_length else b"{}"
-
-            if self.path == "/api/style":
+    
+            if path == "/api/style":
                 ok, message, restarted = write_tileserver_style(raw_body)
                 self._send_json({"ok": ok, "message": message, "restarted": restarted}, 200 if ok else 400)
                 return
-
+    
+            if path.startswith("/api/config/upload/"):
+                kind = path.rsplit("/", 1)[-1].strip().lower()
+                try:
+                    configmap_name, data = _prepare_configmap_payload(kind, raw_body)
+                    KUBE.apply_configmap(configmap_name, data)
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, 400)
+                    return
+                except RuntimeError as exc:
+                    self._send_json({"error": str(exc)}, 500)
+                    return
+                self._send_json({"status": "updated", "configmap": configmap_name, "message": f"{kind} configuration updated."})
+                return
+    
+            if path.startswith("/api/jobs/") and path.endswith("/trigger"):
+                job_name = path[len("/api/jobs/") : -len("/trigger")].strip("/")
+                if not job_name:
+                    self._send_json({"error": "job name is required"}, 400)
+                    return
+                try:
+                    result = _trigger_pipeline_job(job_name)
+                except ValueError as exc:
+                    self._send_json({"error": str(exc)}, 400)
+                    return
+                except RuntimeError as exc:
+                    self._send_json({"error": str(exc)}, 409)
+                    return
+                created_name = result.get("metadata", {}).get("name", job_name)
+                self._send_json({"status": "started", "job": job_name, "resource_name": created_name, "message": f"Job '{created_name}' started."})
+                return
+    
             try:
                 payload = json.loads(raw_body.decode("utf-8"))
             except Exception:  # noqa: BLE001
                 self._send_json({"error": "invalid json"}, 400)
                 return
-
-            if self.path == "/api/library/add":
+    
+            if path == "/api/library/add":
                 try:
                     country = start_country_workflow(payload)
                 except ValueError as exc:
@@ -3076,8 +3477,8 @@ data:
                     return
                 self._send_json({"status": "started", "country": country})
                 return
-
-            if self.path == "/api/library/queue":
+    
+            if path == "/api/library/queue":
                 try:
                     country = start_queue_workflow(payload)
                 except ValueError as exc:
@@ -3088,8 +3489,8 @@ data:
                     return
                 self._send_json({"status": "queued", "country": country})
                 return
-
-            if self.path == "/api/library/remove":
+    
+            if path == "/api/library/remove":
                 slug = payload.get("slug", "").strip()
                 if not slug:
                     self._send_json({"error": "slug is required"}, 400)
@@ -3104,8 +3505,8 @@ data:
                     return
                 self._send_json({"status": "removed", "slug": slug})
                 return
-
-            if self.path == "/api/library/build":
+    
+            if path == "/api/library/build":
                 try:
                     auto_promote = bool(payload.get("auto_promote", True))
                     build = start_build_workflow(auto_promote=auto_promote)
@@ -3114,8 +3515,8 @@ data:
                     return
                 self._send_json({"status": "started", "build": build})
                 return
-
-            if self.path == "/api/library/download-merge":
+    
+            if path == "/api/library/download-merge":
                 try:
                     build = start_download_merge_workflow(payload)
                 except RuntimeError as exc:
@@ -3123,8 +3524,8 @@ data:
                     return
                 self._send_json({"status": "started", "build": build})
                 return
-
-            if self.path == "/api/library/check-updates":
+    
+            if path == "/api/library/check-updates":
                 try:
                     records = start_check_updates()
                 except RuntimeError as exc:
@@ -3132,8 +3533,8 @@ data:
                     return
                 self._send_json({"status": "checked", "countries": records})
                 return
-
-            if self.path == "/api/library/build-step":
+    
+            if path == "/api/library/build-step":
                 step = (payload.get("step") or "").strip().lower()
                 try:
                     build = start_step_build_workflow(step)
@@ -3145,8 +3546,8 @@ data:
                     return
                 self._send_json({"status": "started", "build": build})
                 return
-
-            if self.path in {"/api/library/abort", "/api/import/abort"}:
+    
+            if path in {"/api/library/abort", "/api/import/abort"}:
                 try:
                     abort_import_workflow()
                 except RuntimeError as exc:
@@ -3154,9 +3555,9 @@ data:
                     return
                 self._send_json({"status": "aborted"})
                 return
-
-            if self.path.startswith("/api/promote/"):
-                service = self.path.rsplit("/", 1)[-1].strip().lower()
+    
+            if path.startswith("/api/promote/"):
+                service = path.rsplit("/", 1)[-1].strip().lower()
                 if not service:
                     self._send_json({"error": "service is required"}, 400)
                     return
@@ -3170,8 +3571,8 @@ data:
                     return
                 self._send_json({"status": "promoted", "service": service, "result": result})
                 return
-
-            if self.path == "/api/config":
+    
+            if path == "/api/config":
                 try:
                     config = apply_config_update(payload)
                 except ValueError as exc:
@@ -3179,13 +3580,13 @@ data:
                     return
                 self._send_json(config)
                 return
-
+    
             self._send_json({"error": "not found"}, 404)
-
+    
         def log_message(self, format, *args):
             return
-
-
+    
+    
     if __name__ == "__main__":
         ensure_dirs()
         _startup_state = read_workflow_state()
@@ -3208,6 +3609,7 @@ data:
             pass
         finally:
             server.server_close()
+
 ---
 apiVersion: apps/v1
 kind: Deployment
