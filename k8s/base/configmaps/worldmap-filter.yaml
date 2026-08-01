@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cm-worldmap-filter
+  namespace: osm
+data:
+  filter.txt: |
+    nwr/place
+    nwr/highway
+    nwr/railway
+    nwr/amenity
+    nwr/landuse
+    nwr/leisure
+    nwr/natural
+    nwr/waterway
+    nwr/boundary
+    nwr/tourism
+    nwr/building
+    nwr/construction

@@ -1,0 +1,55 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: planet-update
+  namespace: osm
+spec:
+  schedule: "0 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: planet-update
+              image: python:3.12-slim
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  export DEBIAN_FRONTEND=noninteractive
+                  apt-get update >/dev/null
+                  apt-get install -y --no-install-recommends osmium-tool wget ca-certificates >/dev/null
+                  pip install --no-cache-dir pyosmium >/dev/null
+                  rm -rf /var/lib/apt/lists/*
+                  PLANET_DIR=/mnt/OSM
+                  PLANET_FILE="${PLANET_DIR}/planet-latest.osm.pbf"
+                  LOCK_FILE="${PLANET_DIR}/.planet-update.lock"
+                  mkdir -p "${PLANET_DIR}"
+                  if [ -e "${LOCK_FILE}" ]; then
+                    echo "Another planet update is already running."
+                    exit 0
+                  fi
+                  touch "${LOCK_FILE}"
+                  trap 'rm -f "${LOCK_FILE}"' EXIT
+                  cd "${PLANET_DIR}"
+                  if [ ! -s "${PLANET_FILE}" ]; then
+                    echo "Downloading initial planet-latest.osm.pbf ..."
+                    wget -O "${PLANET_FILE}.tmp" https://planet.openstreetmap.org/planet-latest.osm.pbf
+                    mv "${PLANET_FILE}.tmp" "${PLANET_FILE}"
+                  fi
+                  echo "Running pyosmium-up-to-date on ${PLANET_FILE} ..."
+                  pyosmium-up-to-date "${PLANET_FILE}"
+                  echo "Planet update completed."
+              volumeMounts:
+                - name: planet-storage
+                  mountPath: /mnt/OSM
+          volumes:
+            - name: planet-storage
+              persistentVolumeClaim:
+                claimName: planet-storage-pvc

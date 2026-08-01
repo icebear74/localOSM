@@ -1,0 +1,76 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nominatim-import
+  namespace: osm
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        fsGroup: 100
+      containers:
+        - name: nominatim-import
+          image: mediagis/nominatim:4.5
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PBF_PATH
+              value: /pipeline/europa_mitte_final.osm.pbf
+            - name: NOMINATIM_PASSWORD
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-nominatim-import-config
+                  key: import_password
+            - name: THREADS
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-nominatim-import-config
+                  key: import_threads
+            - name: NOMINATIM_OSM2PGSQL_CACHE
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-nominatim-import-config
+                  key: import_cache_mb
+            - name: NOMINATIM_FLATNODE_FILE
+              value: /var/lib/postgresql/16/main/flatnodes.bin
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              /app/config.sh
+              if [ -n "${NOMINATIM_OSM2PGSQL_CACHE:-}" ]; then
+                sed -i '/nominatim import/ s/--threads \$THREADS/--threads \$THREADS --osm2pgsql-cache \$NOMINATIM_OSM2PGSQL_CACHE --flatnode-file \$NOMINATIM_FLATNODE_FILE/g' /app/init.sh
+              else
+                sed -i '/nominatim import/ s/--threads \$THREADS/--threads \$THREADS --flatnode-file \$NOMINATIM_FLATNODE_FILE/g' /app/init.sh
+              fi
+              /app/init.sh
+              sleep 10
+              su -c "psql -c 'CHECKPOINT;'" postgres
+              sleep 5
+              touch /var/lib/postgresql/16/main/import-finished
+              rm -f "${NOMINATIM_FLATNODE_FILE}"
+          volumeMounts:
+            - name: planet-storage
+              mountPath: /pipeline
+              readOnly: true
+            - name: nominatim-data
+              mountPath: /var/lib/postgresql/16/main
+            - name: nominatim-postgres-tuning
+              mountPath: /etc/postgresql/16/main/conf.d/zz-tuning.conf
+              subPath: import-tuning.conf
+              readOnly: true
+      volumes:
+        - name: planet-storage
+          persistentVolumeClaim:
+            claimName: planet-storage-pvc
+        - name: nominatim-data
+          persistentVolumeClaim:
+            claimName: nominatim-pvc
+        - name: nominatim-postgres-tuning
+          configMap:
+            name: nominatim-postgres-tuning
+            items:
+              - key: import-tuning.conf
+                path: import-tuning.conf

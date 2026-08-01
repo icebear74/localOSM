@@ -1,0 +1,50 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: photon-import
+  namespace: osm
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: photon-import
+          image: eclipse-temurin:21-jre
+          env:
+            - name: PHOTON_VERSION
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-photon-config
+                  key: photon_version
+            - name: PHOTON_LANGUAGES
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-photon-config
+                  key: photon_languages
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              JAR="/photon/bin/photon-${PHOTON_VERSION}.jar"
+              if [ ! -s "${JAR}" ]; then
+                echo "Photon jar missing at ${JAR}" >&2
+                exit 1
+              fi
+              rm -rf /photon/data/photon_data
+              mkdir -p /photon/data
+              java -Xms16g -Xmx32g -XX:+UseG1GC -jar "${JAR}" import -osm-file /pipeline/europa_mitte_final.osm.pbf -languages "${PHOTON_LANGUAGES}" -data-dir /photon/data
+          volumeMounts:
+            - name: planet-storage
+              mountPath: /pipeline
+              readOnly: true
+            - name: photon-data
+              mountPath: /photon
+      volumes:
+        - name: planet-storage
+          persistentVolumeClaim:
+            claimName: planet-storage-pvc
+        - name: photon-data
+          persistentVolumeClaim:
+            claimName: photon-pvc

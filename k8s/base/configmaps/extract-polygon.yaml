@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cm-extract-polygon
+  namespace: osm
+data:
+  polygon.geojson: |
+    {
+      "type": "FeatureCollection",
+      "features": [
+        {
+          "type": "Feature",
+          "properties": {
+            "name": "Europa Mitte"
+          },
+          "geometry": {
+            "type": "Polygon",
+            "coordinates": [
+              [
+                [4.5, 45.0],
+                [19.5, 45.0],
+                [19.5, 55.8],
+                [4.5, 55.8],
+                [4.5, 45.0]
+              ]
+            ]
+          }
+        }
+      ]
+    }
