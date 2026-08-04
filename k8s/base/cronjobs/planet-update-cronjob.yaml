@@ -24,8 +24,7 @@ spec:
                   set -euo pipefail
                   export DEBIAN_FRONTEND=noninteractive
                   apt-get update >/dev/null
-                  apt-get install -y --no-install-recommends osmium-tool wget ca-certificates >/dev/null
-                  pip install --no-cache-dir pyosmium >/dev/null
+                  apt-get install -y --no-install-recommends osmium-tool python3-osmium wget ca-certificates >/dev/null
                   rm -rf /var/lib/apt/lists/*
                   PLANET_DIR=/mnt/OSM
                   PLANET_FILE="${PLANET_DIR}/planet-latest.osm.pbf"
