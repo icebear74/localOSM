@@ -21,12 +21,12 @@ spec:
               command: ["/bin/bash", "-c"]
               args:
                 - |
-                  set -euo pipefail
+                  set -euxo pipefail
                   export DEBIAN_FRONTEND=noninteractive
-                  apt-get update >/dev/null
-                  apt-get install -y --no-install-recommends osmium-tool wget ca-certificates >/dev/null
+                  apt-get update
+                  apt-get install -y --no-install-recommends osmium-tool wget ca-certificates
                   rm -rf /var/lib/apt/lists/*
-                  pip install --no-cache-dir osmium >/dev/null
+                  pip install --no-cache-dir osmium
                   PLANET_DIR=/mnt/OSM
                   PLANET_FILE="${PLANET_DIR}/planet-latest.osm.pbf"
                   LOCK_FILE="${PLANET_DIR}/.planet-update.lock"
@@ -40,11 +40,11 @@ spec:
                   cd "${PLANET_DIR}"
                   if [ ! -s "${PLANET_FILE}" ]; then
                     echo "Downloading initial planet-latest.osm.pbf ..."
-                    wget -O "${PLANET_FILE}.tmp" https://planet.openstreetmap.org/planet-latest.osm.pbf
+                    wget --progress=dot:giga -O "${PLANET_FILE}.tmp" https://planet.openstreetmap.org/planet-latest.osm.pbf
                     mv "${PLANET_FILE}.tmp" "${PLANET_FILE}"
                   fi
                   echo "Running pyosmium-up-to-date on ${PLANET_FILE} ..."
-                  pyosmium-up-to-date "${PLANET_FILE}"
+                  pyosmium-up-to-date -v "${PLANET_FILE}"
                   echo "Planet update completed."
               volumeMounts:
                 - name: planet-storage
