@@ -1,0 +1,59 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: osmium-pipeline
+  namespace: osm
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: osmium-pipeline
+          image: python:3.12-slim
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update >/dev/null
+              apt-get install -y --no-install-recommends osmium-tool >/dev/null
+              rm -rf /var/lib/apt/lists/*
+              WORKDIR=/tmp/osmium
+              PLANET=/mnt/OSM/planet-latest.osm.pbf
+              FINAL=/mnt/OSM/europa_mitte_final.osm.pbf
+              PRIVATE=/mnt/OSM/privat.osm
+              mkdir -p "${WORKDIR}"
+              test -s "${PLANET}"
+              osmium extract -p /config/polygon.geojson "${PLANET}" -o "${WORKDIR}/europa_mitte_sauber.osm.pbf" --overwrite
+              osmium tags-filter -e /config/filter.txt "${PLANET}" -o "${WORKDIR}/planet-world-overview.osm.pbf" --overwrite
+              if [ -s "${PRIVATE}" ]; then
+                osmium sort "${PRIVATE}" -o "${WORKDIR}/privat-sorted.osm.pbf" --overwrite
+                osmium merge "${WORKDIR}/europa_mitte_sauber.osm.pbf" "${WORKDIR}/planet-world-overview.osm.pbf" "${WORKDIR}/privat-sorted.osm.pbf" -o "${WORKDIR}/europa_mitte_final.osm.pbf" --overwrite
+              else
+                osmium merge "${WORKDIR}/europa_mitte_sauber.osm.pbf" "${WORKDIR}/planet-world-overview.osm.pbf" -o "${WORKDIR}/europa_mitte_final.osm.pbf" --overwrite
+              fi
+              mv "${WORKDIR}/europa_mitte_final.osm.pbf" "${FINAL}"
+              rm -rf "${WORKDIR}"
+          volumeMounts:
+            - name: planet-storage
+              mountPath: /mnt/OSM
+            - name: extract-polygon
+              mountPath: /config/polygon.geojson
+              subPath: polygon.geojson
+              readOnly: true
+            - name: worldmap-filter
+              mountPath: /config/filter.txt
+              subPath: filter.txt
+              readOnly: true
+      volumes:
+        - name: planet-storage
+          persistentVolumeClaim:
+            claimName: planet-storage-pvc
+        - name: extract-polygon
+          configMap:
+            name: cm-extract-polygon
+        - name: worldmap-filter
+          configMap:
+            name: cm-worldmap-filter

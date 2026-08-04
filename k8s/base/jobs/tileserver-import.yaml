@@ -1,0 +1,68 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tileserver-import
+  namespace: osm
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: fetch-sources
+          image: alpine:3.20
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              mkdir -p /data/sources
+              if [ ! -s /data/sources/lake_centerline.shp.zip ]; then
+                wget -q -O /data/sources/lake_centerline.shp.zip https://github.com/acalcutt/osm-lakelines/releases/latest/download/lake_centerline.shp.zip
+              fi
+              if [ ! -s /data/sources/water-polygons-split-3857.zip ]; then
+                wget -q -O /data/sources/water-polygons-split-3857.zip https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip
+              fi
+              if [ ! -s /data/sources/natural_earth_vector.sqlite.zip ]; then
+                wget -q -O /data/sources/natural_earth_vector.sqlite.zip https://naciscdn.org/naturalearth/packages/natural_earth_vector.sqlite.zip
+              fi
+          volumeMounts:
+            - name: tileserver-data
+              mountPath: /data
+      containers:
+        - name: tileserver-import
+          image: ghcr.io/onthegomap/planetiler:latest
+          imagePullPolicy: Always
+          env:
+            - name: JAVA_OPTS
+              value: "-Xms16g -Xmx64g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"
+            - name: JAVA_TOOL_OPTIONS
+              value: "-Xms16g -Xmx64g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"
+          args:
+            - --osm-path=/pipeline/europa_mitte_final.osm.pbf
+            - --output=/data/map.mbtiles
+            - --force
+            - --fetch-wikidata
+            - --nodemap-type=sparsearray
+            - --nodemap-storage=ram
+            - --threads=18
+            - --arguments=journal_mode=WAL,synchronous=OFF,mmap_size=268435456
+            - --lake_centerlines_path=/data/sources/lake_centerline.shp.zip
+            - --water_polygons_path=/data/sources/water-polygons-split-3857.zip
+            - --natural_earth_path=/data/sources/natural_earth_vector.sqlite.zip
+            - --minzoom=0
+            - --maxzoom=16
+            - --extra-osm-tags=shop,building,construction,name,wheelchair,amenity,highway,landuse
+          volumeMounts:
+            - name: planet-storage
+              mountPath: /pipeline
+              readOnly: true
+            - name: tileserver-data
+              mountPath: /data
+      volumes:
+        - name: planet-storage
+          persistentVolumeClaim:
+            claimName: planet-storage-pvc
+        - name: tileserver-data
+          persistentVolumeClaim:
+            claimName: tileserver-pvc

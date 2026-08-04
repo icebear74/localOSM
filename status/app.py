@@ -49,6 +49,9 @@ CONFIG_FILE = os.path.join(STATUS_DIR, "config.json")
 # Live style used by TileServer-GL (k8s/tileserver.yaml mounts the same hostPath).
 TILESERVER_STYLE_PATH = os.path.join(DATA_DIR, "tileserver", "active", "style.json")
 IMPORT_REQUEST_FILE = os.path.join(STATUS_DIR, "import-request.json")
+PLANET_FILE = os.path.join(DATA_DIR, "planet-latest.osm.pbf")
+PLANET_FINAL_FILE = os.path.join(DATA_DIR, "europa_mitte_final.osm.pbf")
+PRIVATE_OSM_FILE = os.path.join(DATA_DIR, "privat.osm")
 # import-orchestrator.sh writes its own live progress here (same hostPath as
 # STATUS_DIR, see k8s/import-orchestrator.yaml "state" volume) and watches for
 # ABORT_FLAG_FILE to cancel whatever it is currently doing.
@@ -83,6 +86,18 @@ PROMOTE_SERVICES = {
 
 # Fixed pipeline order the import-orchestrator always runs these steps in.
 BUILD_STEPS = ("tileserver", "nominatim", "valhalla", "photon")
+PIPELINE_CONFIGMAPS = {
+    "geojson": {"name": "cm-extract-polygon", "key": "polygon.geojson"},
+    "filter": {"name": "cm-worldmap-filter", "key": "filter.txt"},
+}
+PIPELINE_TRIGGER_TARGETS = {
+    "planet-update": {"kind": "cronjob", "name": "planet-update", "prefix": "planet-update"},
+    "osmium-pipeline": {"kind": "job", "name": "osmium-pipeline", "prefix": "osmium-pipeline"},
+    "nominatim-import": {"kind": "job", "name": "nominatim-import", "prefix": "nominatim-import"},
+    "valhalla-import": {"kind": "job", "name": "valhalla-import", "prefix": "valhalla-import"},
+    "tileserver-import": {"kind": "job", "name": "tileserver-import", "prefix": "tileserver-import"},
+    "photon-import": {"kind": "job", "name": "photon-import", "prefix": "photon-import"},
+}
 
 CONFIG_DEFAULTS = {
     "node_url": "",
@@ -657,6 +672,29 @@ class KubeClient:
             if "404" not in str(exc):
                 raise
 
+    def list_jobs(self):
+        return self._request("GET", f"/apis/batch/v1/namespaces/{self.namespace}/jobs")
+
+    def get_cronjob(self, name):
+        return self._request("GET", f"/apis/batch/v1/namespaces/{self.namespace}/cronjobs/{name}")
+
+    def get_configmap(self, name):
+        return self._request("GET", f"/api/v1/namespaces/{self.namespace}/configmaps/{name}")
+
+    def apply_configmap(self, name, data):
+        body = {"metadata": {"name": name, "namespace": self.namespace}, "data": data}
+        try:
+            return self._request(
+                "PATCH",
+                f"/api/v1/namespaces/{self.namespace}/configmaps/{name}",
+                body={"data": data},
+                content_type="application/merge-patch+json",
+            )
+        except RuntimeError as exc:
+            if "404" not in str(exc):
+                raise
+        return self._request("POST", f"/api/v1/namespaces/{self.namespace}/configmaps", body=body)
+
     def get_job_logs(self, name, tail_lines=80):
         pods = self._request(
             "GET",
@@ -824,6 +862,7 @@ INDEX_HTML = """<!doctype html>
     .row2 > * { min-width: 0; }
     .message { font-size: 0.82rem; line-height: 1.4; }
     pre { white-space: pre-wrap; word-break: break-word; font-size: 0.75rem; color: #5f6b76; }
+    textarea { width: 100%; min-height: 120px; padding: 0.55rem 0.65rem; border-radius: 4px; border: 1px solid #cfd7df; font-size: 0.8rem; }
   </style>
 </head>
 <body>
@@ -939,6 +978,62 @@ INDEX_HTML = """<!doctype html>
       <h2>Workflow Fortschritt</h2>
       <div id="workflow-body">Lade ...</div>
       <button id="abort-btn" class="danger" onclick="abortImport()" style="display:none;margin-top:0.6rem">Import abbrechen</button>
+    </div>
+
+    <div class="card">
+      <h2>Planet &amp; Pipeline</h2>
+      <div class="controls">
+        <div id="pipeline-summary" class="hint">Lade ...</div>
+        <div class="row2">
+          <button class="subtle" onclick="triggerPipelineJob('planet-update')">Planet-Update starten</button>
+          <button class="subtle" onclick="showPipelineLogs('planet-update')">Planet-Logs</button>
+        </div>
+        <div class="row2">
+          <button class="subtle" onclick="triggerPipelineJob('osmium-pipeline')">Osmium-Pipeline starten</button>
+          <button class="subtle" onclick="showPipelineLogs('osmium-pipeline')">Pipeline-Logs</button>
+        </div>
+        <div id="pipeline-action-status" class="hint"></div>
+        <pre id="pipeline-logs">Noch keine Logs geladen.</pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>ConfigMap Uploads</h2>
+      <div class="controls">
+        <div>
+          <label>GeoJSON Polygon</label>
+          <input id="geojson-upload-input" type="file" accept=".json,.geojson,application/json">
+          <button class="subtle" onclick="uploadPipelineConfig('geojson')">GeoJSON hochladen</button>
+        </div>
+        <div>
+          <label>Worldmap Filter</label>
+          <input id="filter-upload-input" type="file" accept=".txt,text/plain">
+          <button class="subtle" onclick="uploadPipelineConfig('filter')">Filter hochladen</button>
+        </div>
+        <div id="config-upload-status" class="hint">Die Endpunkte aktualisieren direkt die ConfigMaps im Cluster.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Manuelle Import-Jobs</h2>
+      <div class="controls">
+        <div class="row2">
+          <button class="subtle" onclick="triggerPipelineJob('nominatim-import')">Nominatim Import</button>
+          <button class="subtle" onclick="showPipelineLogs('nominatim-import')">Nominatim Logs</button>
+        </div>
+        <div class="row2">
+          <button class="subtle" onclick="triggerPipelineJob('valhalla-import')">Valhalla Import</button>
+          <button class="subtle" onclick="showPipelineLogs('valhalla-import')">Valhalla Logs</button>
+        </div>
+        <div class="row2">
+          <button class="subtle" onclick="triggerPipelineJob('tileserver-import')">TileServer Import</button>
+          <button class="subtle" onclick="showPipelineLogs('tileserver-import')">TileServer Logs</button>
+        </div>
+        <div class="row2">
+          <button class="subtle" onclick="triggerPipelineJob('photon-import')">Photon Import</button>
+          <button class="subtle" onclick="showPipelineLogs('photon-import')">Photon Logs</button>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -1506,6 +1601,88 @@ INDEX_HTML = """<!doctype html>
     }
   }
 
+  async function uploadPipelineConfig(kind) {
+    var inputId = kind === 'geojson' ? 'geojson-upload-input' : 'filter-upload-input';
+    var input = document.getElementById(inputId);
+    var statusEl = document.getElementById('config-upload-status');
+    if (!input.files || !input.files.length) {
+      statusEl.textContent = 'Bitte zuerst eine Datei auswählen.';
+      return;
+    }
+    statusEl.textContent = 'Upload läuft ...';
+    try {
+      var content = await input.files[0].text();
+      var resp = await fetch('/api/config/upload/' + encodeURIComponent(kind), {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({content: content})
+      });
+      var data = await resp.json();
+      statusEl.textContent = resp.ok ? (data.message || 'Upload erfolgreich.') : ('Fehler: ' + (data.error || 'Unbekannter Fehler'));
+    } catch (err) {
+      statusEl.textContent = 'Fehler: ' + err;
+    }
+  }
+
+  async function triggerPipelineJob(name) {
+    var statusEl = document.getElementById('pipeline-action-status');
+    statusEl.textContent = 'Starte ' + name + ' ...';
+    try {
+      var resp = await fetch('/api/jobs/' + encodeURIComponent(name) + '/trigger', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: '{}'
+      });
+      var data = await resp.json();
+      statusEl.textContent = resp.ok ? (data.message || (name + ' gestartet.')) : ('Fehler: ' + (data.error || 'Unbekannter Fehler'));
+      await refresh();
+    } catch (err) {
+      statusEl.textContent = 'Fehler: ' + err;
+    }
+  }
+
+  async function showPipelineLogs(name) {
+    var logsEl = document.getElementById('pipeline-logs');
+    var statusEl = document.getElementById('pipeline-action-status');
+    logsEl.textContent = 'Lade Logs für ' + name + ' ...';
+    try {
+      var resp = await fetch('/api/jobs/' + encodeURIComponent(name) + '/logs');
+      var data = await resp.json();
+      if (!resp.ok) {
+        logsEl.textContent = data.error || 'Keine Logs verfügbar.';
+        return;
+      }
+      statusEl.textContent = (data.resource_name || name) + ' · Status: ' + (data.status || 'unbekannt');
+      logsEl.textContent = data.logs || 'Noch keine Logs vorhanden.';
+    } catch (err) {
+      logsEl.textContent = 'Fehler: ' + err;
+    }
+  }
+
+  function renderPipelineSummary(files, jobs) {
+    var el = document.getElementById('pipeline-summary');
+    if (!el) return;
+    function fmtFile(label, entry) {
+      if (!entry || !entry.exists) return '<div><b>' + esc(label) + ':</b> fehlt</div>';
+      return '<div><b>' + esc(label) + ':</b> ' + esc(entry.size_mb) + ' MB · ' + esc(entry.mtime || '') + '</div>';
+    }
+    function fmtJob(label, entry) {
+      var status = entry && entry.status ? entry.status : 'missing';
+      return '<div><b>' + esc(label) + ':</b> ' + esc(status) + (entry && entry.resource_name ? ' · ' + esc(entry.resource_name) : '') + '</div>';
+    }
+    el.innerHTML =
+      fmtFile('planet-latest.osm.pbf', files.planet) +
+      fmtFile('europa_mitte_final.osm.pbf', files.final_pbf) +
+      fmtFile('privat.osm', files.private_osm) +
+      '<hr style="border:none;border-top:1px solid #eef2f5;margin:.5rem 0">' +
+      fmtJob('Planet Update', jobs['planet-update']) +
+      fmtJob('Osmium Pipeline', jobs['osmium-pipeline']) +
+      fmtJob('Nominatim Import', jobs['nominatim-import']) +
+      fmtJob('Valhalla Import', jobs['valhalla-import']) +
+      fmtJob('TileServer Import', jobs['tileserver-import']) +
+      fmtJob('Photon Import', jobs['photon-import']);
+  }
+
   async function refresh() {
     try {
       var resp = await fetch('/api/status');
@@ -1518,6 +1695,7 @@ INDEX_HTML = """<!doctype html>
       renderCountries(d.selected_countries || []);
       renderQueuedCount(d.selected_countries || []);
       renderPromote(d.promote || {});
+      renderPipelineSummary(d.pipeline_files || {}, d.pipeline_jobs || {});
 
       var svcs = d.services || [];
       var okCount = svcs.filter(function(s){ return s.ok; }).length;
@@ -2044,6 +2222,166 @@ def _describe_data_dir(path):
     return payload
 
 
+def _describe_file(path):
+    exists = os.path.isfile(path)
+    payload = {
+        "path": path,
+        "exists": exists,
+        "size_mb": round(os.path.getsize(path) / (1024 * 1024), 1) if exists else 0.0,
+        "mtime": _format_mtime(path) if exists else "",
+    }
+    return payload
+
+
+def _safe_job_name_suffix():
+    return datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+
+
+def _clone_job_manifest(job_manifest, *, new_name=None):
+    cloned = json.loads(json.dumps(job_manifest))
+    cloned["apiVersion"] = "batch/v1"
+    cloned["kind"] = "Job"
+    metadata = cloned.setdefault("metadata", {})
+    metadata["name"] = new_name or metadata.get("name", "")
+    metadata.pop("uid", None)
+    metadata.pop("resourceVersion", None)
+    metadata.pop("generation", None)
+    metadata.pop("creationTimestamp", None)
+    metadata.pop("managedFields", None)
+    metadata.pop("selfLink", None)
+    metadata.pop("annotations", None)
+    metadata.pop("ownerReferences", None)
+    cloned.pop("status", None)
+    return cloned
+
+
+def _job_sort_key(job):
+    metadata = job.get("metadata", {})
+    return metadata.get("creationTimestamp", ""), metadata.get("name", "")
+
+
+def _list_jobs():
+    try:
+        return KUBE.list_jobs().get("items", [])
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _find_latest_job(job_name):
+    jobs = _list_jobs()
+    target = PIPELINE_TRIGGER_TARGETS.get(job_name, {"prefix": job_name})
+    prefix = target.get("prefix", job_name)
+    candidates = []
+    for job in jobs:
+        name = job.get("metadata", {}).get("name", "")
+        if name == job_name or name == prefix or name.startswith(prefix + "-"):
+            candidates.append(job)
+    if not candidates:
+        return None
+    candidates.sort(key=_job_sort_key)
+    return candidates[-1]
+
+
+def _summarize_job(job_name):
+    job = _find_latest_job(job_name)
+    if not job:
+        return {
+            "name": job_name,
+            "exists": False,
+            "active": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "status": "missing",
+            "created_at": "",
+            "completed_at": "",
+        }
+    metadata = job.get("metadata", {})
+    status = job.get("status", {})
+    active = int(status.get("active", 0) or 0)
+    succeeded = int(status.get("succeeded", 0) or 0)
+    failed = int(status.get("failed", 0) or 0)
+    state = "pending"
+    if active:
+        state = "running"
+    elif failed:
+        state = "failed"
+    elif succeeded:
+        state = "completed"
+    return {
+        "name": job_name,
+        "resource_name": metadata.get("name", job_name),
+        "exists": True,
+        "active": active,
+        "succeeded": succeeded,
+        "failed": failed,
+        "status": state,
+        "created_at": metadata.get("creationTimestamp", ""),
+        "completed_at": status.get("completionTime", ""),
+        "start_time": status.get("startTime", ""),
+    }
+
+
+def _collect_pipeline_jobs():
+    return {name: _summarize_job(name) for name in PIPELINE_TRIGGER_TARGETS}
+
+
+def _collect_pipeline_files():
+    return {
+        "planet": _describe_file(PLANET_FILE),
+        "final_pbf": _describe_file(PLANET_FINAL_FILE),
+        "private_osm": _describe_file(PRIVATE_OSM_FILE),
+    }
+
+
+def _prepare_configmap_payload(kind, raw_body):
+    target = PIPELINE_CONFIGMAPS.get(kind)
+    if not target:
+        raise ValueError(f"Unsupported config upload kind: {kind}")
+    content_type = (raw_body or b"").strip()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:  # noqa: BLE001
+        payload = None
+    if isinstance(payload, dict) and "content" in payload:
+        content = str(payload.get("content", ""))
+    else:
+        content = raw_body.decode("utf-8")
+    content = content.strip()
+    if not content:
+        raise ValueError("Uploaded content is empty.")
+    if kind == "geojson":
+        try:
+            geojson = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid GeoJSON: {exc}") from exc
+        if not isinstance(geojson, dict) or "type" not in geojson:
+            raise ValueError("GeoJSON must be a JSON object with a 'type' field.")
+        content = json.dumps(geojson, indent=2, ensure_ascii=False) + "\n"
+    else:
+        content = content + "\n"
+    return target["name"], {target["key"]: content}
+
+
+def _trigger_pipeline_job(job_name):
+    target = PIPELINE_TRIGGER_TARGETS.get(job_name)
+    if not target:
+        raise ValueError(f"Unsupported job trigger: {job_name}")
+    kind = target["kind"]
+    if kind == "cronjob":
+        cronjob = KUBE.get_cronjob(target["name"])
+        manifest = {
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "metadata": {"name": f"{target['prefix']}-manual-{_safe_job_name_suffix()}"},
+            "spec": cronjob.get("spec", {}).get("jobTemplate", {}).get("spec", {}),
+        }
+        return KUBE.create_job(manifest)
+    job = KUBE.get_job(target["name"])
+    manifest = _clone_job_manifest(job, new_name=target["name"])
+    KUBE.delete_job(target["name"])
+    return KUBE.create_job(manifest)
+
+
 def _deployment_selector(name):
     deployment = KUBE.get_deployment(name)
     match_labels = deployment.get("spec", {}).get("selector", {}).get("matchLabels", {})
@@ -2383,6 +2721,8 @@ def collect_status():
         "import_dir": IMPORT_DIR,
         "import_files": import_files,
         "valhalla_tiles_mb": dir_size_mb(VALHALLA_TILE_DIR),
+        "pipeline_files": _collect_pipeline_files(),
+        "pipeline_jobs": _collect_pipeline_jobs(),
         "available_countries": country_catalog_with_flags(records),
         "selected_countries": records,
         "queued_count": len([record for record in records if record.get("status") == "queued"]),
@@ -2915,7 +3255,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        if self.path in {"/", "/index.html"}:
+        path = urllib.parse.urlparse(self.path).path
+
+        if path in {"/", "/index.html"}:
             cfg = load_config()
             effective_url = cfg.get("node_url") or cfg.get("detected_node_url", "")
             body = INDEX_HTML.replace("{{NODE_URL}}", effective_url).encode("utf-8")
@@ -2926,29 +3268,29 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
-        if self.path == "/healthz":
+        if path == "/healthz":
             self._send_json({"status": "ok"})
             return
 
-        if self.path == "/api/status":
+        if path == "/api/status":
             try:
                 self._send_json(collect_status())
             except Exception as exc:  # noqa: BLE001
                 self._send_json({"error": str(exc)}, 500)
             return
 
-        if self.path == "/api/promote/status":
+        if path == "/api/promote/status":
             try:
                 self._send_json(promote_status())
             except Exception as exc:  # noqa: BLE001
                 self._send_json({"error": str(exc)}, 500)
             return
 
-        if self.path == "/api/config":
+        if path == "/api/config":
             self._send_json(load_config())
             return
 
-        if self.path == "/api/style":
+        if path == "/api/style":
             raw = read_tileserver_style()
             if raw is None:
                 self._send_json({"error": "style.json not found"}, 404)
@@ -2962,8 +3304,29 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(raw)
             return
 
-        if self.path.startswith("/test/"):
-            name = self.path.split("/", 2)[-1]
+        if path.startswith("/api/jobs/") and path.endswith("/status"):
+            job_name = path[len("/api/jobs/") : -len("/status")].strip("/")
+            if not job_name:
+                self._send_json({"error": "job name is required"}, 400)
+                return
+            self._send_json(_summarize_job(job_name))
+            return
+
+        if path.startswith("/api/jobs/") and path.endswith("/logs"):
+            job_name = path[len("/api/jobs/") : -len("/logs")].strip("/")
+            if not job_name:
+                self._send_json({"error": "job name is required"}, 400)
+                return
+            summary = _summarize_job(job_name)
+            if not summary.get("exists"):
+                self._send_json({"error": f"Job '{job_name}' not found."}, 404)
+                return
+            logs = KUBE.get_job_logs(summary.get("resource_name", job_name), tail_lines=200)
+            self._send_json({**summary, "logs": logs})
+            return
+
+        if path.startswith("/test/"):
+            name = path.split("/", 2)[-1]
             if name == "tileserver":
                 ok, detail = check_http("http://tileserver-gl.osm.svc.cluster.local/")
             elif name == "nominatim":
@@ -2983,12 +3346,44 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json({"error": "not found"}, 404)
 
     def do_POST(self):
+        path = urllib.parse.urlparse(self.path).path
         content_length = int(self.headers.get("Content-Length", "0"))
         raw_body = self.rfile.read(content_length) if content_length else b"{}"
 
-        if self.path == "/api/style":
+        if path == "/api/style":
             ok, message, restarted = write_tileserver_style(raw_body)
             self._send_json({"ok": ok, "message": message, "restarted": restarted}, 200 if ok else 400)
+            return
+
+        if path.startswith("/api/config/upload/"):
+            kind = path.rsplit("/", 1)[-1].strip().lower()
+            try:
+                configmap_name, data = _prepare_configmap_payload(kind, raw_body)
+                KUBE.apply_configmap(configmap_name, data)
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 400)
+                return
+            except RuntimeError as exc:
+                self._send_json({"error": str(exc)}, 500)
+                return
+            self._send_json({"status": "updated", "configmap": configmap_name, "message": f"{kind} configuration updated."})
+            return
+
+        if path.startswith("/api/jobs/") and path.endswith("/trigger"):
+            job_name = path[len("/api/jobs/") : -len("/trigger")].strip("/")
+            if not job_name:
+                self._send_json({"error": "job name is required"}, 400)
+                return
+            try:
+                result = _trigger_pipeline_job(job_name)
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 400)
+                return
+            except RuntimeError as exc:
+                self._send_json({"error": str(exc)}, 409)
+                return
+            created_name = result.get("metadata", {}).get("name", job_name)
+            self._send_json({"status": "started", "job": job_name, "resource_name": created_name, "message": f"Job '{created_name}' started."})
             return
 
         try:
@@ -2997,7 +3392,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "invalid json"}, 400)
             return
 
-        if self.path == "/api/library/add":
+        if path == "/api/library/add":
             try:
                 country = start_country_workflow(payload)
             except ValueError as exc:
@@ -3009,7 +3404,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"status": "started", "country": country})
             return
 
-        if self.path == "/api/library/queue":
+        if path == "/api/library/queue":
             try:
                 country = start_queue_workflow(payload)
             except ValueError as exc:
@@ -3021,7 +3416,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"status": "queued", "country": country})
             return
 
-        if self.path == "/api/library/remove":
+        if path == "/api/library/remove":
             slug = payload.get("slug", "").strip()
             if not slug:
                 self._send_json({"error": "slug is required"}, 400)
@@ -3037,7 +3432,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"status": "removed", "slug": slug})
             return
 
-        if self.path == "/api/library/build":
+        if path == "/api/library/build":
             try:
                 auto_promote = bool(payload.get("auto_promote", True))
                 build = start_build_workflow(auto_promote=auto_promote)
@@ -3047,7 +3442,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"status": "started", "build": build})
             return
 
-        if self.path == "/api/library/download-merge":
+        if path == "/api/library/download-merge":
             try:
                 build = start_download_merge_workflow(payload)
             except RuntimeError as exc:
@@ -3056,7 +3451,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"status": "started", "build": build})
             return
 
-        if self.path == "/api/library/check-updates":
+        if path == "/api/library/check-updates":
             try:
                 records = start_check_updates()
             except RuntimeError as exc:
@@ -3065,7 +3460,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"status": "checked", "countries": records})
             return
 
-        if self.path == "/api/library/build-step":
+        if path == "/api/library/build-step":
             step = (payload.get("step") or "").strip().lower()
             try:
                 build = start_step_build_workflow(step)
@@ -3078,7 +3473,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"status": "started", "build": build})
             return
 
-        if self.path in {"/api/library/abort", "/api/import/abort"}:
+        if path in {"/api/library/abort", "/api/import/abort"}:
             try:
                 abort_import_workflow()
             except RuntimeError as exc:
@@ -3087,8 +3482,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"status": "aborted"})
             return
 
-        if self.path.startswith("/api/promote/"):
-            service = self.path.rsplit("/", 1)[-1].strip().lower()
+        if path.startswith("/api/promote/"):
+            service = path.rsplit("/", 1)[-1].strip().lower()
             if not service:
                 self._send_json({"error": "service is required"}, 400)
                 return
@@ -3103,7 +3498,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"status": "promoted", "service": service, "result": result})
             return
 
-        if self.path == "/api/config":
+        if path == "/api/config":
             try:
                 config = apply_config_update(payload)
             except ValueError as exc:

@@ -1,0 +1,55 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: valhalla-import
+  namespace: osm
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: valhalla-import
+          image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
+          imagePullPolicy: Always
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          env:
+            - name: serve_tiles
+              value: "False"
+            - name: force_rebuild
+              value: "False"
+            - name: build_admins
+              value: "True"
+            - name: build_time_zones
+              value: "True"
+            - name: build_tar
+              value: "True"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              test -s /pipeline/europa_mitte_final.osm.pbf
+              mkdir -p /data/tiles
+              valhalla_build_tiles -c /config/valhalla.json /pipeline/europa_mitte_final.osm.pbf -j 16
+              valhalla_build_extract -c /config/valhalla.json -e /data/valhalla_tiles.tar -O
+          volumeMounts:
+            - name: planet-storage
+              mountPath: /pipeline
+              readOnly: true
+            - name: valhalla-data
+              mountPath: /data
+            - name: valhalla-config
+              mountPath: /config
+      volumes:
+        - name: planet-storage
+          persistentVolumeClaim:
+            claimName: planet-storage-pvc
+        - name: valhalla-data
+          persistentVolumeClaim:
+            claimName: valhalla-pvc
+        - name: valhalla-config
+          configMap:
+            name: osm-valhalla-import-config
