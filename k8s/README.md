@@ -7,14 +7,14 @@ Die neue Basisstruktur unter `k8s/base/` bereitet LocalOSM auf spätere Blue/Gre
 - `storage/` – `local-path` StorageClass mit konfigurierbarem Basispfad
 - `pvcs/` – dedizierte PVCs für Nominatim, Valhalla, TileServer, Photon und Planet-Daten
 - `configmaps/` – editierbare GeoJSON- und Filter-Konfigurationen
-- `cronjobs/` – stündliches Planet-Update via `pyosmium-up-to-date`
-- `jobs/` – Osmium-Pipeline und manuell triggerbare Import-Jobs
+- `cronjobs/` – Planet-Update (`pyosmium-up-to-date`) inklusive Extract → Filter → Merge Pipeline
+- `jobs/` – manuell re-triggerbare Osmium-Pipeline und Import-Jobs
 - `deployments/` – Services ohne direkte `hostPath`-Mounts
 
 ## Datenfluss
 
-1. `planet-update` aktualisiert `/mnt/OSM/planet-latest.osm.pbf`
-2. `osmium-pipeline` erzeugt daraus `/mnt/OSM/europa_mitte_final.osm.pbf`
+1. `planet-update` aktualisiert `/mnt/OSM/planet-latest.osm.pbf` und erzeugt anschließend im selben Lauf per Extract (GeoJSON-Region) + Tag-Filter (Attribut-Extrakt) + Merge die Datei `/mnt/OSM/europa_mitte_final.osm.pbf`. Erst wenn beide Schritte erfolgreich sind, meldet der Job Erfolg; bei einem Fehler werden alle Zwischendateien automatisch entfernt, sodass im Verzeichnis nur `planet-latest.osm.pbf` und ggf. die zuletzt erfolgreich erzeugte `europa_mitte_final.osm.pbf` verbleiben.
+2. `osmium-pipeline` kann optional manuell erneut ausgeführt werden, um Extract/Filter/Merge (z. B. nach einer ConfigMap-Änderung) ohne erneuten Download zu wiederholen
 3. Die Import-Jobs lesen ausschließlich diese finale PBF-Datei
 4. Die WebUI triggert nur diese vorgefertigten Jobs; dieselben YAMLs sind auch direkt per `kubectl apply -f ...` nutzbar
 
