@@ -44,8 +44,18 @@ spec:
                     mv "${PLANET_FILE}.tmp" "${PLANET_FILE}"
                   fi
                   echo "Running pyosmium-up-to-date on ${PLANET_FILE} ..."
+                  set +e
                   pyosmium-up-to-date -v "${PLANET_FILE}"
-                  echo "Planet update completed."
+                  update_status=$?
+                  set -e
+                  if [ "${update_status}" -eq 0 ]; then
+                    echo "Planet update completed, file is fully up to date."
+                  elif [ "${update_status}" -eq 1 ]; then
+                    echo "Planet update applied partially; more data is available on the server. Will continue on next run."
+                  else
+                    echo "pyosmium-up-to-date failed with exit code ${update_status}."
+                    exit "${update_status}"
+                  fi
               volumeMounts:
                 - name: planet-storage
                   mountPath: /mnt/OSM
