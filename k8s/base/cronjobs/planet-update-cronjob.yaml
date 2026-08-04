@@ -4,7 +4,7 @@ metadata:
   name: planet-update
   namespace: osm
 spec:
-  schedule: "0 * * * *"
+  schedule: "52 8 * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 2
   failedJobsHistoryLimit: 2
