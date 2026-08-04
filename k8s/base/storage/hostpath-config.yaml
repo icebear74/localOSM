@@ -1,0 +1,43 @@
+# hostpath-config.yaml
+# Configures the HostPath base directory used by the local-path provisioner.
+# Edit the "paths" value below to match the actual mount point on your node
+# before deploying.  The default is /mnt/k8s (same as the original
+# local-path-storage-class.yaml shipped in this repository).
+#
+# Apply with:
+#   kubectl apply -f k8s/base/storage/hostpath-config.yaml
+#
+# NOTE: Changes take effect for *new* PVCs only.  Existing PVCs are not
+# affected because their HostPath directory was already chosen at bind time.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: local-path-config
+  namespace: local-path-storage
+data:
+  config.json: |
+    {
+      "nodePathMap": [
+        {
+          "node": "DEFAULT_PATH_FOR_NON_LISTED_NODES",
+          "paths": ["/mnt/k8s"]
+        }
+      ]
+    }
+  # Helper directories that must exist on the node before the first PVC is
+  # provisioned.  Create them with:
+  #   mkdir -p /mnt/k8s
+  #   mkdir -p /mnt/OSM/tileserver/blue
+  #   mkdir -p /mnt/OSM/tileserver/green
+  setup.sh: |
+    #!/usr/bin/env bash
+    # Run this script once on every node that will host tileserver PVCs.
+    set -euo pipefail
+    BASE_PATH="${HOSTPATH_BASE:-/mnt/k8s}"
+    OSM_PATH="${OSM_DATA_DIR:-/mnt/OSM}"
+    echo "Creating HostPath base directory: $BASE_PATH"
+    mkdir -p "$BASE_PATH"
+    echo "Creating TileServer Blue/Green data directories under $OSM_PATH"
+    mkdir -p "$OSM_PATH/tileserver/blue"
+    mkdir -p "$OSM_PATH/tileserver/green"
+    echo "Done."

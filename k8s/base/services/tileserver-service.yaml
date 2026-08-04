@@ -1,0 +1,19 @@
+# Main TileServer service – selector switches between blue and green via the
+# orchestrator (or manually via scripts/switch-tileserver.sh).
+apiVersion: v1
+kind: Service
+metadata:
+  name: tileserver-gl
+  namespace: osm
+  labels:
+    app: tileserver
+spec:
+  type: NodePort
+  selector:
+    app: tileserver
+    active: "true"
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      nodePort: 31085

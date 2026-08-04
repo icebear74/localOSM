@@ -756,6 +756,36 @@ class KubeClient:
             content_type="application/merge-patch+json",
         )
 
+    def get_service(self, name):
+        return self._request("GET", f"/api/v1/namespaces/{self.namespace}/services/{name}")
+
+    def patch_service_selector(self, name, selector_patch):
+        """Merge-patch the spec.selector of a Service."""
+        self._request(
+            "PATCH",
+            f"/api/v1/namespaces/{self.namespace}/services/{name}",
+            body={"spec": {"selector": selector_patch}},
+            content_type="application/merge-patch+json",
+        )
+
+    def patch_deployment_pod_labels(self, name, labels_patch):
+        """Merge-patch spec.template.metadata.labels of a Deployment."""
+        self._request(
+            "PATCH",
+            f"/apis/apps/v1/namespaces/{self.namespace}/deployments/{name}",
+            body={"spec": {"template": {"metadata": {"labels": labels_patch}}}},
+            content_type="application/merge-patch+json",
+        )
+
+    def patch_pvc_labels(self, name, labels_patch):
+        """Merge-patch metadata.labels of a PersistentVolumeClaim."""
+        self._request(
+            "PATCH",
+            f"/api/v1/namespaces/{self.namespace}/persistentvolumeclaims/{name}",
+            body={"metadata": {"labels": labels_patch}},
+            content_type="application/merge-patch+json",
+        )
+
     def list_pods(self, label_selector):
         return self._request(
             "GET",
@@ -1037,6 +1067,18 @@ INDEX_HTML = """<!doctype html>
     </div>
 
     <div class="card">
+      <h2>TileServer Blue/Green</h2>
+      <div id="tileserver-bg-status" class="hint">Lade ...</div>
+      <div class="controls" style="margin-top:0.5rem">
+        <div class="row2">
+          <button class="subtle" id="tileserver-switch-blue-btn" onclick="tileserverSwitch('blue')">&#8594; Blue aktivieren</button>
+          <button class="subtle" id="tileserver-switch-green-btn" onclick="tileserverSwitch('green')">&#8594; Green aktivieren</button>
+        </div>
+        <div id="tileserver-bg-msg" class="hint" style="display:none"></div>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Manuelle Promotion (Staging → Active)</h2>
       <div id="promote-list" class="hint">Lade ...</div>
     </div>
@@ -1181,7 +1223,66 @@ INDEX_HTML = """<!doctype html>
     renderCountryOptions(ALL_COUNTRIES);
   }
 
-  function renderWorkflow(workflow) {
+  function renderTileserverBgState(state) {
+    var el = document.getElementById('tileserver-bg-status');
+    if (!state) { el.innerHTML = '<span class="hint">Keine Daten</span>'; return; }
+    var active = state.active_color || '?';
+    var blue = state.blue || {};
+    var green = state.green || {};
+    var blueClass = active === 'blue' ? 'status-ready' : 'status-queued';
+    var greenClass = active === 'green' ? 'status-ready' : 'status-queued';
+    el.innerHTML =
+      '<div class="stack">' +
+      '<div class="country-row">' +
+        '<div><div class="country-name">&#x1F535; Blue</div>' +
+        '<div class="country-meta">Replicas: ' + esc(blue.replicas) + '/' + esc(blue.ready_replicas) + ' ready</div></div>' +
+        '<span class="status-pill ' + blueClass + '">' + (active === 'blue' ? 'aktiv' : 'inaktiv') + '</span>' +
+      '</div>' +
+      '<div class="country-row">' +
+        '<div><div class="country-name">&#x1F7E2; Green</div>' +
+        '<div class="country-meta">Replicas: ' + esc(green.replicas) + '/' + esc(green.ready_replicas) + ' ready</div></div>' +
+        '<span class="status-pill ' + greenClass + '">' + (active === 'green' ? 'aktiv' : 'inaktiv') + '</span>' +
+      '</div>' +
+      '<div class="muted">Aktive Farbe: <b>' + esc(active) + '</b> &nbsp;|&nbsp; Main-Port: 31085 &nbsp;|&nbsp; Blue-Direct: 31086 &nbsp;|&nbsp; Green-Direct: 31087</div>' +
+      '</div>';
+    var blueBtn = document.getElementById('tileserver-switch-blue-btn');
+    var greenBtn = document.getElementById('tileserver-switch-green-btn');
+    if (blueBtn)  blueBtn.disabled  = active === 'blue';
+    if (greenBtn) greenBtn.disabled = active === 'green';
+  }
+
+  async function tileserverSwitch(color) {
+    var msgEl = document.getElementById('tileserver-bg-msg');
+    msgEl.style.display = 'block';
+    msgEl.textContent = 'Wechsel zu ' + color + ' …';
+    document.getElementById('tileserver-switch-blue-btn').disabled  = true;
+    document.getElementById('tileserver-switch-green-btn').disabled = true;
+    try {
+      var resp = await fetch('/api/services/tileserver/switch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({color: color})
+      });
+      var data = await resp.json();
+      if (resp.ok) {
+        msgEl.textContent = 'Gewechselt zu ' + color + '.';
+        renderTileserverBgState(data.state);
+      } else {
+        msgEl.textContent = 'Fehler: ' + (data.error || resp.status);
+      }
+    } catch (err) {
+      msgEl.textContent = 'Netzwerkfehler: ' + err;
+    }
+  }
+
+  async function refreshTileserverBgState() {
+    try {
+      var resp = await fetch('/api/services/tileserver/state');
+      if (resp.ok) renderTileserverBgState(await resp.json());
+    } catch (_) {}
+  }
+
+
     var body = document.getElementById('workflow-body');
     var running = !!(workflow && workflow.running);
     WORKFLOW_RUNNING = running;
@@ -1747,10 +1848,12 @@ INDEX_HTML = """<!doctype html>
     }
     if (refreshTimer) clearTimeout(refreshTimer);
     refreshTimer = setTimeout(refresh, 5000);
+    refreshTileserverBgState();
   }
 
   loadConfig();
   refresh();
+  refreshTileserverBgState();
   </script>
 </body>
 </html>
@@ -2493,6 +2596,60 @@ def _restore_missing_entries(backup_dir, active_dir):
             shutil.copytree(src, dst)
         else:
             shutil.copy2(src, dst)
+
+
+def tileserver_bg_state():
+    """Return the current Blue/Green state of the TileServer deployments."""
+    result = {"blue": {}, "green": {}, "active_color": None}
+    for color in ("blue", "green"):
+        deploy_name = f"tileserver-{color}"
+        try:
+            deploy = KUBE.get_deployment(deploy_name)
+            spec_replicas = deploy.get("spec", {}).get("replicas", 0) or 0
+            ready_replicas = deploy.get("status", {}).get("readyReplicas", 0) or 0
+            labels = deploy.get("metadata", {}).get("labels", {})
+            result[color] = {
+                "deployment": deploy_name,
+                "replicas": spec_replicas,
+                "ready_replicas": ready_replicas,
+                "active": labels.get("active") == "true" or spec_replicas > 0,
+            }
+            if spec_replicas > 0:
+                result["active_color"] = color
+        except RuntimeError:
+            result[color] = {"deployment": deploy_name, "replicas": 0, "ready_replicas": 0, "active": False}
+    # Fallback when both or neither show replicas > 0: check service selector
+    if result["active_color"] is None:
+        try:
+            svc = KUBE.get_service("tileserver-gl")
+            color = svc.get("spec", {}).get("selector", {}).get("color")
+            if color in ("blue", "green"):
+                result["active_color"] = color
+        except RuntimeError:
+            pass
+    return result
+
+
+def tileserver_bg_switch(target_color):
+    """Switch the TileServer main service to target_color (blue|green)."""
+    if target_color not in ("blue", "green"):
+        raise ValueError("color must be 'blue' or 'green'")
+    old_color = "green" if target_color == "blue" else "blue"
+    target_deploy = f"tileserver-{target_color}"
+    old_deploy = f"tileserver-{old_color}"
+    # Ensure target deployment is running
+    KUBE.scale_deployment(target_deploy, 1)
+    # Patch pod-template labels so the service selector picks up the pods
+    KUBE.patch_deployment_pod_labels(target_deploy, {"active": "true"})
+    KUBE.patch_deployment_pod_labels(old_deploy, {"active": "false"})
+    # Switch main service selector
+    KUBE.patch_service_selector("tileserver-gl", {"color": target_color, "active": "true"})
+    # Update PVC labels
+    KUBE.patch_pvc_labels(f"tileserver-{target_color}-pvc", {"active": "true"})
+    KUBE.patch_pvc_labels(f"tileserver-{old_color}-pvc", {"active": "false"})
+    # Scale old deployment down
+    KUBE.scale_deployment(old_deploy, 0)
+    return tileserver_bg_state()
 
 
 def promote_status():
@@ -3325,6 +3482,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({**summary, "logs": logs})
             return
 
+        if path == "/api/services/tileserver/state":
+            try:
+                self._send_json(tileserver_bg_state())
+            except Exception as exc:  # noqa: BLE001
+                self._send_json({"error": str(exc)}, 500)
+            return
+
         if path.startswith("/test/"):
             name = path.split("/", 2)[-1]
             if name == "tileserver":
@@ -3496,6 +3660,22 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(exc)}, 409)
                 return
             self._send_json({"status": "promoted", "service": service, "result": result})
+            return
+
+        if path == "/api/services/tileserver/switch":
+            color = (payload.get("color") or "").strip().lower()
+            if color not in ("blue", "green"):
+                self._send_json({"error": "color must be 'blue' or 'green'"}, 400)
+                return
+            try:
+                result = tileserver_bg_switch(color)
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 400)
+                return
+            except RuntimeError as exc:
+                self._send_json({"error": str(exc)}, 409)
+                return
+            self._send_json({"status": "switched", "active_color": color, "state": result})
             return
 
         if path == "/api/config":
