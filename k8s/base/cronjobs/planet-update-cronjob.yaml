@@ -59,7 +59,7 @@ spec:
                   cd "${PLANET_DIR}"
                   if [ ! -s "${PLANET_FILE}" ]; then
                     echo "Downloading initial planet-latest.osm.pbf ..."
-                    wget --progress=dot:giga -O "${PLANET_FILE}.tmp" https://planet.openstreetmap.org/planet-latest.osm.pbf
+                    wget --progress=dot:giga -O "${PLANET_FILE}.tmp" https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf
                     mv "${PLANET_FILE}.tmp" "${PLANET_FILE}"
                   fi
 
