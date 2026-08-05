@@ -901,9 +901,10 @@ INDEX_HTML = """<!doctype html>
 
   <div class="links" id="links">
     <a href="#" id="web-link" data-port="30084">&#128205; Routing-UI</a>
-    <a href="#" id="valhalla-link" data-port="30082">Valhalla API</a>
+    <a href="#" id="valhalla-link" data-port="30082">&#128663; Valhalla (Routing-Engine)</a>
     <a href="#" id="nominatim-link" data-port="30081">Nominatim</a>
     <a href="#" id="tileserver-link" data-port="30085">TileServer GL</a>
+    <a href="#" id="photon-link" data-port="30087">Photon</a>
     <a href="#" id="style-editor-link" data-port="30086" target="_blank" rel="noopener" aria-label="Style-Editor">&#127912; Style-Editor</a>
   </div>
 
@@ -1071,10 +1072,62 @@ INDEX_HTML = """<!doctype html>
       <div id="tileserver-bg-status" class="hint">Lade ...</div>
       <div class="controls" style="margin-top:0.5rem">
         <div class="row2">
-          <button class="subtle" id="tileserver-switch-blue-btn" onclick="tileserverSwitch('blue')">&#8594; Blue aktivieren</button>
-          <button class="subtle" id="tileserver-switch-green-btn" onclick="tileserverSwitch('green')">&#8594; Green aktivieren</button>
+          <button class="subtle" id="tileserver-switch-blue-btn" onclick="serviceSwitch('tileserver','blue')">&#8594; Blue aktivieren</button>
+          <button class="subtle" id="tileserver-switch-green-btn" onclick="serviceSwitch('tileserver','green')">&#8594; Green aktivieren</button>
+        </div>
+        <div class="row2">
+          <a href="#" id="tileserver-blue-link" data-port="31086" target="_blank" rel="noopener">&#x1F535; Blue direkt öffnen</a>
+          <a href="#" id="tileserver-green-link" data-port="31087" target="_blank" rel="noopener">&#x1F7E2; Green direkt öffnen</a>
         </div>
         <div id="tileserver-bg-msg" class="hint" style="display:none"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Nominatim Blue/Green</h2>
+      <div id="nominatim-bg-status" class="hint">Lade ...</div>
+      <div class="controls" style="margin-top:0.5rem">
+        <div class="row2">
+          <button class="subtle" id="nominatim-switch-blue-btn" onclick="serviceSwitch('nominatim','blue')">&#8594; Blue aktivieren</button>
+          <button class="subtle" id="nominatim-switch-green-btn" onclick="serviceSwitch('nominatim','green')">&#8594; Green aktivieren</button>
+        </div>
+        <div class="row2">
+          <a href="#" id="nominatim-blue-link" data-port="31082" target="_blank" rel="noopener">&#x1F535; Blue direkt öffnen</a>
+          <a href="#" id="nominatim-green-link" data-port="31083" target="_blank" rel="noopener">&#x1F7E2; Green direkt öffnen</a>
+        </div>
+        <div id="nominatim-bg-msg" class="hint" style="display:none"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Valhalla Blue/Green</h2>
+      <div id="valhalla-bg-status" class="hint">Lade ...</div>
+      <div class="controls" style="margin-top:0.5rem">
+        <div class="row2">
+          <button class="subtle" id="valhalla-switch-blue-btn" onclick="serviceSwitch('valhalla','blue')">&#8594; Blue aktivieren</button>
+          <button class="subtle" id="valhalla-switch-green-btn" onclick="serviceSwitch('valhalla','green')">&#8594; Green aktivieren</button>
+        </div>
+        <div class="row2">
+          <a href="#" id="valhalla-blue-link" data-port="31089" target="_blank" rel="noopener">&#x1F535; Blue direkt öffnen</a>
+          <a href="#" id="valhalla-green-link" data-port="31090" target="_blank" rel="noopener">&#x1F7E2; Green direkt öffnen</a>
+        </div>
+        <div id="valhalla-bg-msg" class="hint" style="display:none"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Photon Blue/Green</h2>
+      <div id="photon-bg-status" class="hint">Lade ...</div>
+      <div class="controls" style="margin-top:0.5rem">
+        <div class="row2">
+          <button class="subtle" id="photon-switch-blue-btn" onclick="serviceSwitch('photon','blue')">&#8594; Blue aktivieren</button>
+          <button class="subtle" id="photon-switch-green-btn" onclick="serviceSwitch('photon','green')">&#8594; Green aktivieren</button>
+        </div>
+        <div class="row2">
+          <a href="#" id="photon-blue-link" data-port="31092" target="_blank" rel="noopener">&#x1F535; Blue direkt öffnen</a>
+          <a href="#" id="photon-green-link" data-port="31093" target="_blank" rel="noopener">&#x1F7E2; Green direkt öffnen</a>
+        </div>
+        <div id="photon-bg-msg" class="hint" style="display:none"></div>
       </div>
     </div>
 
@@ -1131,7 +1184,11 @@ INDEX_HTML = """<!doctype html>
 
   function updateLinks() {
     var baseUrl = (NODE_URL || (location.protocol + '//' + location.hostname)).replace(/\\/+$/, '');
-    ['web-link','valhalla-link','nominatim-link','tileserver-link'].forEach(function(id) {
+    ['web-link','valhalla-link','nominatim-link','tileserver-link','photon-link',
+     'tileserver-blue-link','tileserver-green-link',
+     'nominatim-blue-link','nominatim-green-link',
+     'valhalla-blue-link','valhalla-green-link',
+     'photon-blue-link','photon-green-link'].forEach(function(id) {
       var a = document.getElementById(id);
       if (a && a.dataset.port) a.href = baseUrl + ':' + a.dataset.port + '/';
     });
@@ -1223,14 +1280,23 @@ INDEX_HTML = """<!doctype html>
     renderCountryOptions(ALL_COUNTRIES);
   }
 
-  function renderTileserverBgState(state) {
-    var el = document.getElementById('tileserver-bg-status');
+  var BG_PORTS = {
+    tileserver: {main: 31085, blue: 31086, green: 31087},
+    nominatim: {main: 31081, blue: 31082, green: 31083},
+    valhalla: {main: 31088, blue: 31089, green: 31090},
+    photon: {main: 31091, blue: 31092, green: 31093}
+  };
+
+  function renderServiceBgState(service, state) {
+    var el = document.getElementById(service + '-bg-status');
+    if (!el) return;
     if (!state) { el.innerHTML = '<span class="hint">Keine Daten</span>'; return; }
     var active = state.active_color || '?';
     var blue = state.blue || {};
     var green = state.green || {};
     var blueClass = active === 'blue' ? 'status-ready' : 'status-queued';
     var greenClass = active === 'green' ? 'status-ready' : 'status-queued';
+    var ports = BG_PORTS[service] || {};
     el.innerHTML =
       '<div class="stack">' +
       '<div class="country-row">' +
@@ -1243,22 +1309,23 @@ INDEX_HTML = """<!doctype html>
         '<div class="country-meta">Replicas: ' + esc(green.replicas) + '/' + esc(green.ready_replicas) + ' ready</div></div>' +
         '<span class="status-pill ' + greenClass + '">' + (active === 'green' ? 'aktiv' : 'inaktiv') + '</span>' +
       '</div>' +
-      '<div class="muted">Aktive Farbe: <b>' + esc(active) + '</b> &nbsp;|&nbsp; Main-Port: 31085 &nbsp;|&nbsp; Blue-Direct: 31086 &nbsp;|&nbsp; Green-Direct: 31087</div>' +
+      '<div class="muted">Aktive Farbe: <b>' + esc(active) + '</b> &nbsp;|&nbsp; Main-Port: ' + esc(ports.main) +
+        ' &nbsp;|&nbsp; Blue-Direct: ' + esc(ports.blue) + ' &nbsp;|&nbsp; Green-Direct: ' + esc(ports.green) + '</div>' +
       '</div>';
-    var blueBtn = document.getElementById('tileserver-switch-blue-btn');
-    var greenBtn = document.getElementById('tileserver-switch-green-btn');
+    var blueBtn = document.getElementById(service + '-switch-blue-btn');
+    var greenBtn = document.getElementById(service + '-switch-green-btn');
     if (blueBtn)  blueBtn.disabled  = active === 'blue';
     if (greenBtn) greenBtn.disabled = active === 'green';
   }
 
-  async function tileserverSwitch(color) {
-    var msgEl = document.getElementById('tileserver-bg-msg');
+  async function serviceSwitch(service, color) {
+    var msgEl = document.getElementById(service + '-bg-msg');
     msgEl.style.display = 'block';
     msgEl.textContent = 'Wechsel zu ' + color + ' …';
-    document.getElementById('tileserver-switch-blue-btn').disabled  = true;
-    document.getElementById('tileserver-switch-green-btn').disabled = true;
+    document.getElementById(service + '-switch-blue-btn').disabled  = true;
+    document.getElementById(service + '-switch-green-btn').disabled = true;
     try {
-      var resp = await fetch('/api/services/tileserver/switch', {
+      var resp = await fetch('/api/services/' + service + '/switch', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({color: color})
@@ -1266,7 +1333,7 @@ INDEX_HTML = """<!doctype html>
       var data = await resp.json();
       if (resp.ok) {
         msgEl.textContent = 'Gewechselt zu ' + color + '.';
-        renderTileserverBgState(data.state);
+        renderServiceBgState(service, data.state);
       } else {
         msgEl.textContent = 'Fehler: ' + (data.error || resp.status);
       }
@@ -1275,11 +1342,15 @@ INDEX_HTML = """<!doctype html>
     }
   }
 
-  async function refreshTileserverBgState() {
+  async function refreshServiceBgState(service) {
     try {
-      var resp = await fetch('/api/services/tileserver/state');
-      if (resp.ok) renderTileserverBgState(await resp.json());
+      var resp = await fetch('/api/services/' + service + '/state');
+      if (resp.ok) renderServiceBgState(service, await resp.json());
     } catch (_) {}
+  }
+
+  async function refreshAllBgStates() {
+    ['tileserver', 'nominatim', 'valhalla', 'photon'].forEach(refreshServiceBgState);
   }
 
 
@@ -1848,12 +1919,12 @@ INDEX_HTML = """<!doctype html>
     }
     if (refreshTimer) clearTimeout(refreshTimer);
     refreshTimer = setTimeout(refresh, 5000);
-    refreshTileserverBgState();
+    refreshAllBgStates();
   }
 
   loadConfig();
   refresh();
-  refreshTileserverBgState();
+  refreshAllBgStates();
   </script>
 </body>
 </html>
@@ -2598,11 +2669,23 @@ def _restore_missing_entries(backup_dir, active_dir):
             shutil.copy2(src, dst)
 
 
-def tileserver_bg_state():
-    """Return the current Blue/Green state of the TileServer deployments."""
+# Service name -> Kubernetes Service name used as the main/active Blue/Green
+# selector target for each of the four buildable services.
+BLUE_GREEN_MAIN_SERVICE = {
+    "tileserver": "tileserver-gl",
+    "nominatim": "nominatim",
+    "valhalla": "valhalla",
+    "photon": "photon",
+}
+
+
+def service_bg_state(service):
+    """Return the current Blue/Green state of the given service's deployments."""
+    if service not in BLUE_GREEN_MAIN_SERVICE:
+        raise ValueError(f"unknown service '{service}'")
     result = {"blue": {}, "green": {}, "active_color": None}
     for color in ("blue", "green"):
-        deploy_name = f"tileserver-{color}"
+        deploy_name = f"{service}-{color}"
         try:
             deploy = KUBE.get_deployment(deploy_name)
             spec_replicas = deploy.get("spec", {}).get("replicas", 0) or 0
@@ -2621,7 +2704,7 @@ def tileserver_bg_state():
     # Fallback when both or neither show replicas > 0: check service selector
     if result["active_color"] is None:
         try:
-            svc = KUBE.get_service("tileserver-gl")
+            svc = KUBE.get_service(BLUE_GREEN_MAIN_SERVICE[service])
             color = svc.get("spec", {}).get("selector", {}).get("color")
             if color in ("blue", "green"):
                 result["active_color"] = color
@@ -2630,26 +2713,38 @@ def tileserver_bg_state():
     return result
 
 
-def tileserver_bg_switch(target_color):
-    """Switch the TileServer main service to target_color (blue|green)."""
+def service_bg_switch(service, target_color):
+    """Switch the given service's main service to target_color (blue|green)."""
+    if service not in BLUE_GREEN_MAIN_SERVICE:
+        raise ValueError(f"unknown service '{service}'")
     if target_color not in ("blue", "green"):
         raise ValueError("color must be 'blue' or 'green'")
     old_color = "green" if target_color == "blue" else "blue"
-    target_deploy = f"tileserver-{target_color}"
-    old_deploy = f"tileserver-{old_color}"
+    target_deploy = f"{service}-{target_color}"
+    old_deploy = f"{service}-{old_color}"
     # Ensure target deployment is running
     KUBE.scale_deployment(target_deploy, 1)
     # Patch pod-template labels so the service selector picks up the pods
     KUBE.patch_deployment_pod_labels(target_deploy, {"active": "true"})
     KUBE.patch_deployment_pod_labels(old_deploy, {"active": "false"})
     # Switch main service selector
-    KUBE.patch_service_selector("tileserver-gl", {"color": target_color, "active": "true"})
+    KUBE.patch_service_selector(BLUE_GREEN_MAIN_SERVICE[service], {"color": target_color, "active": "true"})
     # Update PVC labels
-    KUBE.patch_pvc_labels(f"tileserver-{target_color}-pvc", {"active": "true"})
-    KUBE.patch_pvc_labels(f"tileserver-{old_color}-pvc", {"active": "false"})
+    KUBE.patch_pvc_labels(f"{service}-{target_color}-pvc", {"active": "true"})
+    KUBE.patch_pvc_labels(f"{service}-{old_color}-pvc", {"active": "false"})
     # Scale old deployment down
     KUBE.scale_deployment(old_deploy, 0)
-    return tileserver_bg_state()
+    return service_bg_state(service)
+
+
+def tileserver_bg_state():
+    """Return the current Blue/Green state of the TileServer deployments."""
+    return service_bg_state("tileserver")
+
+
+def tileserver_bg_switch(target_color):
+    """Switch the TileServer main service to target_color (blue|green)."""
+    return service_bg_switch("tileserver", target_color)
 
 
 def promote_status():
@@ -3482,9 +3577,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({**summary, "logs": logs})
             return
 
-        if path == "/api/services/tileserver/state":
+        if path.startswith("/api/services/") and path.endswith("/state"):
+            service = path[len("/api/services/") : -len("/state")].strip("/")
+            if service not in BLUE_GREEN_MAIN_SERVICE:
+                self._send_json({"error": f"unknown service '{service}'"}, 404)
+                return
             try:
-                self._send_json(tileserver_bg_state())
+                self._send_json(service_bg_state(service))
             except Exception as exc:  # noqa: BLE001
                 self._send_json({"error": str(exc)}, 500)
             return
@@ -3662,13 +3761,17 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"status": "promoted", "service": service, "result": result})
             return
 
-        if path == "/api/services/tileserver/switch":
+        if path.startswith("/api/services/") and path.endswith("/switch"):
+            service = path[len("/api/services/") : -len("/switch")].strip("/")
+            if service not in BLUE_GREEN_MAIN_SERVICE:
+                self._send_json({"error": f"unknown service '{service}'"}, 404)
+                return
             color = (payload.get("color") or "").strip().lower()
             if color not in ("blue", "green"):
                 self._send_json({"error": "color must be 'blue' or 'green'"}, 400)
                 return
             try:
-                result = tileserver_bg_switch(color)
+                result = service_bg_switch(service, color)
             except ValueError as exc:
                 self._send_json({"error": str(exc)}, 400)
                 return
