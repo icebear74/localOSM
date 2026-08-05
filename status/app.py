@@ -1353,7 +1353,7 @@ INDEX_HTML = """<!doctype html>
     ['tileserver', 'nominatim', 'valhalla', 'photon'].forEach(refreshServiceBgState);
   }
 
-
+  function renderWorkflow(workflow) {
     var body = document.getElementById('workflow-body');
     var running = !!(workflow && workflow.running);
     WORKFLOW_RUNNING = running;

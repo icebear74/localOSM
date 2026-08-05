@@ -119,7 +119,7 @@ data:
                   mkdir -p "$DATA_DIR"
                   java -Xms16g -Xmx32g -XX:+UseG1GC -jar "/photon/bin/photon-${PHOTON_VERSION}.jar" import \
                     -host "${NOMINATIM_DB_HOST}" -port "${NOMINATIM_DB_PORT}" \
-                    -database "${NOMINATIM_DB_NAME}" -user "${PHOTON_DB_USER}"****** \
+                    -database "${NOMINATIM_DB_NAME}" -user "${PHOTON_DB_USER}" -password "${PHOTON_DB_PASSWORD}" \
                     -languages "${PHOTON_LANGUAGES}" -data-dir "$DATA_DIR"
               volumeMounts:
                 - name: shared-data
