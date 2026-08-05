@@ -52,3 +52,10 @@ Die Status-WebUI ergänzt dafür folgende Endpunkte:
 - `POST /api/jobs/{service}-import/trigger`
 - `GET /api/jobs/{jobname}/status`
 - `GET /api/jobs/{jobname}/logs`
+
+
+## Blue/Green
+
+- `k8s/BLUE-GREEN.md` – allgemeine Blue/Green-Dokumentation für TileServer, Nominatim, Valhalla und Photon
+- `scripts/deploy-bluegreen.sh` – rollt die neue Blue/Green-Struktur aus, optional mit `--clean`
+- `scripts/build-all.sh` / `scripts/build-<service>.sh` – triggern Import/Rebuild und warten bis zum Abschluss

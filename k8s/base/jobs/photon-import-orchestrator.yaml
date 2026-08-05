@@ -1,0 +1,52 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: photon-import-orchestrator
+  namespace: osm
+  labels:
+    app: photon-orchestrator
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 7200
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: osm-orchestrator
+      containers:
+        - name: orchestrator
+          image: bitnami/kubectl:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              NAMESPACE=osm
+              JOB_SUFFIX=$(date +%Y%m%d%H%M%S)
+              IMPORTER_JOB="photon-importer-${JOB_SUFFIX}"
+              IMPORTER_TIMEOUT=21600
+              DEPLOY_TIMEOUT=1800
+              echo "=== Photon Orchestrator starting (suffix: $JOB_SUFFIX) ==="
+              JOB_YAML=$(kubectl get configmap photon-importer-manifest -n $NAMESPACE -o jsonpath='{.data.job\.yaml}' | sed "s/JOB_SUFFIX/${JOB_SUFFIX}/g")
+              echo "$JOB_YAML" | kubectl apply -f -
+              ELAPSED=0
+              while true; do
+                STATUS=$(kubectl get job $IMPORTER_JOB -n $NAMESPACE -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || true)
+                FAILED=$(kubectl get job $IMPORTER_JOB -n $NAMESPACE -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)
+                [ "$STATUS" = "True" ] && break
+                [ "$FAILED" = "True" ] && { echo "ERROR: Importer job failed" >&2; exit 1; }
+                ELAPSED=$((ELAPSED+10)); [ $ELAPSED -ge $IMPORTER_TIMEOUT ] && { echo "ERROR: Timeout waiting for importer job" >&2; exit 1; }
+                sleep 10
+              done
+              TARGET_COLOR=$(kubectl logs -l "job-name=${IMPORTER_JOB}" -n $NAMESPACE --container importer 2>/dev/null | grep '^Importing to' | tail -1 | awk '{print $3}' || true)
+              [ -z "$TARGET_COLOR" ] && TARGET_COLOR=$(kubectl logs -l "job-name=${IMPORTER_JOB}" -n $NAMESPACE --container dispatcher 2>/dev/null | grep '^Active:' | tail -1 | awk '{print $4}' || true)
+              if [ -z "$TARGET_COLOR" ] || { [ "$TARGET_COLOR" != "blue" ] && [ "$TARGET_COLOR" != "green" ]; }; then echo "ERROR: Could not determine TARGET_COLOR from importer logs." >&2; exit 1; fi
+              [ "$TARGET_COLOR" = "blue" ] && OLD_COLOR=green || OLD_COLOR=blue
+              TARGET_DEPLOY="photon-${TARGET_COLOR}"; OLD_DEPLOY="photon-${OLD_COLOR}"
+              kubectl scale deployment $TARGET_DEPLOY -n $NAMESPACE --replicas=1
+              kubectl rollout status deployment/$TARGET_DEPLOY -n $NAMESPACE --timeout=${DEPLOY_TIMEOUT}s
+              kubectl patch service photon -n $NAMESPACE --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/selector/color\",\"value\":\"${TARGET_COLOR}\"},{\"op\":\"replace\",\"path\":\"/spec/selector/active\",\"value\":\"true\"}]"
+              kubectl label pvc photon-${TARGET_COLOR}-pvc -n $NAMESPACE active=true --overwrite
+              kubectl label pvc photon-${OLD_COLOR}-pvc -n $NAMESPACE active=false --overwrite
+              kubectl patch deployment $TARGET_DEPLOY -n $NAMESPACE --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/template/metadata/labels/active\",\"value\":\"true\"}]"
+              kubectl patch deployment $OLD_DEPLOY -n $NAMESPACE --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/template/metadata/labels/active\",\"value\":\"false\"}]" || true
+              kubectl scale deployment $OLD_DEPLOY -n $NAMESPACE --replicas=0
+              echo "=== Blue/Green switch complete. Active colour: $TARGET_COLOR ==="

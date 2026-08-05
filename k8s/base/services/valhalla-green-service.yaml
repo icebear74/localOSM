@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: valhalla-green
+  namespace: osm
+  labels:
+    app: valhalla
+    color: green
+spec:
+  type: NodePort
+  selector:
+    app: valhalla
+    color: green
+  ports:
+    - name: http
+      port: 8002
+      targetPort: 8002
+      nodePort: 31090

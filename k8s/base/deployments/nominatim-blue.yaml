@@ -1,0 +1,154 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nominatim-blue
+  namespace: osm
+  labels:
+    app: nominatim
+    color: blue
+    active: "false"
+spec:
+  replicas: 0
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: nominatim
+      color: blue
+  template:
+    metadata:
+      labels:
+        app: nominatim
+        color: blue
+        active: "false"
+    spec:
+      securityContext:
+        fsGroup: 100
+      terminationGracePeriodSeconds: 3660
+      initContainers:
+        - name: wait-for-data
+          image: busybox:1.36
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              trap 'echo "Terminating wait script..."; exit 0' TERM INT
+              DB=/nominatim-db/PG_VERSION
+              IMPORT_FINISHED=/nominatim-db/import-finished
+              LAST_MISSING=""
+              until [ -f "$DB" ] && [ -f "$IMPORT_FINISHED" ]; do
+                MISSING=""
+                [ -f "$DB" ] || MISSING="$DB"
+                [ -f "$IMPORT_FINISHED" ] || MISSING="${MISSING:+$MISSING, }$IMPORT_FINISHED"
+                if [ "$MISSING" != "$LAST_MISSING" ]; then
+                  echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for imported Nominatim database markers at $MISSING ..."
+                  LAST_MISSING="$MISSING"
+                fi
+                sleep 5
+              done
+              echo "Database ready — starting Nominatim."
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "16Mi"
+            limits:
+              cpu: "50m"
+              memory: "64Mi"
+          volumeMounts:
+            - name: nominatim-data
+              mountPath: /nominatim-db
+              readOnly: true
+      containers:
+        - name: nominatim
+          image: mediagis/nominatim:4.5
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NOMINATIM_PASSWORD
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-nominatim-import-config
+                  key: import_password
+            - name: THREADS
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-nominatim-import-config
+                  key: import_threads
+            - name: PBF_PATH
+              value: /nominatim/data/import/planet.osm.pbf
+            - name: PHOTON_DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-photon-config
+                  key: photon_db_user
+            - name: PHOTON_DB_PASSWORD
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-photon-config
+                  key: photon_db_password
+            - name: PGCTLTIMEOUT
+              value: "3600"
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              PG_CTL_CONF=/etc/postgresql/16/main/pg_ctl.conf
+              mkdir -p "$(dirname "${PG_CTL_CONF}")"
+              echo "pg_ctl_options = '-t ${PGCTLTIMEOUT}'" > "${PG_CTL_CONF}"
+              HBA_FILE=/etc/postgresql/16/main/pg_hba.conf
+              HBA_LINE="host nominatim ${PHOTON_DB_USER} 0.0.0.0/0 scram-sha-256"
+              mkdir -p "$(dirname "${HBA_FILE}")"
+              touch "${HBA_FILE}"
+              if ! grep -qxF "${HBA_LINE}" "${HBA_FILE}"; then
+                echo "${HBA_LINE}" >> "${HBA_FILE}"
+              fi
+              (
+                for _ in $(seq 1 60); do
+                  if pg_isready -q; then
+                    break
+                  fi
+                  sleep 5
+                done
+                PSQL_OUTPUT=$(sudo -u postgres psql -v ON_ERROR_STOP=1 -d nominatim -c "DO \\$\\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${PHOTON_DB_USER}') THEN EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', '${PHOTON_DB_USER}', '${PHOTON_DB_PASSWORD}'); ELSE EXECUTE format('ALTER ROLE %I PASSWORD %L', '${PHOTON_DB_USER}', '${PHOTON_DB_PASSWORD}'); END IF; END \\$\\$; GRANT CONNECT ON DATABASE nominatim TO ${PHOTON_DB_USER}; GRANT USAGE, CREATE ON SCHEMA public TO ${PHOTON_DB_USER}; GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${PHOTON_DB_USER}; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ${PHOTON_DB_USER};" 2>&1) || echo "WARNING: could not provision Photon Postgres role (Photon import may fail until this is fixed): ${PSQL_OUTPUT}"
+              ) &
+              exec /app/start.sh
+          ports:
+            - containerPort: 8080
+            - containerPort: 5432
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "2"
+            limits:
+              memory: "24Gi"
+              cpu: "16"
+          startupProbe:
+            httpGet:
+              path: /status
+              port: 8080
+            periodSeconds: 10
+            failureThreshold: 540
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: nominatim-data
+              mountPath: /var/lib/postgresql/16/main
+            - name: nominatim-postgres-tuning
+              mountPath: /etc/postgresql/16/main/conf.d/zz-tuning.conf
+              subPath: runtime-tuning.conf
+              readOnly: true
+      volumes:
+        - name: nominatim-data
+          persistentVolumeClaim:
+            claimName: nominatim-blue-pvc
+        - name: nominatim-postgres-tuning
+          configMap:
+            name: nominatim-postgres-tuning
+            items:
+              - key: runtime-tuning.conf
+                path: runtime-tuning.conf
