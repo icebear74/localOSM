@@ -15,7 +15,7 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              set -euo pipefail
+              set -eu
               mkdir -p /data/sources
               if [ ! -s /data/sources/lake_centerline.shp.zip ]; then
                 wget -q -O /data/sources/lake_centerline.shp.zip https://github.com/acalcutt/osm-lakelines/releases/latest/download/lake_centerline.shp.zip

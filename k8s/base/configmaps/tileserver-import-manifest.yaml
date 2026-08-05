@@ -88,7 +88,7 @@ data:
               command: ["/bin/sh", "-c"]
               args:
                 - |
-                  set -euo pipefail
+                  set -eu
                   TARGET_COLOR=$(cat /mnt/shared/target-color)
                   DATA_DIR="/mnt/tileserver/$TARGET_COLOR"
                   mkdir -p "$DATA_DIR/sources"
@@ -130,7 +130,7 @@ data:
               command: ["/bin/sh", "-c"]
               args:
                 - |
-                  set -euo pipefail
+                  set -eu
                   TARGET_COLOR=$(cat /mnt/shared/target-color)
                   DATA_DIR="/mnt/tileserver/$TARGET_COLOR"
                   echo "Importing to $TARGET_COLOR PVC at $DATA_DIR"
