@@ -38,6 +38,10 @@ if [[ "$CLEAN" == true ]]; then
   if ! wait_for_namespace_deletion 120; then
     kubectl patch namespace "$NAMESPACE" --type=merge -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
     kubectl get namespace "$NAMESPACE" -o json 2>/dev/null | python3 -c 'import json,sys; o=json.load(sys.stdin); o.setdefault("spec",{}); o["spec"]["finalizers"]=[]; print(json.dumps(o))' | kubectl replace --raw "/api/v1/namespaces/'"$NAMESPACE"'/finalize" -f - >/dev/null 2>&1 || true
+    if ! wait_for_namespace_deletion 60; then
+      echo "ERROR: namespace '$NAMESPACE' is still terminating; aborting before re-creating resources." >&2
+      exit 1
+    fi
   fi
   for dir in "$BASE_DIR/tileserver" "$BASE_DIR/nominatim" "$BASE_DIR/valhalla" "$BASE_DIR/photon"; do [ -d "$dir" ] && $SUDO find "$dir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +; done
 fi
