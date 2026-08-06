@@ -1,0 +1,130 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # Name is suffixed with a timestamp at runtime – see scripts/run-tileserver-import.sh
+  name: tileserver-import-orchestrator
+  namespace: osm
+  labels:
+    app: tileserver-orchestrator
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 7200
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: tileserver-orchestrator
+      containers:
+        - name: orchestrator
+          image: bitnami/kubectl:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              NAMESPACE=osm
+              JOB_SUFFIX=$(date +%Y%m%d%H%M%S)
+              IMPORTER_JOB="tileserver-importer-${JOB_SUFFIX}"
+              IMPORTER_TIMEOUT=7200
+              DEPLOY_TIMEOUT=600
+
+              echo "=== TileServer Orchestrator starting (suffix: $JOB_SUFFIX) ==="
+
+              # Step 1: wait for planet-update lock
+              echo "Checking planet-update lock ..."
+              MAX_WAIT=120
+              WAITED=0
+              while kubectl get configmap planet-update-lock -n $NAMESPACE >/dev/null 2>&1; do
+                WAITED=$((WAITED+30))
+                if [ $WAITED -ge $MAX_WAIT ]; then
+                  echo "Planet-update lock present for ${MAX_WAIT}s – proceeding anyway."
+                  break
+                fi
+                echo "Planet update in progress, waiting 30s ($WAITED/${MAX_WAIT}s) ..."
+                sleep 30
+              done
+
+              # Step 2: create the importer job from ConfigMap template
+              echo "Creating importer job $IMPORTER_JOB ..."
+              JOB_YAML=$(kubectl get configmap tileserver-importer-manifest -n $NAMESPACE \
+                -o jsonpath='{.data.job\.yaml}' | sed "s/JOB_SUFFIX/${JOB_SUFFIX}/g")
+              echo "$JOB_YAML" | kubectl apply -f -
+              echo "Importer job $IMPORTER_JOB created."
+
+              # Step 3: wait for importer job to complete
+              echo "Waiting for importer job $IMPORTER_JOB (timeout: ${IMPORTER_TIMEOUT}s) ..."
+              ELAPSED=0
+              while true; do
+                STATUS=$(kubectl get job $IMPORTER_JOB -n $NAMESPACE \
+                  -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || true)
+                FAILED=$(kubectl get job $IMPORTER_JOB -n $NAMESPACE \
+                  -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)
+                if [ "$STATUS" = "True" ]; then
+                  echo "Importer job $IMPORTER_JOB completed successfully."
+                  break
+                fi
+                if [ "$FAILED" = "True" ]; then
+                  echo "ERROR: Importer job $IMPORTER_JOB failed. Aborting orchestration." >&2
+                  exit 1
+                fi
+                ELAPSED=$((ELAPSED+10))
+                if [ $ELAPSED -ge $IMPORTER_TIMEOUT ]; then
+                  echo "ERROR: Timeout waiting for importer job $IMPORTER_JOB." >&2
+                  exit 1
+                fi
+                sleep 10
+              done
+
+              # Step 4: read TARGET_COLOR from importer pod shared volume via logs
+              TARGET_COLOR=$(kubectl logs -l "job-name=${IMPORTER_JOB}" -n $NAMESPACE \
+                --container importer 2>/dev/null \
+                | grep "^Importing to" | tail -1 | awk '{print $3}' || true)
+              if [ -z "$TARGET_COLOR" ]; then
+                # Fallback: read from dispatcher init-container logs
+                TARGET_COLOR=$(kubectl logs -l "job-name=${IMPORTER_JOB}" -n $NAMESPACE \
+                  --container dispatcher 2>/dev/null \
+                  | grep "^Target:" | tail -1 | awk '{print $2}' || true)
+              fi
+              if [ -z "$TARGET_COLOR" ] || { [ "$TARGET_COLOR" != "blue" ] && [ "$TARGET_COLOR" != "green" ]; }; then
+                echo "ERROR: Could not determine TARGET_COLOR from importer logs." >&2
+                exit 1
+              fi
+              echo "TARGET_COLOR: $TARGET_COLOR"
+              if [ "$TARGET_COLOR" = "blue" ]; then
+                OLD_COLOR=green
+              else
+                OLD_COLOR=blue
+              fi
+
+              # Step 5: scale target deployment to 1
+              TARGET_DEPLOY="tileserver-${TARGET_COLOR}"
+              OLD_DEPLOY="tileserver-${OLD_COLOR}"
+              echo "Scaling $TARGET_DEPLOY to 1 ..."
+              kubectl scale deployment $TARGET_DEPLOY -n $NAMESPACE --replicas=1
+
+              # Step 6: wait for target deployment to be ready
+              echo "Waiting for $TARGET_DEPLOY to be ready (timeout: ${DEPLOY_TIMEOUT}s) ..."
+              kubectl rollout status deployment/$TARGET_DEPLOY -n $NAMESPACE --timeout=${DEPLOY_TIMEOUT}s
+
+              # Step 7: patch main service selector to target colour
+              echo "Switching main service selector to color=$TARGET_COLOR ..."
+              kubectl patch service tileserver-gl -n $NAMESPACE \
+                --type=json \
+                -p="[{\"op\":\"replace\",\"path\":\"/spec/selector/color\",\"value\":\"${TARGET_COLOR}\"}]"
+
+              # Step 8: update PVC labels
+              echo "Updating PVC labels ..."
+              kubectl label pvc tileserver-${TARGET_COLOR}-pvc -n $NAMESPACE active=true --overwrite
+              kubectl label pvc tileserver-${OLD_COLOR}-pvc   -n $NAMESPACE active=false --overwrite
+
+              # Step 9: patch deployment labels so the service selector matches
+              kubectl patch deployment $TARGET_DEPLOY -n $NAMESPACE \
+                --type=json \
+                -p="[{\"op\":\"replace\",\"path\":\"/spec/template/metadata/labels/active\",\"value\":\"true\"}]"
+              kubectl patch deployment $OLD_DEPLOY -n $NAMESPACE \
+                --type=json \
+                -p="[{\"op\":\"replace\",\"path\":\"/spec/template/metadata/labels/active\",\"value\":\"false\"}]" || true
+
+              # Step 10: scale old deployment to 0
+              echo "Scaling $OLD_DEPLOY to 0 ..."
+              kubectl scale deployment $OLD_DEPLOY -n $NAMESPACE --replicas=0
+
+              echo "=== Blue/Green switch complete. Active colour: $TARGET_COLOR ==="

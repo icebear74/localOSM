@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tileserver-blue-pvc
+  namespace: osm
+  labels:
+    app: tileserver
+    color: blue
+    active: "false"
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 200Gi

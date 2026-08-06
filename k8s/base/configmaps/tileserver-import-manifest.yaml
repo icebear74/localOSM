@@ -1,0 +1,195 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tileserver-importer-manifest
+  namespace: osm
+data:
+  # Job 2 template – created and applied by the orchestrator at runtime.
+  # The orchestrator substitutes the literal string JOB_SUFFIX with a timestamp
+  # before applying this manifest via "kubectl apply -f -".
+  job.yaml: |
+    apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: tileserver-importer-JOB_SUFFIX
+      namespace: osm
+      labels:
+        app: tileserver-importer
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: tileserver-orchestrator
+          initContainers:
+            # --- Init 1: dispatcher -------------------------------------------
+            # Reads replica counts to detect the currently-active colour, then
+            # writes TARGET_COLOR into the shared emptyDir so later containers
+            # and the orchestrator can read it.
+            - name: dispatcher
+              image: bitnami/kubectl:latest
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  NAMESPACE=osm
+                  BLUE_REPLICAS=$(kubectl get deployment tileserver-blue -n $NAMESPACE \
+                    -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+                  GREEN_REPLICAS=$(kubectl get deployment tileserver-green -n $NAMESPACE \
+                    -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+                  echo "Blue replicas: $BLUE_REPLICAS  Green replicas: $GREEN_REPLICAS"
+                  if [ "$GREEN_REPLICAS" -gt 0 ] && [ "$BLUE_REPLICAS" -eq 0 ]; then
+                    ACTIVE_COLOR=green
+                  elif [ "$BLUE_REPLICAS" -gt 0 ] && [ "$GREEN_REPLICAS" -eq 0 ]; then
+                    ACTIVE_COLOR=blue
+                  else
+                    ACTIVE_COLOR=green
+                  fi
+                  if [ "$ACTIVE_COLOR" = "green" ]; then
+                    TARGET_COLOR=blue
+                  else
+                    TARGET_COLOR=green
+                  fi
+                  echo "Active: $ACTIVE_COLOR  Target: $TARGET_COLOR"
+                  echo "$TARGET_COLOR" > /mnt/shared/target-color
+              volumeMounts:
+                - name: shared-data
+                  mountPath: /mnt/shared
+            # --- Init 2: wait-planet ------------------------------------------
+            # Blocks until the planet-update lock file disappears (max ~1h).
+            - name: wait-planet
+              image: alpine:3.20
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  MAX_RETRIES=120
+                  RETRY=0
+                  while [ -f /mnt/planet/planet-update.lock ]; do
+                    RETRY=$((RETRY+1))
+                    if [ $RETRY -ge $MAX_RETRIES ]; then
+                      echo "Max retries reached waiting for planet lock – proceeding anyway."
+                      break
+                    fi
+                    echo "Waiting for planet-update.lock to be removed (attempt $RETRY/$MAX_RETRIES) ..."
+                    sleep 30
+                  done
+                  echo "Planet lock released or not present. Proceeding."
+              volumeMounts:
+                - name: planet-storage
+                  mountPath: /mnt/planet
+                  readOnly: true
+            # --- Init 3: fetch-sources ----------------------------------------
+            # Downloads helper datasets into the target PVC if not already
+            # cached there.  Mirrors the fetch-sources init container from
+            # the original tileserver-import job exactly.
+            - name: fetch-sources
+              image: alpine:3.20
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  TARGET_COLOR=$(cat /mnt/shared/target-color)
+                  DATA_DIR="/mnt/tileserver/$TARGET_COLOR"
+                  mkdir -p "$DATA_DIR/sources"
+                  if [ ! -s "$DATA_DIR/sources/lake_centerline.shp.zip" ]; then
+                    wget -q -O "$DATA_DIR/sources/lake_centerline.shp.zip" \
+                      https://github.com/acalcutt/osm-lakelines/releases/latest/download/lake_centerline.shp.zip
+                  fi
+                  if [ ! -s "$DATA_DIR/sources/water-polygons-split-3857.zip" ]; then
+                    wget -q -O "$DATA_DIR/sources/water-polygons-split-3857.zip" \
+                      https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip
+                  fi
+                  if [ ! -s "$DATA_DIR/sources/natural_earth_vector.sqlite.zip" ]; then
+                    wget -q -O "$DATA_DIR/sources/natural_earth_vector.sqlite.zip" \
+                      https://naciscdn.org/naturalearth/packages/natural_earth_vector.sqlite.zip
+                  fi
+              volumeMounts:
+                - name: shared-data
+                  mountPath: /mnt/shared
+                  readOnly: true
+                - name: tileserver-blue
+                  mountPath: /mnt/tileserver/blue
+                - name: tileserver-green
+                  mountPath: /mnt/tileserver/green
+          containers:
+            # --- Main: importer -----------------------------------------------
+            # Runs planetiler with the same flags and JVM settings as the
+            # original tileserver-import job.  Output goes to the TARGET PVC
+            # (selected via the TARGET_COLOR written by the dispatcher).
+            - name: tileserver-import
+              image: ghcr.io/onthegomap/planetiler:latest
+              imagePullPolicy: Always
+              resources:
+                requests:
+                  memory: "16Gi"
+                  cpu: "5"
+                limits:
+                  memory: "80Gi"
+                  cpu: "20"
+              env:
+                - name: JAVA_OPTS
+                  value: "-Xms16g -Xmx64g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"
+                - name: JAVA_TOOL_OPTIONS
+                  value: "-Xms16g -Xmx64g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"
+                - name: TARGET_COLOR_FILE
+                  value: /mnt/shared/target-color
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  TARGET_COLOR=$(cat /mnt/shared/target-color)
+                  DATA_DIR="/mnt/tileserver/$TARGET_COLOR"
+                  echo "Importing to $TARGET_COLOR PVC at $DATA_DIR"
+                  # Clean up any previous partial import in the target PVC
+                  find "$DATA_DIR" -maxdepth 1 -mindepth 1 \
+                    ! -name sources \
+                    -exec rm -rf {} + 2>/dev/null || true
+                  # Run planetiler with exactly the same arguments as the
+                  # original tileserver-import job.  The planetiler image
+                  # entrypoint is "java -jar /app/planetiler.jar".
+                  java $JAVA_TOOL_OPTIONS -jar /app/planetiler.jar \
+                    --osm-path=/pipeline/europa_mitte_final.osm.pbf \
+                    --output="$DATA_DIR/map.mbtiles" \
+                    --force \
+                    --fetch-wikidata \
+                    --nodemap-type=sparsearray \
+                    --nodemap-storage=ram \
+                    --threads=18 \
+                    "--arguments=journal_mode=WAL,synchronous=OFF,mmap_size=268435456" \
+                    "--lake_centerlines_path=$DATA_DIR/sources/lake_centerline.shp.zip" \
+                    "--water_polygons_path=$DATA_DIR/sources/water-polygons-split-3857.zip" \
+                    "--natural_earth_path=$DATA_DIR/sources/natural_earth_vector.sqlite.zip" \
+                    --minzoom=0 \
+                    --maxzoom=16 \
+                    "--extra-osm-tags=shop,building,construction,name,wheelchair,amenity,highway,landuse"
+                  # Validate output
+                  if [ ! -s "$DATA_DIR/map.mbtiles" ]; then
+                    echo "ERROR: map.mbtiles missing or empty after import!" >&2
+                    exit 1
+                  fi
+                  echo "Import successful. Writing import-finished marker."
+                  touch "$DATA_DIR/import-finished"
+              volumeMounts:
+                - name: shared-data
+                  mountPath: /mnt/shared
+                  readOnly: true
+                - name: planet-storage
+                  mountPath: /pipeline
+                  readOnly: true
+                - name: tileserver-blue
+                  mountPath: /mnt/tileserver/blue
+                - name: tileserver-green
+                  mountPath: /mnt/tileserver/green
+          volumes:
+            - name: shared-data
+              emptyDir: {}
+            - name: tileserver-blue
+              persistentVolumeClaim:
+                claimName: tileserver-blue-pvc
+            - name: tileserver-green
+              persistentVolumeClaim:
+                claimName: tileserver-green-pvc
+            - name: planet-storage
+              persistentVolumeClaim:
+                claimName: planet-storage-pvc

@@ -21,35 +21,97 @@ spec:
               command: ["/bin/bash", "-c"]
               args:
                 - |
-                  set -euo pipefail
+                  set -euxo pipefail
                   export DEBIAN_FRONTEND=noninteractive
-                  apt-get update >/dev/null
-                  apt-get install -y --no-install-recommends osmium-tool wget ca-certificates >/dev/null
+                  apt-get update
+                  apt-get install -y --no-install-recommends osmium-tool wget ca-certificates
                   rm -rf /var/lib/apt/lists/*
-                  pip install --no-cache-dir osmium >/dev/null
+                  pip install --no-cache-dir osmium
                   PLANET_DIR=/mnt/OSM
                   PLANET_FILE="${PLANET_DIR}/planet-latest.osm.pbf"
+                  FINAL_FILE="${PLANET_DIR}/europa_mitte_final.osm.pbf"
+                  PRIVATE_FILE="${PLANET_DIR}/privat.osm"
                   LOCK_FILE="${PLANET_DIR}/.planet-update.lock"
+                  WORKDIR="${PLANET_DIR}/.planet-update.tmp"
                   mkdir -p "${PLANET_DIR}"
                   if [ -e "${LOCK_FILE}" ]; then
                     echo "Another planet update is already running."
                     exit 0
                   fi
                   touch "${LOCK_FILE}"
-                  trap 'rm -f "${LOCK_FILE}"' EXIT
+
+                  cleanup_workdir() {
+                    rm -rf "${WORKDIR}"
+                  }
+                  on_exit() {
+                    exit_code=$?
+                    if [ "${exit_code}" -ne 0 ]; then
+                      echo "Planet update failed with exit code ${exit_code}; cleaning up leftover/partial files."
+                    fi
+                    cleanup_workdir
+                    rm -f "${LOCK_FILE}"
+                    exit "${exit_code}"
+                  }
+                  trap on_exit EXIT
+
+                  rm -rf "${WORKDIR}"
+                  mkdir -p "${WORKDIR}"
                   cd "${PLANET_DIR}"
                   if [ ! -s "${PLANET_FILE}" ]; then
                     echo "Downloading initial planet-latest.osm.pbf ..."
-                    wget -O "${PLANET_FILE}.tmp" https://planet.openstreetmap.org/planet-latest.osm.pbf
+                    wget --progress=dot:giga -O "${PLANET_FILE}.tmp" https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf
                     mv "${PLANET_FILE}.tmp" "${PLANET_FILE}"
                   fi
+
                   echo "Running pyosmium-up-to-date on ${PLANET_FILE} ..."
-                  pyosmium-up-to-date "${PLANET_FILE}"
-                  echo "Planet update completed."
+                  set +e
+                  pyosmium-up-to-date -v "${PLANET_FILE}"
+                  update_status=$?
+                  set -e
+                  if [ "${update_status}" -eq 0 ]; then
+                    echo "Planet update completed, file is fully up to date."
+                  elif [ "${update_status}" -eq 1 ]; then
+                    echo "Planet update applied partially; more data is available on the server. Will continue on next run."
+                  else
+                    echo "pyosmium-up-to-date failed with exit code ${update_status}."
+                    exit "${update_status}"
+                  fi
+
+                  echo "Step 1/2: extracting configured polygon region ..."
+                  osmium extract -v -p /config/polygon.geojson "${PLANET_FILE}" -o "${WORKDIR}/region-extract.osm.pbf" --overwrite
+
+                  echo "Step 2/2: extracting configured world-overview attributes ..."
+                  osmium tags-filter -v -e /config/filter.txt "${PLANET_FILE}" -o "${WORKDIR}/attribute-extract.osm.pbf" --overwrite
+
+                  echo "Merging region and attribute extracts ..."
+                  if [ -s "${PRIVATE_FILE}" ]; then
+                    osmium sort -v "${PRIVATE_FILE}" -o "${WORKDIR}/private-sorted.osm.pbf" --overwrite
+                    osmium merge -v "${WORKDIR}/region-extract.osm.pbf" "${WORKDIR}/attribute-extract.osm.pbf" "${WORKDIR}/private-sorted.osm.pbf" -o "${WORKDIR}/final.osm.pbf" --overwrite
+                  else
+                    osmium merge -v "${WORKDIR}/region-extract.osm.pbf" "${WORKDIR}/attribute-extract.osm.pbf" -o "${WORKDIR}/final.osm.pbf" --overwrite
+                  fi
+
+                  mv -f "${WORKDIR}/final.osm.pbf" "${FINAL_FILE}"
+                  cleanup_workdir
+                  echo "Planet update and extraction completed successfully. Directory now contains only ${PLANET_FILE} and ${FINAL_FILE}."
               volumeMounts:
                 - name: planet-storage
                   mountPath: /mnt/OSM
+                - name: extract-polygon
+                  mountPath: /config/polygon.geojson
+                  subPath: polygon.geojson
+                  readOnly: true
+                - name: worldmap-filter
+                  mountPath: /config/filter.txt
+                  subPath: filter.txt
+                  readOnly: true
           volumes:
             - name: planet-storage
               persistentVolumeClaim:
                 claimName: planet-storage-pvc
+            - name: extract-polygon
+              configMap:
+                name: cm-extract-polygon
+            - name: worldmap-filter
+              configMap:
+                name: cm-worldmap-filter

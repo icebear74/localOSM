@@ -1,0 +1,146 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: photon-importer-manifest
+  namespace: osm
+data:
+  job.yaml: |
+    apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: photon-importer-JOB_SUFFIX
+      namespace: osm
+      labels:
+        app: photon-importer
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: osm-orchestrator
+          initContainers:
+            - name: dispatcher
+              image: bitnami/kubectl:latest
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  NAMESPACE=osm
+                  BLUE_REPLICAS=$(kubectl get deployment photon-blue -n $NAMESPACE -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+                  GREEN_REPLICAS=$(kubectl get deployment photon-green -n $NAMESPACE -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+                  echo "Blue replicas: $BLUE_REPLICAS  Green replicas: $GREEN_REPLICAS"
+                  if [ "$GREEN_REPLICAS" -gt 0 ] && [ "$BLUE_REPLICAS" -eq 0 ]; then ACTIVE_COLOR=green; elif [ "$BLUE_REPLICAS" -gt 0 ] && [ "$GREEN_REPLICAS" -eq 0 ]; then ACTIVE_COLOR=blue; else ACTIVE_COLOR=green; fi
+                  if [ "$ACTIVE_COLOR" = "green" ]; then TARGET_COLOR=blue; else TARGET_COLOR=green; fi
+                  echo "Active: $ACTIVE_COLOR  Target: $TARGET_COLOR"
+                  echo "$TARGET_COLOR" > /mnt/shared/target-color
+              volumeMounts:
+                - name: shared-data
+                  mountPath: /mnt/shared
+            - name: fetch-photon-jar
+              image: curlimages/curl:8.10.1
+              securityContext:
+                runAsUser: 0
+                runAsGroup: 0
+              env:
+                - name: PHOTON_VERSION
+                  valueFrom:
+                    configMapKeyRef:
+                      name: osm-photon-config
+                      key: photon_version
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -e
+                  JAR="/mnt/bin/photon-${PHOTON_VERSION}.jar"
+                  if [ -s "${JAR}" ]; then
+                    echo "Photon ${PHOTON_VERSION} jar already present at ${JAR}."
+                  else
+                    echo "Downloading Photon ${PHOTON_VERSION} release jar ..."
+                    curl -fsSL -o "${JAR}.part" "https://github.com/komoot/photon/releases/download/${PHOTON_VERSION}/photon-${PHOTON_VERSION}.jar"
+                    mv "${JAR}.part" "${JAR}"
+                    echo "Downloaded Photon ${PHOTON_VERSION}."
+                  fi
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "200m"
+                  memory: "256Mi"
+              volumeMounts:
+                - name: photon-bin
+                  mountPath: /mnt/bin
+          containers:
+            - name: importer
+              image: eclipse-temurin:21-jre
+              env:
+                - name: PHOTON_VERSION
+                  valueFrom:
+                    configMapKeyRef:
+                      name: osm-photon-config
+                      key: photon_version
+                - name: NOMINATIM_DB_HOST
+                  value: "nominatim-postgres.osm.svc.cluster.local"
+                - name: NOMINATIM_DB_PORT
+                  value: "5432"
+                - name: NOMINATIM_DB_NAME
+                  value: "nominatim"
+                - name: PHOTON_DB_USER
+                  valueFrom:
+                    configMapKeyRef:
+                      name: osm-photon-config
+                      key: photon_db_user
+                - name: PHOTON_DB_PASSWORD
+                  valueFrom:
+                    configMapKeyRef:
+                      name: osm-photon-config
+                      key: photon_db_password
+                - name: PHOTON_LANGUAGES
+                  valueFrom:
+                    configMapKeyRef:
+                      name: osm-photon-config
+                      key: photon_languages
+              resources:
+                requests:
+                  memory: "4Gi"
+                  cpu: "2"
+                limits:
+                  memory: "64Gi"
+                  cpu: "16"
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  TARGET_COLOR=$(cat /mnt/shared/target-color)
+                  DATA_DIR="/mnt/photon/${TARGET_COLOR}"
+                  echo "Importing to $TARGET_COLOR PVC at $DATA_DIR"
+                  rm -rf "$DATA_DIR/photon_data"
+                  mkdir -p "$DATA_DIR"
+                  java -Xms16g -Xmx32g -XX:+UseG1GC -jar "/photon/bin/photon-${PHOTON_VERSION}.jar" import \
+                    -host "${NOMINATIM_DB_HOST}" -port "${NOMINATIM_DB_PORT}" \
+                    -database "${NOMINATIM_DB_NAME}" -user "${PHOTON_DB_USER}" -password "${PHOTON_DB_PASSWORD}" \
+                    -languages "${PHOTON_LANGUAGES}" -data-dir "$DATA_DIR"
+              volumeMounts:
+                - name: shared-data
+                  mountPath: /mnt/shared
+                  readOnly: true
+                - name: photon-bin
+                  mountPath: /photon/bin
+                - name: photon-blue
+                  mountPath: /mnt/photon/blue
+                - name: photon-green
+                  mountPath: /mnt/photon/green
+          volumes:
+            - name: shared-data
+              emptyDir: {}
+            - name: photon-bin
+              hostPath:
+                path: /mnt/OSM/photon/bin
+                type: DirectoryOrCreate
+            - name: photon-blue
+              persistentVolumeClaim:
+                claimName: photon-blue-pvc
+            - name: photon-green
+              persistentVolumeClaim:
+                claimName: photon-green-pvc

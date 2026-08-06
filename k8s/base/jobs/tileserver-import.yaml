@@ -15,7 +15,7 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              set -euo pipefail
+              set -eu
               mkdir -p /data/sources
               if [ ! -s /data/sources/lake_centerline.shp.zip ]; then
                 wget -q -O /data/sources/lake_centerline.shp.zip https://github.com/acalcutt/osm-lakelines/releases/latest/download/lake_centerline.shp.zip
@@ -33,6 +33,13 @@ spec:
         - name: tileserver-import
           image: ghcr.io/onthegomap/planetiler:latest
           imagePullPolicy: Always
+          resources:
+            requests:
+              memory: "16Gi"
+              cpu: "5"
+            limits:
+              memory: "80Gi"
+              cpu: "20"
           env:
             - name: JAVA_OPTS
               value: "-Xms16g -Xmx64g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"

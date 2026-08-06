@@ -1,0 +1,30 @@
+# hostpath-config.yaml
+# Configures the HostPath base directory used by the local-path provisioner.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: local-path-config
+  namespace: local-path-storage
+data:
+  config.json: |
+    {
+      "nodePathMap": [
+        {
+          "node": "DEFAULT_PATH_FOR_NON_LISTED_NODES",
+          "paths": ["/mnt/k8s"]
+        }
+      ]
+    }
+  setup.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BASE_PATH="${HOSTPATH_BASE:-/mnt/k8s}"
+    OSM_PATH="${OSM_DATA_DIR:-/mnt/OSM}"
+    echo "Creating HostPath base directory: $BASE_PATH"
+    mkdir -p "$BASE_PATH"
+    echo "Creating Blue/Green data directories under $OSM_PATH"
+    mkdir -p "$OSM_PATH/tileserver/blue" "$OSM_PATH/tileserver/green"
+    mkdir -p "$OSM_PATH/nominatim/blue" "$OSM_PATH/nominatim/green"
+    mkdir -p "$OSM_PATH/valhalla/blue" "$OSM_PATH/valhalla/green"
+    mkdir -p "$OSM_PATH/photon/blue" "$OSM_PATH/photon/green" "$OSM_PATH/photon/bin"
+    echo "Done."

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: valhalla-blue-pvc
+  namespace: osm
+  labels:
+    app: valhalla
+    color: blue
+    active: "false"
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 100Gi
