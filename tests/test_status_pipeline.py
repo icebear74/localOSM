@@ -35,7 +35,21 @@ class StatusPipelineTests(unittest.TestCase):
                 'creationTimestamp': 'now',
                 'managedFields': ['x'],
             },
-            'spec': {'template': {'spec': {'containers': []}}},
+            'spec': {
+                'selector': {'matchLabels': {'job-name': 'old-name'}},
+                'template': {
+                    'metadata': {
+                        'labels': {
+                            'app': 'orchestrator',
+                            'batch.kubernetes.io/controller-uid': 'abc',
+                            'batch.kubernetes.io/job-name': 'old-name',
+                            'controller-uid': 'abc',
+                            'job-name': 'old-name',
+                        }
+                    },
+                    'spec': {'containers': []},
+                },
+            },
             'status': {'succeeded': 1},
         }
         cloned = status_app._clone_job_manifest(manifest, new_name='new-name')
@@ -43,6 +57,12 @@ class StatusPipelineTests(unittest.TestCase):
         self.assertNotIn('uid', cloned['metadata'])
         self.assertNotIn('resourceVersion', cloned['metadata'])
         self.assertNotIn('status', cloned)
+        self.assertNotIn('selector', cloned['spec'])
+        self.assertEqual(cloned['spec']['template']['metadata']['labels']['app'], 'orchestrator')
+        self.assertNotIn('batch.kubernetes.io/controller-uid', cloned['spec']['template']['metadata']['labels'])
+        self.assertNotIn('batch.kubernetes.io/job-name', cloned['spec']['template']['metadata']['labels'])
+        self.assertNotIn('controller-uid', cloned['spec']['template']['metadata']['labels'])
+        self.assertNotIn('job-name', cloned['spec']['template']['metadata']['labels'])
 
     def test_summarize_job_uses_latest_matching_resource(self):
         original = status_app._list_jobs

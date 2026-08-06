@@ -2451,6 +2451,25 @@ def _clone_job_manifest(job_manifest, *, new_name=None):
     metadata.pop("annotations", None)
     metadata.pop("ownerReferences", None)
     cloned.pop("status", None)
+
+    spec = cloned.get("spec")
+    if isinstance(spec, dict):
+        spec.pop("selector", None)
+        template = spec.get("template")
+        if isinstance(template, dict):
+            template_metadata = template.get("metadata")
+            if isinstance(template_metadata, dict):
+                labels = template_metadata.get("labels")
+                if isinstance(labels, dict):
+                    for key in (
+                        "batch.kubernetes.io/controller-uid",
+                        "batch.kubernetes.io/job-name",
+                        "controller-uid",
+                        "job-name",
+                    ):
+                        labels.pop(key, None)
+                    if not labels:
+                        template_metadata.pop("labels", None)
     return cloned
 
 
