@@ -146,9 +146,11 @@ data:
                     ! -name sources \
                     -exec rm -rf {} + 2>/dev/null || true
                   # Run planetiler with exactly the same arguments as the
-                  # original tileserver-import job.  The planetiler image
-                  # entrypoint is "java -jar /app/planetiler.jar".
-                  java $JAVA_TOOL_OPTIONS -jar /app/planetiler.jar \
+                  # original tileserver-import job.  The current planetiler
+                  # image uses a Jib classpath entrypoint instead of a
+                  # single /app/planetiler.jar file, so invoke the main
+                  # class directly.
+                  exec java $JAVA_TOOL_OPTIONS -cp @/app/jib-classpath-file com.onthegomap.planetiler.Main \
                     --osm-path=/pipeline/europa_mitte_final.osm.pbf \
                     --output="$DATA_DIR/map.mbtiles" \
                     --force \
