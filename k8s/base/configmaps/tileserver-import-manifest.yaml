@@ -141,6 +141,7 @@ data:
                   TARGET_COLOR=$(cat /mnt/shared/target-color)
                   DATA_DIR="/mnt/tileserver/$TARGET_COLOR"
                   echo "Importing to $TARGET_COLOR PVC at $DATA_DIR"
+                  mkdir -p "$DATA_DIR/sources"
                   # Clean up any previous partial import in the target PVC
                   find "$DATA_DIR" -maxdepth 1 -mindepth 1 \
                     ! -name sources \
@@ -176,6 +177,7 @@ data:
                   # class directly.
                   java $JAVA_TOOL_OPTIONS -cp @/app/jib-classpath-file com.onthegomap.planetiler.Main \
                     --osm-path="$OSM_INPUT" \
+                    --download-dir="$DATA_DIR/sources" \
                     --output="$DATA_DIR/map.mbtiles" \
                     --force \
                     --fetch-wikidata \

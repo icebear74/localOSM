@@ -70,8 +70,10 @@ spec:
                 exit 1
               fi
               echo "Using OSM input: $OSM_INPUT"
+              mkdir -p /data/sources
               java -cp @/app/jib-classpath-file com.onthegomap.planetiler.Main \
                 --osm-path="$OSM_INPUT" \
+                --download-dir=/data/sources \
                 --output=/data/map.mbtiles \
                 --force \
                 --fetch-wikidata \
