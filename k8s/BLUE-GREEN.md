@@ -63,9 +63,22 @@ Der Clean-Modus:
 
 - löscht Ressourcen im Namespace `osm`
 - löscht den Namespace selbst
-- entfernt ggf. Namespace-Finalizer zwangsweise
+- wartet, bis der Namespace vollständig terminiert ist (mit wiederholten Versuchen, hängende Finalizer zu entfernen), bevor Ressourcen neu angelegt werden
 - löscht zusätzlich gebundene PVs des Namespace
 - leert die Blue/Green-Datenverzeichnisse unter `/mnt/OSM`
+
+Mit Soft-Reset (Pods/Jobs/Deployments neu erstellen, aber Daten behalten):
+
+```bash
+bash scripts/deploy-bluegreen.sh --soft-reset
+```
+
+Der Soft-Reset-Modus:
+
+- löscht alle Workload-Ressourcen im Namespace `osm` (Deployments, Jobs, CronJobs, ConfigMaps, Secrets, Services)
+- lässt die PVCs (und damit die importierten Daten) unangetastet
+- behält den Namespace selbst bei
+- eignet sich, wenn die WebUI/Jobs nach einem Redeploy nicht sauber wieder anlaufen, aber kein Datenverlust gewünscht ist
 
 ## Manueller Import / Switch
 

@@ -57,5 +57,5 @@ Die Status-WebUI ergänzt dafür folgende Endpunkte:
 ## Blue/Green
 
 - `k8s/BLUE-GREEN.md` – allgemeine Blue/Green-Dokumentation für TileServer, Nominatim, Valhalla und Photon
-- `scripts/deploy-bluegreen.sh` – rollt die neue Blue/Green-Struktur aus, optional mit `--clean`
+- `scripts/deploy-bluegreen.sh` – rollt die neue Blue/Green-Struktur aus, optional mit `--clean` (alles inkl. Daten löschen) oder `--soft-reset` (Pods/Jobs neu erstellen, PVCs behalten)
 - `scripts/build-all.sh` / `scripts/build-<service>.sh` – triggern Import/Rebuild und warten bis zum Abschluss
