@@ -45,21 +45,46 @@ spec:
               value: "-Xms16g -Xmx64g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"
             - name: JAVA_TOOL_OPTIONS
               value: "-Xms16g -Xmx64g -XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1MaxNewSizePercent=20"
+          command: ["/bin/sh", "-c"]
           args:
-            - --osm-path=/pipeline/europa_mitte_final.osm.pbf
-            - --output=/data/map.mbtiles
-            - --force
-            - --fetch-wikidata
-            - --nodemap-type=sparsearray
-            - --nodemap-storage=ram
-            - --threads=18
-            - --arguments=journal_mode=WAL,synchronous=OFF,mmap_size=268435456
-            - --lake_centerlines_path=/data/sources/lake_centerline.shp.zip
-            - --water_polygons_path=/data/sources/water-polygons-split-3857.zip
-            - --natural_earth_path=/data/sources/natural_earth_vector.sqlite.zip
-            - --minzoom=0
-            - --maxzoom=16
-            - --extra-osm-tags=shop,building,construction,name,wheelchair,amenity,highway,landuse
+            - |
+              set -eu
+              OSM_INPUT="${PLANET_INPUT_PATH:-}"
+              if [ -z "$OSM_INPUT" ]; then
+                for candidate in \
+                  /pipeline/europa_mitte_final.osm.pbf \
+                  /mnt/OSM/europa_mitte_final.osm.pbf \
+                  /pipeline/planet-latest.osm.pbf \
+                  /mnt/OSM/planet-latest.osm.pbf; do
+                  if [ -s "$candidate" ]; then
+                    OSM_INPUT="$candidate"
+                    break
+                  fi
+                done
+              fi
+              if [ -z "$OSM_INPUT" ] || [ ! -s "$OSM_INPUT" ]; then
+                echo "ERROR: no OSM input file found in expected locations" >&2
+                echo "Checked paths: /pipeline/europa_mitte_final.osm.pbf, /mnt/OSM/europa_mitte_final.osm.pbf, /pipeline/planet-latest.osm.pbf, /mnt/OSM/planet-latest.osm.pbf" >&2
+                ls -la /pipeline 2>/dev/null || true
+                ls -la /mnt/OSM 2>/dev/null || true
+                exit 1
+              fi
+              echo "Using OSM input: $OSM_INPUT"
+              java -cp @/app/jib-classpath-file com.onthegomap.planetiler.Main \
+                --osm-path="$OSM_INPUT" \
+                --output=/data/map.mbtiles \
+                --force \
+                --fetch-wikidata \
+                --nodemap-type=sparsearray \
+                --nodemap-storage=ram \
+                --threads=18 \
+                --arguments=journal_mode=WAL,synchronous=OFF,mmap_size=268435456 \
+                --lake_centerlines_path=/data/sources/lake_centerline.shp.zip \
+                --water_polygons_path=/data/sources/water-polygons-split-3857.zip \
+                --natural_earth_path=/data/sources/natural_earth_vector.sqlite.zip \
+                --minzoom=0 \
+                --maxzoom=16 \
+                --extra-osm-tags=shop,building,construction,name,wheelchair,amenity,highway,landuse
           volumeMounts:
             - name: planet-storage
               mountPath: /pipeline

@@ -145,13 +145,37 @@ data:
                   find "$DATA_DIR" -maxdepth 1 -mindepth 1 \
                     ! -name sources \
                     -exec rm -rf {} + 2>/dev/null || true
+                  # Resolve the OSM input file from the mounted planet-storage PVC.
+                  # The cluster may expose the generated PBFs at /pipeline or /mnt/OSM,
+                  # and the import job should use whichever file is present.
+                  OSM_INPUT="${PLANET_INPUT_PATH:-}"
+                  if [ -z "$OSM_INPUT" ]; then
+                    for candidate in \
+                      /pipeline/europa_mitte_final.osm.pbf \
+                      /mnt/OSM/europa_mitte_final.osm.pbf \
+                      /pipeline/planet-latest.osm.pbf \
+                      /mnt/OSM/planet-latest.osm.pbf; do
+                      if [ -s "$candidate" ]; then
+                        OSM_INPUT="$candidate"
+                        break
+                      fi
+                    done
+                  fi
+                  if [ -z "$OSM_INPUT" ] || [ ! -s "$OSM_INPUT" ]; then
+                    echo "ERROR: no OSM input file found in expected locations" >&2
+                    echo "Checked paths: /pipeline/europa_mitte_final.osm.pbf, /mnt/OSM/europa_mitte_final.osm.pbf, /pipeline/planet-latest.osm.pbf, /mnt/OSM/planet-latest.osm.pbf" >&2
+                    ls -la /pipeline 2>/dev/null || true
+                    ls -la /mnt/OSM 2>/dev/null || true
+                    exit 1
+                  fi
+                  echo "Using OSM input: $OSM_INPUT"
                   # Run planetiler with exactly the same arguments as the
                   # original tileserver-import job.  The current planetiler
                   # image uses a Jib classpath entrypoint instead of a
                   # single /app/planetiler.jar file, so invoke the main
                   # class directly.
-                  exec java $JAVA_TOOL_OPTIONS -cp @/app/jib-classpath-file com.onthegomap.planetiler.Main \
-                    --osm-path=/pipeline/europa_mitte_final.osm.pbf \
+                  java $JAVA_TOOL_OPTIONS -cp @/app/jib-classpath-file com.onthegomap.planetiler.Main \
+                    --osm-path="$OSM_INPUT" \
                     --output="$DATA_DIR/map.mbtiles" \
                     --force \
                     --fetch-wikidata \
