@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NAMESPACE="${PHOTON_NAMESPACE:-osm}"
 SUFFIX=$(date +%Y%m%d%H%M%S)
 JOB_NAME="photon-import-orchestrator-${SUFFIX}"
@@ -9,8 +10,14 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown argument: $1"; exit 1 ;;
   esac
 done
+MANIFEST_PATH="$REPO_ROOT/k8s/base/jobs/photon-import-orchestrator.yaml"
+TMP_MANIFEST="$(mktemp)"
+trap 'rm -f "$TMP_MANIFEST"' EXIT
+sed -e "s|^  name: .*|  name: ${JOB_NAME}|" \
+    -e "s|^  namespace: .*|  namespace: ${NAMESPACE}|" \
+    "$MANIFEST_PATH" > "$TMP_MANIFEST"
 echo "Creating photon orchestrator job '${JOB_NAME}' in namespace '${NAMESPACE}' ..."
-kubectl create job "$JOB_NAME" --from=job/photon-import-orchestrator -n "$NAMESPACE"
+kubectl apply -f "$TMP_MANIFEST"
 echo
 echo "Job created. Follow logs with:"
 echo "  kubectl logs -f job/${JOB_NAME} -n ${NAMESPACE}"
