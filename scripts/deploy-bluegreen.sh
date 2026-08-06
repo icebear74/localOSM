@@ -56,7 +56,7 @@ if [[ "$CLEAN" == true ]]; then
     kubectl -n "$NAMESPACE" delete configmap --all --ignore-not-found --timeout=90s >/dev/null 2>&1 || true
     kubectl -n "$NAMESPACE" delete secret --all --ignore-not-found --timeout=90s >/dev/null 2>&1 || true
   fi
-  for pv in $(kubectl get pv -o jsonpath='{range .items[?(@.spec.claimRef.namespace=="osm")]}{.metadata.name}{"
+  for pv in $(kubectl get pv -o jsonpath='{range .items[?(@.spec.claimRef.namespace=="'"$NAMESPACE"'")]}{.metadata.name}{"
 "}{end}' 2>/dev/null); do kubectl delete pv "$pv" --ignore-not-found >/dev/null 2>&1 || true; done
   kubectl delete namespace "$NAMESPACE" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   echo ">>> Waiting for namespace '$NAMESPACE' to finish terminating …"
