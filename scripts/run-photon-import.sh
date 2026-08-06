@@ -13,9 +13,35 @@ done
 MANIFEST_PATH="$REPO_ROOT/k8s/base/jobs/photon-import-orchestrator.yaml"
 TMP_MANIFEST="$(mktemp)"
 trap 'rm -f "$TMP_MANIFEST"' EXIT
-sed -e "s|^  name: .*|  name: ${JOB_NAME}|" \
-    -e "s|^  namespace: .*|  namespace: ${NAMESPACE}|" \
-    "$MANIFEST_PATH" > "$TMP_MANIFEST"
+python3 - "$MANIFEST_PATH" "$JOB_NAME" "$NAMESPACE" "$TMP_MANIFEST" <<'PY'
+import pathlib
+import sys
+
+source_path, job_name, namespace, output_path = sys.argv[1:]
+lines = pathlib.Path(source_path).read_text().splitlines()
+modified = False
+in_metadata = False
+for idx, line in enumerate(lines):
+    if line == "metadata:":
+        in_metadata = True
+        continue
+    if in_metadata and line.startswith("  name:"):
+        lines[idx] = f"  name: {job_name}"
+        modified = True
+        in_metadata = False
+        continue
+    if in_metadata and line.startswith("  namespace:"):
+        lines[idx] = f"  namespace: {namespace}"
+        modified = True
+        in_metadata = False
+        continue
+    if in_metadata and line and not line.startswith(" "):
+        in_metadata = False
+
+if not modified:
+    raise SystemExit(f"Unable to locate metadata.name/metadata.namespace in {source_path}")
+pathlib.Path(output_path).write_text("\n".join(lines) + "\n")
+PY
 echo "Creating photon orchestrator job '${JOB_NAME}' in namespace '${NAMESPACE}' ..."
 kubectl apply -f "$TMP_MANIFEST"
 echo
