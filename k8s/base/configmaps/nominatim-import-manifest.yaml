@@ -70,27 +70,6 @@ data:
                 - name: planet-storage
                   mountPath: /mnt/planet
                   readOnly: true
-            - name: select-target-pvc
-              image: alpine:3.20
-              command: ["/bin/sh", "-c"]
-              args:
-                - |
-                  set -eu
-                  TARGET_COLOR=$(cat /mnt/shared/target-color)
-                  if [ "$TARGET_COLOR" = "blue" ]; then
-                    ln -s /mnt/nominatim-blue /mnt/target
-                  else
-                    ln -s /mnt/nominatim-green /mnt/target
-                  fi
-              volumeMounts:
-                - name: shared-data
-                  mountPath: /mnt/shared
-                - name: target-link
-                  mountPath: /mnt
-                - name: nominatim-blue
-                  mountPath: /mnt/nominatim-blue
-                - name: nominatim-green
-                  mountPath: /mnt/nominatim-green
           containers:
             - name: importer
               image: mediagis/nominatim:4.5
@@ -128,6 +107,16 @@ data:
                   set -euo pipefail
                   TARGET_COLOR=$(cat /mnt/shared/target-color)
                   echo "Importing to $TARGET_COLOR PVC"
+                  # /var/lib/postgresql/16/main must physically be the chosen
+                  # colour's PVC. Symlinking it here (application-level, in the
+                  # main container's own writable rootfs) instead of using a
+                  # Kubernetes subPath into an emptyDir avoids the kubelet
+                  # subPath-symlink-escape check (CVE-2021-25741 hardening),
+                  # which otherwise rejects this pod at container-creation time
+                  # with CreateContainerConfigError because the "target" path
+                  # is a symlink pointing outside its own volume.
+                  rm -rf /var/lib/postgresql/16/main
+                  ln -s "/mnt/nominatim-${TARGET_COLOR}" /var/lib/postgresql/16/main
                   find /var/lib/postgresql/16/main -mindepth 1 -maxdepth 1 -exec rm -rf {} +
                   /app/config.sh
                   if id nominatim >/dev/null 2>&1; then
@@ -153,17 +142,16 @@ data:
                 - name: planet-storage
                   mountPath: /pipeline
                   readOnly: true
-                - name: target-link
-                  mountPath: /var/lib/postgresql/16/main
-                  subPath: target
+                - name: nominatim-blue
+                  mountPath: /mnt/nominatim-blue
+                - name: nominatim-green
+                  mountPath: /mnt/nominatim-green
                 - name: nominatim-postgres-tuning
                   mountPath: /etc/postgresql/16/main/conf.d/zz-tuning.conf
                   subPath: import-tuning.conf
                   readOnly: true
           volumes:
             - name: shared-data
-              emptyDir: {}
-            - name: target-link
               emptyDir: {}
             - name: planet-storage
               persistentVolumeClaim:

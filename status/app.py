@@ -93,10 +93,35 @@ PIPELINE_CONFIGMAPS = {
 PIPELINE_TRIGGER_TARGETS = {
     "planet-update": {"kind": "cronjob", "name": "planet-update", "prefix": "planet-update"},
     "osmium-pipeline": {"kind": "job", "name": "osmium-pipeline", "prefix": "osmium-pipeline"},
-    "nominatim-import": {"kind": "job", "name": "nominatim-import", "prefix": "nominatim-import"},
-    "valhalla-import": {"kind": "job", "name": "valhalla-import", "prefix": "valhalla-import"},
-    "tileserver-import": {"kind": "job", "name": "tileserver-import", "prefix": "tileserver-import"},
-    "photon-import": {"kind": "job", "name": "photon-import", "prefix": "photon-import"},
+    # The blue/green deployments (k8s/base/deployments/*-{blue,green}.yaml,
+    # rolled out by scripts/deploy-bluegreen.sh) never apply a plain
+    # "nominatim-import"/"valhalla-import"/"tileserver-import"/"photon-import"
+    # Job — only the corresponding "*-import-orchestrator" Job (see
+    # k8s/base/jobs/*-import-orchestrator.yaml) is deployed. Triggering these
+    # via the WebUI must therefore clone that orchestrator Job under a fresh
+    # name (mirroring "kubectl create job ... --from=job/*-import-orchestrator"
+    # in scripts/run-*-import.sh), not the plain (never-deployed) import Job,
+    # or the trigger 404s: GET .../jobs/tileserver-import not found.
+    "nominatim-import": {
+        "kind": "job-template",
+        "name": "nominatim-import-orchestrator",
+        "prefix": "nominatim-import-orchestrator",
+    },
+    "valhalla-import": {
+        "kind": "job-template",
+        "name": "valhalla-import-orchestrator",
+        "prefix": "valhalla-import-orchestrator",
+    },
+    "tileserver-import": {
+        "kind": "job-template",
+        "name": "tileserver-import-orchestrator",
+        "prefix": "tileserver-import-orchestrator",
+    },
+    "photon-import": {
+        "kind": "job-template",
+        "name": "photon-import-orchestrator",
+        "prefix": "photon-import-orchestrator",
+    },
 }
 
 CONFIG_DEFAULTS = {
@@ -2549,6 +2574,14 @@ def _trigger_pipeline_job(job_name):
             "metadata": {"name": f"{target['prefix']}-manual-{_safe_job_name_suffix()}"},
             "spec": cronjob.get("spec", {}).get("jobTemplate", {}).get("spec", {}),
         }
+        return KUBE.create_job(manifest)
+    if kind == "job-template":
+        # Re-run by cloning the always-present orchestrator Job under a
+        # fresh, timestamp-suffixed name instead of deleting/recreating it
+        # in place (the orchestrator Job itself must be left alone so it can
+        # be cloned again next time).
+        job = KUBE.get_job(target["name"])
+        manifest = _clone_job_manifest(job, new_name=f"{target['prefix']}-{_safe_job_name_suffix()}")
         return KUBE.create_job(manifest)
     job = KUBE.get_job(target["name"])
     manifest = _clone_job_manifest(job, new_name=target["name"])
