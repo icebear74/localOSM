@@ -96,7 +96,7 @@ class StatusPipelineTests(unittest.TestCase):
             status_app.NAMESPACE = 'custom-namespace'
             manifest = status_app._build_orchestrator_job_manifest('tileserver-import-orchestrator')
             script = manifest['spec']['template']['spec']['containers'][0]['args'][0]
-            self.assertIn("NAMESPACE='custom-namespace'", script)
+            self.assertIn(f"NAMESPACE={status_app.shlex.quote('custom-namespace')}", script)
         finally:
             status_app.NAMESPACE = original_namespace
 

@@ -2607,9 +2607,9 @@ def _prepare_configmap_payload(kind, raw_body):
 def _build_orchestrator_job_manifest(name):
     if name != "tileserver-import-orchestrator":
         raise RuntimeError(f"Fallback orchestrator manifest is only defined for tileserver-import-orchestrator, got {name}.")
-script = f"""set -eu
-NAMESPACE={shlex.quote(NAMESPACE)}
-JOB_SUFFIX=$(date +%Y%m%d%H%M%S)
+    script = """set -eu
+    NAMESPACE=__NAMESPACE__
+    JOB_SUFFIX=$(date +%Y%m%d%H%M%S)
 IMPORTER_JOB="tileserver-importer-${JOB_SUFFIX}"
 IMPORTER_TIMEOUT=7200
 DEPLOY_TIMEOUT=600
@@ -2706,6 +2706,7 @@ kubectl scale deployment $OLD_DEPLOY -n $NAMESPACE --replicas=0
 
 echo "=== Blue/Green switch complete. Active colour: $TARGET_COLOR ==="
 """
+    script = script.replace("__NAMESPACE__", shlex.quote(NAMESPACE))
     return {
         "apiVersion": "batch/v1",
         "kind": "Job",
