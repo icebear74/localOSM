@@ -5,6 +5,7 @@ import itertools
 import json
 import os
 import re
+import shlex
 import shutil
 import socket
 import ssl
@@ -2606,8 +2607,8 @@ def _prepare_configmap_payload(kind, raw_body):
 def _build_orchestrator_job_manifest(name):
     if name != "tileserver-import-orchestrator":
         raise RuntimeError(f"Fallback orchestrator manifest is only defined for tileserver-import-orchestrator, got {name}.")
-    script = """set -eu
-NAMESPACE=osm
+script = f"""set -eu
+NAMESPACE={shlex.quote(NAMESPACE)}
 JOB_SUFFIX=$(date +%Y%m%d%H%M%S)
 IMPORTER_JOB="tileserver-importer-${JOB_SUFFIX}"
 IMPORTER_TIMEOUT=7200
@@ -2756,6 +2757,8 @@ def _trigger_pipeline_job(job_name):
             job = KUBE.get_job(target["name"])
         except Exception as exc:  # noqa: BLE001
             if "404" not in str(exc):
+                raise
+            if target["name"] != "tileserver-import-orchestrator":
                 raise
             manifest = _build_orchestrator_job_manifest(target["name"])
             KUBE.create_job(manifest)

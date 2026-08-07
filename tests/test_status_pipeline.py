@@ -90,6 +90,33 @@ class StatusPipelineTests(unittest.TestCase):
         self.assertEqual(manifest['spec']['ttlSecondsAfterFinished'], 43200)
         self.assertEqual(manifest['spec']['template']['spec']['containers'][0]['command'], ['/bin/sh', '-c'])
 
+    def test_build_orchestrator_job_manifest_uses_configured_namespace(self):
+        original_namespace = status_app.NAMESPACE
+        try:
+            status_app.NAMESPACE = 'custom-namespace'
+            manifest = status_app._build_orchestrator_job_manifest('tileserver-import-orchestrator')
+            script = manifest['spec']['template']['spec']['containers'][0]['args'][0]
+            self.assertIn("NAMESPACE='custom-namespace'", script)
+        finally:
+            status_app.NAMESPACE = original_namespace
+
+    def test_trigger_pipeline_job_reraises_404_for_unsupported_orchestrator(self):
+        original_kube = status_app.KUBE
+
+        class DummyKube:
+            def get_job(self, name):
+                raise RuntimeError('404 Not Found')
+
+            def create_job(self, manifest):
+                raise AssertionError('create_job should not be called for unsupported fallback targets')
+
+        status_app.KUBE = DummyKube()
+        try:
+            with self.assertRaises(RuntimeError):
+                status_app._trigger_pipeline_job('nominatim-import')
+        finally:
+            status_app.KUBE = original_kube
+
     def test_apply_auto_update_cronjob_state_patches_suspend_flag(self):
         original_kube = status_app.KUBE
 
