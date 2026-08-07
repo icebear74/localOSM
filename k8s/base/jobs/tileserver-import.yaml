@@ -72,6 +72,7 @@ spec:
               echo "Using OSM input: $OSM_INPUT"
               DOWNLOAD_DIR=/data/sources
               TMP_DIR=/data/tmp
+              rm -rf "$TMP_DIR"
               mkdir -p "$DOWNLOAD_DIR" "$TMP_DIR"
               cleanup() {
                 rm -rf "$TMP_DIR"
@@ -88,9 +89,9 @@ spec:
                 --nodemap-storage=ram \
                 --threads=18 \
                 --arguments=journal_mode=WAL,synchronous=OFF,mmap_size=268435456 \
-                --lake_centerlines_path=/data/sources/lake_centerline.shp.zip \
-                --water_polygons_path=/data/sources/water-polygons-split-3857.zip \
-                --natural_earth_path=/data/sources/natural_earth_vector.sqlite.zip \
+                --lake_centerlines_path="$DOWNLOAD_DIR/lake_centerline.shp.zip" \
+                --water_polygons_path="$DOWNLOAD_DIR/water-polygons-split-3857.zip" \
+                --natural_earth_path="$DOWNLOAD_DIR/natural_earth_vector.sqlite.zip" \
                 --minzoom=0 \
                 --maxzoom=16 \
                 --extra-osm-tags=shop,building,construction,name,wheelchair,amenity,highway,landuse
