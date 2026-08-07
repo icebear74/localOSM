@@ -703,6 +703,14 @@ class KubeClient:
     def get_cronjob(self, name):
         return self._request("GET", f"/apis/batch/v1/namespaces/{self.namespace}/cronjobs/{name}")
 
+    def patch_cronjob(self, name, body):
+        self._request(
+            "PATCH",
+            f"/apis/batch/v1/namespaces/{self.namespace}/cronjobs/{name}",
+            body=body,
+            content_type="application/merge-patch+json",
+        )
+
     def get_configmap(self, name):
         return self._request("GET", f"/api/v1/namespaces/{self.namespace}/configmaps/{name}")
 
@@ -838,6 +846,7 @@ KUBE = KubeClient(NAMESPACE)
 _detected_node_url_cache: "str | None" = None
 _detected_node_url_cache_time: float = 0.0
 _NODE_URL_EMPTY_CACHE_TTL = 30.0  # seconds to suppress retries after a failed lookup
+_auto_update_cronjob_state_cache: bool | None = None
 
 
 def detect_node_url():
@@ -1992,6 +2001,18 @@ def save_json(path, payload):
     os.replace(tmp_path, path)
 
 
+def _apply_auto_update_cronjob_state(enabled):
+    global _auto_update_cronjob_state_cache
+    if _auto_update_cronjob_state_cache == enabled:
+        return
+    try:
+        KUBE.patch_cronjob("planet-update", {"spec": {"suspend": not enabled}})
+    except Exception as exc:  # noqa: BLE001
+        print(f"Failed to update auto-update cronjob state: {exc}", flush=True)
+        return
+    _auto_update_cronjob_state_cache = enabled
+
+
 def _cron_token_value(token, names):
     token = token.strip().lower()
     if names and token in names:
@@ -2095,6 +2116,7 @@ def load_config():
         config["auto_update_steps"] = list(BUILD_STEPS)
     config["auto_update_auto_promote"] = bool(config.get("auto_update_auto_promote"))
     config["detected_node_url"] = detect_node_url() if not config["node_url"] else ""
+    _apply_auto_update_cronjob_state(config["auto_update_enabled"])
     return config
 
 
@@ -2102,6 +2124,7 @@ def save_config(data):
     config = clone_default(CONFIG_DEFAULTS)
     config.update({key: data.get(key, value) for key, value in CONFIG_DEFAULTS.items()})
     save_json(CONFIG_FILE, config)
+    _apply_auto_update_cronjob_state(config["auto_update_enabled"])
     return config
 
 
@@ -2580,6 +2603,136 @@ def _prepare_configmap_payload(kind, raw_body):
     return target["name"], {target["key"]: content}
 
 
+def _build_orchestrator_job_manifest(name):
+    if name != "tileserver-import-orchestrator":
+        raise RuntimeError(f"Fallback orchestrator manifest is only defined for tileserver-import-orchestrator, got {name}.")
+    script = """set -eu
+NAMESPACE=osm
+JOB_SUFFIX=$(date +%Y%m%d%H%M%S)
+IMPORTER_JOB="tileserver-importer-${JOB_SUFFIX}"
+IMPORTER_TIMEOUT=7200
+DEPLOY_TIMEOUT=600
+
+echo "=== TileServer Orchestrator starting (suffix: $JOB_SUFFIX) ==="
+
+echo "Checking planet-update lock ..."
+MAX_WAIT=120
+WAITED=0
+while kubectl get configmap planet-update-lock -n $NAMESPACE >/dev/null 2>&1; do
+  WAITED=$((WAITED+30))
+  if [ $WAITED -ge $MAX_WAIT ]; then
+    echo "Planet-update lock present for ${MAX_WAIT}s – proceeding anyway."
+    break
+  fi
+  echo "Planet update in progress, waiting 30s ($WAITED/${MAX_WAIT}s) ..."
+  sleep 30
+done
+
+echo "Creating importer job $IMPORTER_JOB ..."
+JOB_YAML=$(kubectl get configmap tileserver-importer-manifest -n $NAMESPACE \
+  -o jsonpath='{.data.job\.yaml}' | sed "s/JOB_SUFFIX/${JOB_SUFFIX}/g")
+echo "$JOB_YAML" | kubectl apply -f -
+echo "Importer job $IMPORTER_JOB created."
+
+echo "Waiting for importer job $IMPORTER_JOB (timeout: ${IMPORTER_TIMEOUT}s) ..."
+ELAPSED=0
+while true; do
+  STATUS=$(kubectl get job $IMPORTER_JOB -n $NAMESPACE \
+    -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || true)
+  FAILED=$(kubectl get job $IMPORTER_JOB -n $NAMESPACE \
+    -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)
+  if [ "$STATUS" = "True" ]; then
+    echo "Importer job $IMPORTER_JOB completed successfully."
+    break
+  fi
+  if [ "$FAILED" = "True" ]; then
+    echo "ERROR: Importer job $IMPORTER_JOB failed. Aborting orchestration." >&2
+    exit 1
+  fi
+  ELAPSED=$((ELAPSED+10))
+  if [ $ELAPSED -ge $IMPORTER_TIMEOUT ]; then
+    echo "ERROR: Timeout waiting for importer job $IMPORTER_JOB." >&2
+    exit 1
+  fi
+  sleep 10
+done
+
+TARGET_COLOR=$(kubectl logs -l "job-name=${IMPORTER_JOB}" -n $NAMESPACE \
+  --container importer 2>/dev/null \
+  | grep "^Importing to" | tail -1 | awk '{print $3}' || true)
+if [ -z "$TARGET_COLOR" ]; then
+  TARGET_COLOR=$(kubectl logs -l "job-name=${IMPORTER_JOB}" -n $NAMESPACE \
+    --container dispatcher 2>/dev/null \
+    | grep "^Target:" | tail -1 | awk '{print $2}' || true)
+fi
+if [ -z "$TARGET_COLOR" ] || { [ "$TARGET_COLOR" != "blue" ] && [ "$TARGET_COLOR" != "green" ]; }; then
+  echo "ERROR: Could not determine TARGET_COLOR from importer logs." >&2
+  exit 1
+fi
+echo "TARGET_COLOR: $TARGET_COLOR"
+if [ "$TARGET_COLOR" = "blue" ]; then
+  OLD_COLOR=green
+else
+  OLD_COLOR=blue
+fi
+
+TARGET_DEPLOY="tileserver-${TARGET_COLOR}"
+OLD_DEPLOY="tileserver-${OLD_COLOR}"
+echo "Scaling $TARGET_DEPLOY to 1 ..."
+kubectl scale deployment $TARGET_DEPLOY -n $NAMESPACE --replicas=1
+
+echo "Waiting for $TARGET_DEPLOY to be ready (timeout: ${DEPLOY_TIMEOUT}s) ..."
+kubectl rollout status deployment/$TARGET_DEPLOY -n $NAMESPACE --timeout=${DEPLOY_TIMEOUT}s
+
+echo "Switching main service selector to color=$TARGET_COLOR ..."
+kubectl patch service tileserver-gl -n $NAMESPACE \
+  --type=json \
+  -p="[{\"op\":\"replace\",\"path\":\"/spec/selector/color\",\"value\":\"${TARGET_COLOR}\"}]"
+
+echo "Updating PVC labels ..."
+kubectl label pvc tileserver-${TARGET_COLOR}-pvc -n $NAMESPACE active=true --overwrite
+kubectl label pvc tileserver-${OLD_COLOR}-pvc   -n $NAMESPACE active=false --overwrite
+
+kubectl patch deployment $TARGET_DEPLOY -n $NAMESPACE \
+  --type=json \
+  -p="[{\"op\":\"replace\",\"path\":\"/spec/template/metadata/labels/active\",\"value\":\"true\"}]"
+kubectl patch deployment $OLD_DEPLOY -n $NAMESPACE \
+  --type=json \
+  -p="[{\"op\":\"replace\",\"path\":\"/spec/template/metadata/labels/active\",\"value\":\"false\"}]" || true
+
+echo "Scaling $OLD_DEPLOY to 0 ..."
+kubectl scale deployment $OLD_DEPLOY -n $NAMESPACE --replicas=0
+
+echo "=== Blue/Green switch complete. Active colour: $TARGET_COLOR ==="
+"""
+    return {
+        "apiVersion": "batch/v1",
+        "kind": "Job",
+        "metadata": {
+            "name": name,
+            "labels": {"app": "tileserver-orchestrator"},
+        },
+        "spec": {
+            "backoffLimit": 0,
+            "ttlSecondsAfterFinished": 43200,
+            "template": {
+                "spec": {
+                    "restartPolicy": "Never",
+                    "serviceAccountName": "tileserver-orchestrator",
+                    "containers": [
+                        {
+                            "name": "orchestrator",
+                            "image": "bitnami/kubectl:1.29",
+                            "command": ["/bin/sh", "-c"],
+                            "args": [script],
+                        }
+                    ],
+                }
+            },
+        },
+    }
+
+
 def _trigger_pipeline_job(job_name):
     target = PIPELINE_TRIGGER_TARGETS.get(job_name)
     if not target:
@@ -2599,7 +2752,14 @@ def _trigger_pipeline_job(job_name):
         # fresh, timestamp-suffixed name instead of deleting/recreating it
         # in place (the orchestrator Job itself must be left alone so it can
         # be cloned again next time).
-        job = KUBE.get_job(target["name"])
+        try:
+            job = KUBE.get_job(target["name"])
+        except Exception as exc:  # noqa: BLE001
+            if "404" not in str(exc):
+                raise
+            manifest = _build_orchestrator_job_manifest(target["name"])
+            KUBE.create_job(manifest)
+            job = KUBE.get_job(target["name"])
         manifest = _clone_job_manifest(job, new_name=f"{target['prefix']}-{_safe_job_name_suffix()}")
         return KUBE.create_job(manifest)
     job = KUBE.get_job(target["name"])

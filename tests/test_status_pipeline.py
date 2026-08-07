@@ -84,6 +84,30 @@ class StatusPipelineTests(unittest.TestCase):
         finally:
             status_app._list_jobs = original
 
+    def test_build_orchestrator_job_manifest_sets_ttl_and_name(self):
+        manifest = status_app._build_orchestrator_job_manifest('tileserver-import-orchestrator')
+        self.assertEqual(manifest['metadata']['name'], 'tileserver-import-orchestrator')
+        self.assertEqual(manifest['spec']['ttlSecondsAfterFinished'], 43200)
+        self.assertEqual(manifest['spec']['template']['spec']['containers'][0]['command'], ['/bin/sh', '-c'])
+
+    def test_apply_auto_update_cronjob_state_patches_suspend_flag(self):
+        original_kube = status_app.KUBE
+
+        class DummyKube:
+            def __init__(self):
+                self.calls = []
+
+            def patch_cronjob(self, name, body):
+                self.calls.append((name, body))
+
+        dummy_kube = DummyKube()
+        status_app.KUBE = dummy_kube
+        try:
+            status_app._apply_auto_update_cronjob_state(False)
+            self.assertEqual(dummy_kube.calls, [('planet-update', {'spec': {'suspend': True}})])
+        finally:
+            status_app.KUBE = original_kube
+
 
 if __name__ == '__main__':
     unittest.main()

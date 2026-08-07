@@ -19,26 +19,25 @@ import sys
 
 source_path, job_name, namespace, output_path = sys.argv[1:]
 lines = pathlib.Path(source_path).read_text().splitlines()
-modified = False
+name_modified = False
+namespace_modified = False
 in_metadata = False
 for idx, line in enumerate(lines):
-    if line == "metadata:":
+    if line == "metadata:" and not line.startswith(" "):
         in_metadata = True
         continue
     if in_metadata and line.startswith("  name:"):
         lines[idx] = f"  name: {job_name}"
-        modified = True
-        in_metadata = False
+        name_modified = True
         continue
     if in_metadata and line.startswith("  namespace:"):
         lines[idx] = f"  namespace: {namespace}"
-        modified = True
-        in_metadata = False
+        namespace_modified = True
         continue
     if in_metadata and line and not line.startswith(" "):
         in_metadata = False
 
-if not modified:
+if not name_modified or not namespace_modified:
     raise SystemExit(f"Unable to locate metadata.name/metadata.namespace in {source_path}")
 pathlib.Path(output_path).write_text("\n".join(lines) + "\n")
 PY

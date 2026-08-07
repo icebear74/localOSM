@@ -17,7 +17,7 @@ data:
         app: tileserver-importer
     spec:
       backoffLimit: 1
-      ttlSecondsAfterFinished: 3600
+      ttlSecondsAfterFinished: 43200
       template:
         spec:
           restartPolicy: Never
@@ -28,7 +28,7 @@ data:
             # writes TARGET_COLOR into the shared emptyDir so later containers
             # and the orchestrator can read it.
             - name: dispatcher
-              image: bitnami/kubectl:latest
+              image: bitnami/kubectl:1.29
               command: ["/bin/sh", "-c"]
               args:
                 - |

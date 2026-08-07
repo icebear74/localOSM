@@ -14,7 +14,7 @@ data:
         app: nominatim-importer
     spec:
       backoffLimit: 1
-      ttlSecondsAfterFinished: 3600
+      ttlSecondsAfterFinished: 43200
       template:
         spec:
           restartPolicy: Never
@@ -23,7 +23,7 @@ data:
             fsGroup: 100
           initContainers:
             - name: dispatcher
-              image: bitnami/kubectl:latest
+              image: bitnami/kubectl:1.29
               command: ["/bin/sh", "-c"]
               args:
                 - |

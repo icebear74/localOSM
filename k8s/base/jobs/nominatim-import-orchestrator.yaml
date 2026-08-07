@@ -7,14 +7,14 @@ metadata:
     app: nominatim-orchestrator
 spec:
   backoffLimit: 0
-  ttlSecondsAfterFinished: 7200
+  ttlSecondsAfterFinished: 43200
   template:
     spec:
       restartPolicy: Never
       serviceAccountName: osm-orchestrator
       containers:
         - name: orchestrator
-          image: bitnami/kubectl:latest
+          image: bitnami/kubectl:1.29
           command: ["/bin/sh", "-c"]
           args:
             - |
