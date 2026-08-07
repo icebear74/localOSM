@@ -70,10 +70,17 @@ spec:
                 exit 1
               fi
               echo "Using OSM input: $OSM_INPUT"
-              mkdir -p /data/sources
+              DOWNLOAD_DIR=/data/sources
+              TMP_DIR=/data/tmp
+              mkdir -p "$DOWNLOAD_DIR" "$TMP_DIR"
+              cleanup() {
+                rm -rf "$TMP_DIR"
+              }
+              trap cleanup EXIT
               java -cp @/app/jib-classpath-file com.onthegomap.planetiler.Main \
                 --osm-path="$OSM_INPUT" \
-                --download-dir=/data/sources \
+                --download-dir="$DOWNLOAD_DIR" \
+                --tmpdir="$TMP_DIR" \
                 --output=/data/map.mbtiles \
                 --force \
                 --fetch-wikidata \

@@ -141,10 +141,17 @@ data:
                   TARGET_COLOR=$(cat /mnt/shared/target-color)
                   DATA_DIR="/mnt/tileserver/$TARGET_COLOR"
                   echo "Importing to $TARGET_COLOR PVC at $DATA_DIR"
-                  mkdir -p "$DATA_DIR/sources"
+                  DOWNLOAD_DIR="$DATA_DIR/sources"
+                  TMP_DIR="$DATA_DIR/tmp"
+                  mkdir -p "$DOWNLOAD_DIR" "$TMP_DIR"
+                  cleanup() {
+                    rm -rf "$TMP_DIR"
+                  }
+                  trap cleanup EXIT
                   # Clean up any previous partial import in the target PVC
                   find "$DATA_DIR" -maxdepth 1 -mindepth 1 \
                     ! -name sources \
+                    ! -name tmp \
                     -exec rm -rf {} + 2>/dev/null || true
                   # Resolve the OSM input file from the mounted planet-storage PVC.
                   # The cluster may expose the generated PBFs at /pipeline or /mnt/OSM,
@@ -177,7 +184,8 @@ data:
                   # class directly.
                   java $JAVA_TOOL_OPTIONS -cp @/app/jib-classpath-file com.onthegomap.planetiler.Main \
                     --osm-path="$OSM_INPUT" \
-                    --download-dir="$DATA_DIR/sources" \
+                    --download-dir="$DOWNLOAD_DIR" \
+                    --tmpdir="$TMP_DIR" \
                     --output="$DATA_DIR/map.mbtiles" \
                     --force \
                     --fetch-wikidata \
