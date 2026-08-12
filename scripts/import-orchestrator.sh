@@ -12,6 +12,7 @@ STATE_FILE="${STATE_DIR}/import-orchestrator.json"
 HASH_FILE="${STATE_DIR}/import-orchestrator.hash"
 REQUEST_FILE="${STATE_DIR}/import-request.json"
 REQUEST_QUEUE_FILE="${STATE_DIR}/import-request-queue.json"
+REQUEST_LOCK_FILE="${STATE_DIR}/import-request.lock"
 ABORT_FILE="${STATE_DIR}/import-abort.flag"
 COMPLETED_STEPS_FILE="${STATE_DIR}/import-completed-steps"
 LAST_CONFIG_CHECK=0
@@ -113,25 +114,33 @@ request_fingerprint() {
 # Pulls the next pending import request from the queue into the active
 # REQUEST_FILE slot so the orchestrator processes one request at a time.
 dequeue_next_request() {
-  python3 - "${REQUEST_QUEUE_FILE}" "${REQUEST_FILE}" <<'ORCH_PY'
+  python3 - "${REQUEST_QUEUE_FILE}" "${REQUEST_FILE}" "${REQUEST_LOCK_FILE}" <<'ORCH_PY'
+import fcntl
 import json
+import os
 import sys
 
-queue_path, request_path = sys.argv[1:3]
-try:
-    with open(queue_path, encoding='utf-8') as handle:
-        queue = json.load(handle)
-except (FileNotFoundError, json.JSONDecodeError):
-    queue = []
-if not isinstance(queue, list):
-    queue = []
-if not queue:
-    sys.exit(1)
-request = queue.pop(0)
-with open(request_path, 'w', encoding='utf-8') as handle:
-    json.dump(request, handle, indent=2, sort_keys=True)
-with open(queue_path, 'w', encoding='utf-8') as handle:
-    json.dump(queue, handle, indent=2, sort_keys=True)
+queue_path, request_path, lock_path = sys.argv[1:4]
+os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+with open(lock_path, 'a+', encoding='utf-8') as lock_handle:
+    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+    try:
+        try:
+            with open(queue_path, encoding='utf-8') as handle:
+                queue = json.load(handle)
+        except (FileNotFoundError, json.JSONDecodeError):
+            queue = []
+        if not isinstance(queue, list):
+            queue = []
+        if not queue:
+            sys.exit(1)
+        request = queue.pop(0)
+        with open(request_path, 'w', encoding='utf-8') as handle:
+            json.dump(request, handle, indent=2, sort_keys=True)
+        with open(queue_path, 'w', encoding='utf-8') as handle:
+            json.dump(queue, handle, indent=2, sort_keys=True)
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
 ORCH_PY
 }
 

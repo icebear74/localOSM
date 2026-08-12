@@ -1,6 +1,8 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import concurrent.futures
+import contextlib
 import errno
+import fcntl
 import itertools
 import json
 import os
@@ -50,6 +52,7 @@ CONFIG_FILE = os.path.join(STATUS_DIR, "config.json")
 TILESERVER_STYLE_PATH = os.path.join(DATA_DIR, "tileserver", "active", "style.json")
 IMPORT_REQUEST_FILE = os.path.join(STATUS_DIR, "import-request.json")
 IMPORT_REQUEST_QUEUE_FILE = os.path.join(STATUS_DIR, "import-request-queue.json")
+IMPORT_REQUEST_LOCK_FILE = os.path.join(STATUS_DIR, "import-request.lock")
 # import-orchestrator.sh writes its own live progress here (same hostPath as
 # STATUS_DIR, see k8s/import-orchestrator.yaml "state" volume) and watches for
 # ABORT_FLAG_FILE to cancel whatever it is currently doing.
@@ -2394,6 +2397,18 @@ def collect_status():
     }
 
 
+@contextlib.contextmanager
+def import_request_lock():
+    os.makedirs(os.path.dirname(IMPORT_REQUEST_LOCK_FILE), exist_ok=True)
+    fd = os.open(IMPORT_REQUEST_LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
 def load_import_request_queue():
     return load_json(IMPORT_REQUEST_QUEUE_FILE, [])
 
@@ -2470,23 +2485,24 @@ def write_import_request(
         "merge_requested": bool(merge_requested),
         "force_slugs": list(force_slugs) if force_slugs else [],
     }
-    queue = load_import_request_queue()
-    if not isinstance(queue, list):
-        queue = []
-    active_request = None
-    if os.path.exists(IMPORT_REQUEST_FILE):
-        try:
-            with open(IMPORT_REQUEST_FILE, encoding="utf-8") as handle:
-                active_request = json.load(handle)
-        except (OSError, json.JSONDecodeError):
-            active_request = None
-    for existing in queue:
-        if import_request_signature(existing) == import_request_signature(payload):
-            raise RuntimeError("An identical import request is already queued.")
-    if active_request and import_request_signature(active_request) == import_request_signature(payload):
-        raise RuntimeError("An identical import request is already running.")
-    queue.append(payload)
-    save_import_request_queue(queue)
+    with import_request_lock():
+        queue = load_import_request_queue()
+        if not isinstance(queue, list):
+            queue = []
+        active_request = None
+        if os.path.exists(IMPORT_REQUEST_FILE):
+            try:
+                with open(IMPORT_REQUEST_FILE, encoding="utf-8") as handle:
+                    active_request = json.load(handle)
+            except (OSError, json.JSONDecodeError):
+                active_request = None
+        for existing in queue:
+            if import_request_signature(existing) == import_request_signature(payload):
+                raise RuntimeError("An identical import request is already queued.")
+        if active_request and import_request_signature(active_request) == import_request_signature(payload):
+            raise RuntimeError("An identical import request is already running.")
+        queue.append(payload)
+        save_import_request_queue(queue)
     return payload
 
 
