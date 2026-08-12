@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<osm version="0.6" generator="Local POI Script">
+<node id="991785489750" lat="51.5816327" lon="6.729971531333579">
+    <tag k="name" v="Homeoffice Holger" />
+    <tag k="tourism" v="attraction" />
+  </node>
+</osm>
