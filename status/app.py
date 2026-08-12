@@ -58,6 +58,7 @@ IMPORT_JOB_NAMES = ("import-prep", "tileserver-import", "nominatim-import", "val
 PROMOTE_POD_TERMINATION_TIMEOUT_SECONDS = 240
 PROMOTE_READY_TIMEOUT_SECONDS = 900
 PROMOTE_NOMINATIM_READY_TIMEOUT_SECONDS = 1200
+IMPORT_WORKFLOW_COMPLETION_TIMEOUT_SECONDS = 24 * 60 * 60
 PROMOTE_SERVICES = {
     "tileserver": {
         "deployment": "tileserver-gl",
@@ -2601,8 +2602,15 @@ def workflow_import_is_active():
     return request_pending or bool(orchestrator_state.get("running"))
 
 
-def wait_for_import_workflow_completion():
-    while workflow_import_is_active():
+def wait_for_import_workflow_completion(timeout_seconds=IMPORT_WORKFLOW_COMPLETION_TIMEOUT_SECONDS):
+    deadline = time.time() + timeout_seconds
+    while True:
+        if not workflow_import_is_active():
+            return
+        if time.time() >= deadline:
+            raise RuntimeError(
+                f"Timed out waiting for the import orchestrator to finish after {timeout_seconds} seconds."
+            )
         time.sleep(2)
 
 
