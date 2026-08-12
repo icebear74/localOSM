@@ -23,33 +23,11 @@ spec:
                 configMapKeyRef:
                   name: osm-nominatim-import-config
                   key: import_password
-            # THREADS is forwarded by the image's init.sh as `nominatim
-            # import --threads $THREADS`. Nominatim itself hard-codes
-            # osm2pgsql's --number-processes to 1 for the initial ("--create")
-            # load regardless of --threads (osm2pgsql's flex output only
-            # supports single-threaded node/way processing), so the
-            # osm2pgsql process will always show --number-processes 1 no
-            # matter how high THREADS/import_threads is set — that is
-            # expected. THREADS still matters: it is reused for the
-            # `nominatim index --threads $THREADS` step run right after the
-            # osm2pgsql load, which does parallelize, so size it to the
-            # node's available CPUs (see k8s/nominatim-import-config.yaml).
             - name: THREADS
               valueFrom:
                 configMapKeyRef:
                   name: osm-nominatim-import-config
                   key: import_threads
-            # osm2pgsql's --cache (node cache, in MB) during the initial
-            # import; sized to the node's available RAM (see
-            # k8s/nominatim-import-config.yaml) rather than left at
-            # osm2pgsql's auto-detected default. NOTE: NOMINATIM_OSM2PGSQL_CACHE
-            # is not an actual Nominatim setting (it does not appear in
-            # upstream settings/env.defaults and the image's config.sh/init.sh
-            # never read it), so setting only this env var has no effect by
-            # itself — without --osm2pgsql-cache on the CLI, Nominatim
-            # auto-sizes the cache from 75% of the node's (not the pod's!)
-            # available RAM. The command below patches init.sh to actually
-            # pass --osm2pgsql-cache so this value is honored.
             - name: NOMINATIM_OSM2PGSQL_CACHE
               valueFrom:
                 configMapKeyRef:
@@ -60,7 +38,7 @@ spec:
               memory: "48Gi"
               cpu: "8"
             limits:
-              memory: "96Gi"
+              memory: "110Gi"
               cpu: "20"
           command: ["/bin/bash", "-c"]
           args:
@@ -72,38 +50,33 @@ spec:
               else
                 useradd -m -p "${NOMINATIM_PASSWORD}" nominatim
               fi
-              # The image's init.sh calls `nominatim import --osm-file ... --threads
-              # $THREADS` but never passes --osm2pgsql-cache, so
-              # NOMINATIM_OSM2PGSQL_CACHE alone has no effect (see comment on
-              # that env var above). Patch init.sh to add --osm2pgsql-cache so
-              # the configured cache size actually reaches osm2pgsql. Only the
-              # two `nominatim import ...` lines accept --osm2pgsql-cache; the
-              # later `nominatim index --threads $THREADS` line does NOT (that
-              # subcommand has no --osm2pgsql-cache option and errors out with
-              # "unrecognized arguments" if it is appended there), so the sed
-              # is restricted to lines containing "nominatim import".
+
+              # Patch init.sh um --osm2pgsql-cache zu ergänzen
               if [ -n "${NOMINATIM_OSM2PGSQL_CACHE:-}" ]; then
-                sed -i '/nominatim import/ s/--threads \$THREADS/--threads \$THREADS --osm2pgsql-cache \$NOMINATIM_OSM2PGSQL_CACHE/g' /app/init.sh
-                if ! grep -q -- '--osm2pgsql-cache \$NOMINATIM_OSM2PGSQL_CACHE' /app/init.sh; then
-                  echo "ERROR: failed to patch /app/init.sh to honor NOMINATIM_OSM2PGSQL_CACHE (upstream image's init.sh may have changed); aborting." >&2
-                  exit 1
-                fi
-                if grep -q -- 'nominatim index --threads \$THREADS --osm2pgsql-cache' /app/init.sh; then
-                  echo "ERROR: /app/init.sh patch incorrectly added --osm2pgsql-cache to the 'nominatim index' step, which does not support it; aborting." >&2
-                  exit 1
-                fi
+               sed -i '/nominatim import/ s/--threads \$THREADS/--threads \$THREADS --osm2pgsql-cache \$NOMINATIM_OSM2PGSQL_CACHE/g' /app/init.sh
+               if ! grep -q -- '--osm2pgsql-cache \$NOMINATIM_OSM2PGSQL_CACHE' /app/init.sh; then
+                echo "ERROR: failed to patch /app/init.sh to honor NOMINATIM_OSM2PGSQL_CACHE (upstream image's init.sh may have changed); aborting." >&2
+                exit 1
+               fi
+               if grep -q -- 'nominatim index --threads \$THREADS --osm2pgsql-cache' /app/init.sh; then
+                echo "ERROR: /app/init.sh patch incorrectly added --osm2pgsql-cache to the 'nominatim index' step, which does not support it; aborting." >&2
+                exit 1
+               fi
               fi
+
               /app/init.sh
+
               # Nach erfolgreichem Import: Warte auf Background-PostgreSQL-Prozesse,
               # erzwinge einen CHECKPOINT und stelle sicher, dass alle WAL-Einträge
               # auf die Festplatte geschrieben wurden, bevor der Marker gesetzt wird.
-              # Dies verhindert Datenbankkorruption beim nächsten Pod-Start.
               echo "Nominatim-Import abgeschlossen. Warte 10 Sekunden auf Background-PostgreSQL-Prozesse..."
               sleep 10
               echo "Erzwinge PostgreSQL CHECKPOINT, um alle Daten auf Disk zu schreiben..."
               su -c "psql -c 'CHECKPOINT;'" postgres
               echo "Warte 5 Sekunden auf WAL-Flush..."
               sleep 5
+
+
               echo "WAL-Flush abgeschlossen. Setze import-finished Marker..."
               touch /var/lib/postgresql/16/main/import-finished
           volumeMounts:
@@ -111,13 +84,12 @@ spec:
               mountPath: /nominatim/data/import
             - name: nominatim-data
               mountPath: /var/lib/postgresql/16/main
-            # Tunable Postgres settings for the import (see
-            # k8s/nominatim-postgres-tuning-config.yaml); loaded from conf.d
-            # after Nominatim's own postgres-import.conf, so these values win.
             - name: nominatim-postgres-tuning
               mountPath: /etc/postgresql/16/main/conf.d/zz-tuning.conf
               subPath: import-tuning.conf
               readOnly: true
+            - name: container-tmp
+              mountPath: /tmp
       volumes:
         - name: import-data
           hostPath:
@@ -133,3 +105,7 @@ spec:
             items:
               - key: import-tuning.conf
                 path: import-tuning.conf
+        - name: container-tmp
+          hostPath:
+            path: __OSM_TEMP_DIR__/tmp
+            type: DirectoryOrCreate

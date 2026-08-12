@@ -53,13 +53,11 @@ spec:
                 fi
               done
 
-              FONT_COUNT=$(find /data/fonts -mindepth 1 -type f \( -name "*.pbf" -o -name "*.ttf" -o -name "*.otf" \) 2>/dev/null | wc -l)
-              if [ "$FONT_COUNT" -gt 0 ]; then
-                echo "[✓] Fonts verified: $FONT_COUNT glyph files available"
+              if [ -n "$(find /data/fonts -type f -name "*.pbf" -print -quit 2>/dev/null)" ]; then
+                echo "[✓] Fonts verified and available"
               else
-                echo "[!] WARNING: No glyph files found. Map will render WITHOUT text labels."
+                echo "[!] WARNING: No glyph files found."
               fi
-
               if [ -f /style-source/style.json ] && [ ! -f /data/style.json ]; then
                 cp /style-source/style.json /data/style.json
                 echo "[INFO] TileServer: installed style.json from ConfigMap tileserver-style"

@@ -31,8 +31,8 @@ data:
     effective_io_concurrency = 200       # Perfekt für NVMe/SSD
     max_worker_processes = 16
     max_parallel_workers = 16
-    max_parallel_workers_per_gather = 4
-    max_parallel_maintenance_workers = 4 # Beschleunigt INDEX-Erstellung massiv
+    max_parallel_workers_per_gather = 5
+    max_parallel_maintenance_workers = 5 # Beschleunigt INDEX-Erstellung massiv
 
   # Applied by nominatim.yaml (the running Nominatim service). This deployment
   # requests 2Gi/2 CPUs (limit 8Gi/8 CPUs, see k8s/nominatim.yaml), so these

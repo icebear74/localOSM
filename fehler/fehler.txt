@@ -1,0 +1,16 @@
+INFO:  "word": scanned 30000 of 346240 pages, containing 2329157 live rows and 0 dead rows; 30000 rows in sample, 26881577 estimated                                                                                                                                                                                         total rows
+ANALYZE
++ sudo service postgresql stop
+ * Stopping PostgreSQL 16 database server
+   ...done.
++ rm /etc/postgresql/16/main/conf.d/postgres-import.conf
+Deleting downloaded dumps in /nominatim
++ echo 'Deleting downloaded dumps in /nominatim'
++ rm -f '/nominatim/*sql.gz'
++ rm -f '/nominatim/*csv.gz'
++ rm -f /nominatim/tiger-nominatim-preprocessed.csv.tar.gz
++ '[' '' '!=' '' ']'
+Nominatim-Import abgeschlossen. Warte 10 Sekunden auf Background-PostgreSQL-Prozesse...
+Erzwinge PostgreSQL CHECKPOINT, um alle Daten auf Disk zu schreiben...
+psql: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed: No such file or directory
+        Is the server running locally and accepting connections on that socket?
