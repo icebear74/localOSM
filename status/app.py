@@ -2595,6 +2595,17 @@ def merge_library_files(country, records=None):
             handle.write(f"source[{record['slug']}]={record['url']}\n")
 
 
+def workflow_import_is_active():
+    request_pending = os.path.exists(IMPORT_REQUEST_FILE)
+    orchestrator_state = read_orchestrator_state()
+    return request_pending or bool(orchestrator_state.get("running"))
+
+
+def wait_for_import_workflow_completion():
+    while workflow_import_is_active():
+        time.sleep(2)
+
+
 def finish_workflow_thread():
     ACTIVE_WORKFLOW["thread"] = None
     if WORKFLOW_LOCK.locked():
@@ -2681,6 +2692,28 @@ def run_build_workflow(country=None, steps=None, auto_promote=True):
             country=country["name"],
             error="",
         )
+        wait_for_import_workflow_completion()
+        orchestrator_state = read_orchestrator_state()
+        if orchestrator_state.get("phase") in {"aborted", "failed", "error"}:
+            write_workflow_state(
+                running=False,
+                phase=orchestrator_state.get("phase", "error"),
+                progress=100,
+                message=orchestrator_state.get("message") or "Library build finished with an error.",
+                detail=orchestrator_state.get("detail") or "The import orchestrator reported an error.",
+                country=country["name"],
+                error=orchestrator_state.get("detail") or "",
+            )
+        else:
+            write_workflow_state(
+                running=False,
+                phase="done",
+                progress=100,
+                message="Build completed.",
+                detail="All requested import steps have finished.",
+                country=country["name"],
+                error="",
+            )
     except Exception as exc:  # noqa: BLE001
         write_workflow_state(
             running=False,
@@ -2753,6 +2786,28 @@ def run_download_merge_workflow(auto_promote=False, download_only=False):
             country=country["name"],
             error="",
         )
+        wait_for_import_workflow_completion()
+        orchestrator_state = read_orchestrator_state()
+        if orchestrator_state.get("phase") in {"aborted", "failed", "error"}:
+            write_workflow_state(
+                running=False,
+                phase=orchestrator_state.get("phase", "error"),
+                progress=100,
+                message=orchestrator_state.get("message") or "Download & Merge finished with an error.",
+                detail=orchestrator_state.get("detail") or "The import orchestrator reported an error.",
+                country=country["name"],
+                error=orchestrator_state.get("detail") or "",
+            )
+        else:
+            write_workflow_state(
+                running=False,
+                phase="done",
+                progress=100,
+                message="Download & Merge completed.",
+                detail="All import steps have finished.",
+                country=country["name"],
+                error="",
+            )
     except Exception as exc:  # noqa: BLE001
         write_workflow_state(
             running=False,
