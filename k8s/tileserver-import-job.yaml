@@ -92,6 +92,7 @@ spec:
           args:
             - --osm-path=/data/import/planet.osm.pbf
             - --output=/data/map.mbtiles
+            - --profile=/data/config/rollercoaster.yml
             - --force
             - --fetch-wikidata
             # ÄNDRUNG: Wechsel auf Disk-Speicher für Nodes, um den RAM zu schonen
@@ -111,6 +112,9 @@ spec:
               mountPath: /data
             - name: import-data
               mountPath: /data/import
+            - name: planetiler-profile-config
+              mountPath: /data/config
+              readOnly: true
       volumes:
         - name: osm-data
           hostPath:
@@ -120,3 +124,9 @@ spec:
           hostPath:
             path: __OSM_TEMP_DIR__/import
             type: DirectoryOrCreate
+        - name: planetiler-profile-config
+          configMap:
+            name: osm-tileserver-import-profile-config
+            items:
+              - key: rollercoaster.yml
+                path: rollercoaster.yml
