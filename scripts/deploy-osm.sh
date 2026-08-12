@@ -223,6 +223,7 @@ for manifest in \
   photon.yaml \
   photon-import-job.yaml \
   status.yaml \
+  status-deployment.yaml \
   status-config.yaml \
   nominatim-import-config.yaml \
   nominatim-import-job.yaml \
@@ -291,7 +292,7 @@ if [ -f "${REPO_ROOT}/k8s/style.json" ]; then
     --dry-run=client -o yaml | kubectl apply -f -
 fi
 
-for manifest in tileserver.yaml nominatim.yaml nominatim-postgres-tuning-config.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml photon-config.yaml photon.yaml status-config.yaml status.yaml nominatim-import-config.yaml tileserver-import-config.yaml tileserver-import-profile-config.yaml import-orchestrator.yaml web.yaml style-editor.yaml; do
+for manifest in tileserver.yaml nominatim.yaml nominatim-postgres-tuning-config.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml photon-config.yaml photon.yaml status-config.yaml status.yaml status-deployment.yaml nominatim-import-config.yaml tileserver-import-config.yaml tileserver-import-profile-config.yaml import-orchestrator.yaml web.yaml style-editor.yaml; do
   echo ">>> Applying ${manifest}"
   kubectl apply -f "${BASE_DIR}/manifests/${manifest}"
 done
