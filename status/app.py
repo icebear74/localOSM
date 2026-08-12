@@ -1128,7 +1128,7 @@ INDEX_HTML = """<!doctype html>
     document.getElementById('check-updates-btn').disabled = running;
     ['tileserver', 'nominatim', 'valhalla', 'photon'].forEach(function(step) {
       var stepBtn = document.getElementById('build-step-' + step + '-btn');
-      if (stepBtn) stepBtn.disabled = running && activeStep === step;
+      if (stepBtn) stepBtn.disabled = running;
     });
     document.querySelectorAll('.remove-country-btn').forEach(function(btn) {
       btn.disabled = running;
@@ -2420,11 +2420,14 @@ def import_request_signature(payload):
     ]
     normalized_countries.sort(key=lambda item: (item["slug"], item["url"], item["name"]))
     force_slugs = sorted(str(slug) for slug in (payload.get("force_slugs") or []))
+    merge_requested = payload.get("merge_requested")
+    if merge_requested is None:
+        merge_requested = True
     return json.dumps(
         {
             "steps": [str(step) for step in steps],
             "auto_promote": bool(payload.get("auto_promote", True)),
-            "merge_requested": bool(payload.get("merge_requested", True)),
+            "merge_requested": bool(merge_requested),
             "countries": normalized_countries,
             "force_slugs": force_slugs,
         },
@@ -2911,6 +2914,8 @@ def start_queue_workflow(payload):
 
 
 def start_build_workflow(auto_promote=True):
+    if not WORKFLOW_LOCK.acquire(blocking=False):
+        raise RuntimeError("Another country library workflow is already running.")
     thread = threading.Thread(
         target=run_build_workflow, kwargs={"auto_promote": auto_promote}, daemon=True
     )
@@ -2926,6 +2931,8 @@ def start_build_workflow(auto_promote=True):
 def start_step_build_workflow(step):
     if step not in BUILD_STEPS:
         raise ValueError(f"Unknown build step '{step}'.")
+    if not WORKFLOW_LOCK.acquire(blocking=False):
+        raise RuntimeError("Another country library workflow is already running.")
     country = {"name": f"Build: {step}", "slug": f"build-{step}", "url": ""}
     thread = threading.Thread(
         target=run_build_workflow,
@@ -2946,6 +2953,8 @@ def start_step_build_workflow(step):
 def start_download_merge_workflow(payload=None):
     payload = payload or {}
     download_only = bool(payload.get("download_only", False))
+    if not WORKFLOW_LOCK.acquire(blocking=False):
+        raise RuntimeError("Another country library workflow is already running.")
     thread = threading.Thread(
         target=run_download_merge_workflow,
         kwargs={"auto_promote": False, "download_only": download_only},

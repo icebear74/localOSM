@@ -2492,7 +2492,7 @@ data:
             {
                 "steps": [str(step) for step in steps],
                 "auto_promote": bool(payload.get("auto_promote", True)),
-                "merge_requested": bool(payload.get("merge_requested", True)),
+                "merge_requested": bool(payload.get("merge_requested") if "merge_requested" in payload else True),
                 "countries": normalized_countries,
                 "force_slugs": force_slugs,
             },

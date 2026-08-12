@@ -782,15 +782,19 @@ run_parallel_step_group() {
     esac
   done
 
-  for pid in "${pids[@]}"; do
+  for index in "${!pids[@]}"; do
+    pid="${pids[$index]}"
     wait "${pid}"
     child_rc=$?
     step_name="${launched_steps[$index]}"
     if [ "${child_rc}" -eq 2 ]; then
       log "Abort signal received while running ${step_name}; stopping the remaining parallel import steps."
-      for (( index2 = index + 1; index2 < ${#pids[@]}; index2++ )); do
-        kill "${pids[$index2]}" 2>/dev/null || true
-        wait "${pids[$index2]}" 2>/dev/null || true
+      for other_index in "${!pids[@]}"; do
+        if [ "${other_index}" = "${index}" ]; then
+          continue
+        fi
+        kill "${pids[$other_index]}" 2>/dev/null || true
+        wait "${pids[$other_index]}" 2>/dev/null || true
       done
       overall_rc=2
       break
@@ -801,7 +805,6 @@ run_parallel_step_group() {
     if [ "${child_rc}" -eq 0 ]; then
       PARALLEL_SUCCESSFUL_STEPS+=("${step_name}")
     fi
-    index=$((index + 1))
   done
 
   return "${overall_rc}"
