@@ -756,15 +756,20 @@ run_parallel_step_group() {
     case "${step}" in
       tileserver)
         run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${TEMP_DIR}/tileserver/staging" "tileserver-gl" "${AUTO_PROMOTE}" &
+        pids+=("$!")
         ;;
       nominatim)
         run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${TEMP_DIR}/nominatim/staging" "nominatim" "${AUTO_PROMOTE}" &
+        pids+=("$!")
         ;;
       valhalla)
         run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${TEMP_DIR}/valhalla/staging" "valhalla" "${AUTO_PROMOTE}" &
+        pids+=("$!")
+        ;;
+      *)
+        log "Ignoring unsupported step ${step} requested for parallel execution."
         ;;
     esac
-    pids+=("$!")
   done
 
   for pid in "${pids[@]}"; do

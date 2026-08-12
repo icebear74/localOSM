@@ -2664,11 +2664,11 @@ def wait_for_import_workflow_completion(timeout_seconds=IMPORT_WORKFLOW_COMPLETI
     while True:
         if not workflow_import_is_active():
             return
-        if time.time() + 2 >= deadline:
+        time.sleep(2)
+        if time.time() >= deadline:
             raise RuntimeError(
                 f"Timed out waiting for the import orchestrator to finish after {timeout_seconds} seconds."
             )
-        time.sleep(2)
 
 
 def finish_workflow_thread():
