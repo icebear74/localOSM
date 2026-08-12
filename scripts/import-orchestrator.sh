@@ -773,7 +773,8 @@ run_parallel_step_group() {
   done
 
   for pid in "${pids[@]}"; do
-    wait "${pid}" || child_rc=$?
+    wait "${pid}"
+    child_rc=$?
     if [ "${child_rc}" -gt "${overall_rc}" ]; then
       overall_rc="${child_rc}"
     fi
