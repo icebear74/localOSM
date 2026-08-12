@@ -3347,11 +3347,16 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              set -e
-              apt-get update
-              apt-get install -y --no-install-recommends osmium-tool
-              rm -rf /var/lib/apt/lists/*
-              command -v osmium >/dev/null 2>&1
+              set -eu
+              export DEBIAN_FRONTEND=noninteractive
+              if command -v apt-get >/dev/null 2>&1; then
+                apt-get update >/tmp/apt-update.log 2>&1 || true
+                apt-get install -y --no-install-recommends osmium-tool >/tmp/apt-install.log 2>&1 || true
+                rm -rf /var/lib/apt/lists/* 2>/dev/null || true
+              fi
+              if ! command -v osmium >/dev/null 2>&1; then
+                echo "Warning: osmium-tool is not available; import workflows requiring osmium will return an error until it is installed." >&2
+              fi
               cp /config/app.py /tmp/app.py
               python /tmp/app.py
           env:
