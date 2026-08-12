@@ -567,7 +567,19 @@ if 'steps' in request:
     steps = request.get('steps') or []
 else:
     steps = ['tileserver', 'nominatim', 'valhalla', 'photon']
-print(' '.join(steps))
+normalized = []
+seen = set()
+for raw in steps:
+    step = str(raw).strip().lower()
+    if not step:
+        continue
+    if step not in {'tileserver', 'nominatim', 'valhalla', 'photon'}:
+        raise SystemExit(f'Unsupported step: {step}')
+    if step in seen:
+        raise SystemExit(f'Duplicate step requested: {step}')
+    seen.add(step)
+    normalized.append(step)
+print(' '.join(normalized))
 PY
 }
 
@@ -733,6 +745,38 @@ run_step() {
   write_state false "${service}" 100 "${service} import promoted." "${service} is serving the newly imported data."
 }
 
+run_parallel_step_group() {
+  local -a steps=("$@")
+  local -a pids=()
+  local step
+  local overall_rc=0
+  local child_rc=0
+
+  for step in "${steps[@]}"; do
+    case "${step}" in
+      tileserver)
+        run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${TEMP_DIR}/tileserver/staging" "tileserver-gl" "${AUTO_PROMOTE}" &
+        ;;
+      nominatim)
+        run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${TEMP_DIR}/nominatim/staging" "nominatim" "${AUTO_PROMOTE}" &
+        ;;
+      valhalla)
+        run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${TEMP_DIR}/valhalla/staging" "valhalla" "${AUTO_PROMOTE}" &
+        ;;
+    esac
+    pids+=("$!")
+  done
+
+  for pid in "${pids[@]}"; do
+    wait "${pid}" || child_rc=$?
+    if [ "${child_rc}" -gt "${overall_rc}" ]; then
+      overall_rc="${child_rc}"
+    fi
+  done
+
+  return "${overall_rc}"
+}
+
 main() {
   log "Import orchestrator started."
   write_state false "idle" 0 "Import-Orchestrator bereit." "Warte auf einen Import-Request."
@@ -752,12 +796,19 @@ main() {
     fi
 
     log "Detected import request at ${REQUEST_FILE}."
-    write_state true "queued" 5 "Import request received." "Running TileServer, Nominatim, Valhalla and Photon sequentially."
+    write_state true "queued" 5 "Import request received." "Running requested import steps concurrently where possible."
     # Reconcile the completed-steps tracker with this request so that a
-    # container/pod restart in the middle of the sequential pipeline resumes
-    # at the next pending step instead of redoing already-promoted ones.
+    # container/pod restart in the middle of the workflow resumes at the next
+    # pending step instead of redoing already-promoted ones.
     sync_completed_steps
-    REQUESTED_STEPS="$(request_steps)"
+    if ! REQUESTED_STEPS="$(request_steps)"; then
+      log "Invalid import request steps; archiving request and scratch data to prevent retry loop."
+      archive_file "${REQUEST_FILE}" "failed"
+      cleanup_import_scratch
+      clear_abort_flag
+      clear_completed_steps
+      continue
+    fi
     AUTO_PROMOTE="$(request_auto_promote)"
     log "Requested steps: ${REQUESTED_STEPS} (auto_promote=${AUTO_PROMOTE})."
 
@@ -779,63 +830,41 @@ main() {
       fi
     fi
 
-    local src=0
+    local parallel_rc=0
+    local -a parallel_steps=()
+
     if ! step_requested "tileserver"; then
       log "TileServer step not requested for this import request; skipping."
     elif step_already_done "tileserver"; then
       log "TileServer already promoted for this request (resumed after restart); skipping re-import."
     else
-      run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${TEMP_DIR}/tileserver/staging" "tileserver-gl" "${AUTO_PROMOTE}" || src=$?
-      if [ "${src}" -ne 0 ]; then
-        if [ "${src}" -eq 2 ]; then
-          log "Import aborted by user during TileServer import; archiving import request and scratch data for recovery."
-          archive_file "${REQUEST_FILE}" "aborted"
-        else
-          log "TileServer import failed; archiving import request and scratch data to prevent retry loop while preserving data."
-          archive_file "${REQUEST_FILE}" "failed"
-        fi
-        cleanup_import_scratch
-        clear_abort_flag
-        clear_completed_steps
-        continue
-      fi
-      mark_step_done "tileserver"
+      parallel_steps+=("tileserver")
     fi
-    local nrc=0
+
     if ! step_requested "nominatim"; then
       log "Nominatim step not requested for this import request; skipping."
     elif step_already_done "nominatim"; then
       log "Nominatim already promoted for this request (resumed after restart); skipping re-import."
     else
-      run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${TEMP_DIR}/nominatim/staging" "nominatim" "${AUTO_PROMOTE}" || nrc=$?
-      if [ "${nrc}" -ne 0 ]; then
-        if [ "${nrc}" -eq 2 ]; then
-          log "Import aborted by user during Nominatim import; archiving import request and scratch data for recovery."
-          archive_file "${REQUEST_FILE}" "aborted"
-        else
-          log "Nominatim import failed; archiving import request and scratch data to prevent retry loop while preserving data."
-          archive_file "${REQUEST_FILE}" "failed"
-        fi
-        cleanup_import_scratch
-        clear_abort_flag
-        clear_completed_steps
-        continue
-      fi
-      mark_step_done "nominatim"
+      parallel_steps+=("nominatim")
     fi
-    local vrc=0
+
     if ! step_requested "valhalla"; then
       log "Valhalla step not requested for this import request; skipping."
     elif step_already_done "valhalla"; then
       log "Valhalla already promoted for this request (resumed after restart); skipping re-import."
     else
-      run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${TEMP_DIR}/valhalla/staging" "valhalla" "${AUTO_PROMOTE}" || vrc=$?
-      if [ "${vrc}" -ne 0 ]; then
-        if [ "${vrc}" -eq 2 ]; then
-          log "Import aborted by user during Valhalla import; archiving import request and scratch data for recovery."
+      parallel_steps+=("valhalla")
+    fi
+
+    if [ "${#parallel_steps[@]}" -gt 0 ]; then
+      run_parallel_step_group "${parallel_steps[@]}" || parallel_rc=$?
+      if [ "${parallel_rc}" -ne 0 ]; then
+        if [ "${parallel_rc}" -eq 2 ]; then
+          log "Import aborted by user during the parallel import step group; archiving import request and scratch data for recovery."
           archive_file "${REQUEST_FILE}" "aborted"
         else
-          log "Valhalla import failed; archiving import request and scratch data to prevent retry loop while preserving data."
+          log "One or more parallel import steps failed; archiving import request and scratch data to prevent retry loop while preserving data."
           archive_file "${REQUEST_FILE}" "failed"
         fi
         cleanup_import_scratch
@@ -843,7 +872,9 @@ main() {
         clear_completed_steps
         continue
       fi
-      mark_step_done "valhalla"
+      for step in "${parallel_steps[@]}"; do
+        mark_step_done "${step}"
+      done
     fi
 
     local prc2=0
@@ -855,7 +886,7 @@ main() {
       # Photon builds its full-text search index directly from the running
       # Nominatim Postgres instance (see the nominatim-postgres Service and
       # k8s/photon-import-job.yaml), so it must run after the nominatim step
-      # above rather than in parallel with it.
+      # group above rather than in parallel with it.
       run_step "photon" "photon-import" "photon-import-job.yaml" "${DATA_DIR}/photon/active" "${TEMP_DIR}/photon/staging" "photon" "${AUTO_PROMOTE}" || prc2=$?
       if [ "${prc2}" -ne 0 ]; then
         if [ "${prc2}" -eq 2 ]; then
