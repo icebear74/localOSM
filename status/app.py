@@ -2930,8 +2930,8 @@ def start_queue_workflow(payload):
 
 
 def start_build_workflow(auto_promote=True):
-    if not WORKFLOW_LOCK.acquire(blocking=False):
-        raise RuntimeError("Another country library workflow is already running.")
+    # Import requests are queued by the orchestrator, so follow-up build requests
+    # should be accepted even while another import workflow is already running.
     thread = threading.Thread(
         target=run_build_workflow, kwargs={"auto_promote": auto_promote}, daemon=True
     )
@@ -2947,8 +2947,6 @@ def start_build_workflow(auto_promote=True):
 def start_step_build_workflow(step):
     if step not in BUILD_STEPS:
         raise ValueError(f"Unknown build step '{step}'.")
-    if not WORKFLOW_LOCK.acquire(blocking=False):
-        raise RuntimeError("Another country library workflow is already running.")
     country = {"name": f"Build: {step}", "slug": f"build-{step}", "url": ""}
     thread = threading.Thread(
         target=run_build_workflow,
@@ -2969,8 +2967,6 @@ def start_step_build_workflow(step):
 def start_download_merge_workflow(payload=None):
     payload = payload or {}
     download_only = bool(payload.get("download_only", False))
-    if not WORKFLOW_LOCK.acquire(blocking=False):
-        raise RuntimeError("Another country library workflow is already running.")
     thread = threading.Thread(
         target=run_download_merge_workflow,
         kwargs={"auto_promote": False, "download_only": download_only},
