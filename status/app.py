@@ -2748,7 +2748,7 @@ def run_build_workflow(country=None, steps=None, auto_promote=True):
             else "Bereits vorhandene, zusammengeführte Kartendaten werden verwendet (kein erneuter Download/Merge)."
         )
         write_workflow_state(
-            running=False,
+            running=True,
             phase="queued",
             progress=50,
             message="Build request handed to the import orchestrator.",
@@ -2842,7 +2842,7 @@ def run_download_merge_workflow(auto_promote=False, download_only=False):
             data_detail = f"All {request['count']} country/countries are already up to date; using cached extracts."
         action_label = "Download only" if download_only else "Download & Merge"
         write_workflow_state(
-            running=False,
+            running=True,
             phase="queued",
             progress=50,
             message=f"{action_label} request handed to the import orchestrator.",
