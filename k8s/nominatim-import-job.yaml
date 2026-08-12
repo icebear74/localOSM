@@ -115,11 +115,11 @@ spec:
       volumes:
         - name: import-data
           hostPath:
-            path: __OSM_TEMP_DIR__/import
+            path: /mnt/OSM/TempDir/import
             type: DirectoryOrCreate
         - name: nominatim-data
           hostPath:
-            path: __OSM_TEMP_DIR__/nominatim/staging
+            path: /mnt/OSM/TempDir/nominatim/staging
             type: DirectoryOrCreate
         - name: nominatim-postgres-tuning
           configMap:
@@ -129,5 +129,5 @@ spec:
                 path: import-tuning.conf
         - name: container-tmp
           hostPath:
-            path: __OSM_TEMP_DIR__/tmp
+            path: /mnt/OSM/TempDir/tmp
             type: DirectoryOrCreate

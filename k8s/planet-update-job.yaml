@@ -1,0 +1,182 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: planet-update
+  namespace: osm
+  labels:
+    app: planet-update
+    osm-job-type: planet-update
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: planet-update
+        osm-job-type: planet-update
+    spec:
+      restartPolicy: Never
+      # Init-container: Duplikatschutz – verhindert Start wenn ein planet-update-Job bereits läuft
+      initContainers:
+        - name: preflight-dedup
+          image: bitnami/kubectl:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              echo "=== Planet-Update: Duplikatschutz-Prüfung ==="
+              # Zähle aktive (nicht-abgeschlossene) planet-update Jobs
+              ACTIVE=$(kubectl get pods -n osm -l osm-job-type=planet-update \
+                --field-selector=status.phase=Running \
+                --no-headers 2>/dev/null | wc -l | tr -d ' ')
+              echo "Aktive planet-update Pods: ${ACTIVE}"
+              # Dieser Init-Container selbst läuft bereits, also müssen >= 1 weitere aktiv sein
+              if [ "${ACTIVE}" -gt 1 ]; then
+                echo "ERROR: Es läuft bereits ein planet-update Job. Abbruch." >&2
+                exit 1
+              fi
+              echo "Kein doppelter planet-update Job gefunden. Weiter."
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+      containers:
+        - name: planet-update
+          # Das Image wird aus auto-update/Dockerfile gebaut.
+          # Ersetze den Image-Namen mit dem tatsächlichen Registry-Pfad.
+          image: localosm/planet-update:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: WORK_DIR
+              value: /work
+            - name: CONF_DIR
+              value: /conf
+            - name: STATUS_DIR
+              value: /status
+            - name: PLANET_DOWNLOAD_URL
+              value: https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf
+          resources:
+            requests:
+              memory: "8Gi"
+              cpu: "4"
+            limits:
+              memory: "32Gi"
+              cpu: "16"
+          volumeMounts:
+            - name: planet-work
+              mountPath: /work
+            - name: geojson-config
+              mountPath: /conf/mein_europa.geojson
+              subPath: mein_europa.geojson
+              readOnly: true
+            - name: geojson-config
+              mountPath: /conf/japan.geojson
+              subPath: japan.geojson
+              readOnly: true
+            - name: geojson-config
+              mountPath: /conf/privat.osm
+              subPath: privat.osm
+              readOnly: true
+            - name: filter-config
+              mountPath: /conf/welt_filter.txt
+              subPath: welt_filter.txt
+              readOnly: true
+            - name: status
+              mountPath: /status
+      volumes:
+        - name: planet-work
+          hostPath:
+            path: /mnt/OSM/planet
+            type: DirectoryOrCreate
+        - name: geojson-config
+          configMap:
+            name: osm-auto-update-geojson-config
+        - name: filter-config
+          configMap:
+            name: osm-auto-update-filter-config
+        - name: status
+          hostPath:
+            path: /mnt/OSM/status
+            type: DirectoryOrCreate
+---
+# Optional: CronJob für wöchentliches automatisches Planet-Update (z.B. jeden Montag um 02:00 UTC)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: planet-update-weekly
+  namespace: osm
+spec:
+  schedule: "0 2 * * 1"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app: planet-update
+            osm-job-type: planet-update
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: planet-update
+              image: localosm/planet-update:latest
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: WORK_DIR
+                  value: /work
+                - name: CONF_DIR
+                  value: /conf
+                - name: STATUS_DIR
+                  value: /status
+                - name: PLANET_DOWNLOAD_URL
+                  value: https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf
+              resources:
+                requests:
+                  memory: "8Gi"
+                  cpu: "4"
+                limits:
+                  memory: "32Gi"
+                  cpu: "16"
+              volumeMounts:
+                - name: planet-work
+                  mountPath: /work
+                - name: geojson-config
+                  mountPath: /conf/mein_europa.geojson
+                  subPath: mein_europa.geojson
+                  readOnly: true
+                - name: geojson-config
+                  mountPath: /conf/japan.geojson
+                  subPath: japan.geojson
+                  readOnly: true
+                - name: geojson-config
+                  mountPath: /conf/privat.osm
+                  subPath: privat.osm
+                  readOnly: true
+                - name: filter-config
+                  mountPath: /conf/welt_filter.txt
+                  subPath: welt_filter.txt
+                  readOnly: true
+                - name: status
+                  mountPath: /status
+          volumes:
+            - name: planet-work
+              hostPath:
+                path: /mnt/OSM/planet
+                type: DirectoryOrCreate
+            - name: geojson-config
+              configMap:
+                name: osm-auto-update-geojson-config
+            - name: filter-config
+              configMap:
+                name: osm-auto-update-filter-config
+            - name: status
+              hostPath:
+                path: /mnt/OSM/status
+                type: DirectoryOrCreate

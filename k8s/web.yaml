@@ -21,6 +21,8 @@ data:
     PHOTON_URL = os.environ.get("PHOTON_URL", "http://photon.osm.svc.cluster.local:2322")
     TILESERVER_URL = os.environ.get("TILESERVER_URL", "http://tileserver-gl.osm.svc.cluster.local")
     STATUS_URL = os.environ.get("STATUS_URL", "")
+    PLANET_UPDATE_REQUEST_FILE = os.environ.get("PLANET_UPDATE_REQUEST_FILE", "/state/planet-update-request.flag")
+    PLANET_UPDATE_STATUS_FILE = os.environ.get("PLANET_UPDATE_STATUS_FILE", "/status/planet-update.json")
 
     INDEX_HTML = """<!doctype html>
     <html lang="de">
@@ -52,6 +54,10 @@ data:
         #result-box .ok { color: #1a7a1a; font-weight: 600; }
         #result-box .err { color: #c00; font-weight: 600; }
         .hint { font-size: 0.75rem; color: #888; }
+        #planet-update-box { background: #fff; border: 1px solid #ddd; border-radius: 4px; padding: 0.75rem; font-size: 0.82rem; }
+        #planet-update-box .pu-status { font-size: 0.78rem; color: #555; margin-top: 0.4rem; }
+        #planet-update-box .ok { color: #1a7a1a; font-weight: 600; }
+        #planet-update-box .err { color: #c00; font-weight: 600; }
         .section-title { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: #777; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
         .geocode-row { display: flex; gap: 4px; }
         .geocode-row input { flex: 1; }
@@ -137,6 +143,13 @@ data:
         <button class="btn btn-secondary" onclick="doDistance()">&#8596; Nur Distanz</button>
         <p class="hint">Tipp: Klicke auf die Karte, um Start- (1. Klick) und Zielpunkt (2. Klick) zu setzen.</p>
         <div id="result-box">Noch keine Anfrage.</div>
+
+        <div class="section-title">Planet-Update</div>
+        <div id="planet-update-box">
+          <div id="pu-status-line" class="pu-status">Lade Status...</div>
+          <div id="pu-mtime-line" class="pu-status"></div>
+          <button class="btn btn-secondary" style="margin-top:0.5rem" onclick="triggerPlanetUpdate()">&#127758; Planet-Update jetzt starten</button>
+        </div>
       </div>
       <div id="map-container" style="flex:1;position:relative;">
         <div id="map"></div>
@@ -155,6 +168,43 @@ data:
       });
     }
     updateLinks();
+
+    // ---- Planet-Update Panel ----
+    function loadPlanetUpdateStatus() {
+      fetch('/api/planet-update/status')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          var sl = document.getElementById('pu-status-line');
+          var ml = document.getElementById('pu-mtime-line');
+          if (d.error) { sl.innerHTML = '<span class=\'err\'>Fehler: ' + d.error + '</span>'; return; }
+          if (d.running) {
+            sl.innerHTML = '&#9203; Läuft gerade &hellip; (gestartet: ' + (d.last_run_at || '?') + ')';
+          } else if (d.last_success_at) {
+            sl.innerHTML = '<span class=\'ok\'>&#10003; Letzter Erfolg:</span> ' + d.last_success_at;
+          } else {
+            sl.innerHTML = 'Noch nie ausgeführt.';
+          }
+          if (d.last_error) {
+            sl.innerHTML += '<br><span class=\'err\'>Fehler: ' + d.last_error + '</span>';
+          }
+          ml.textContent = d.output_file_mtime ? 'Datenstand: ' + d.output_file_mtime : '';
+        })
+        .catch(function() {
+          document.getElementById('pu-status-line').innerHTML = '<span class=\'err\'>Status nicht verfügbar.</span>';
+        });
+    }
+    function triggerPlanetUpdate() {
+      fetch('/api/planet-update/trigger', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'})
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (d.error) { alert('Fehler: ' + d.error); return; }
+          alert(d.message || 'Planet-Update angefordert.');
+          setTimeout(loadPlanetUpdateStatus, 1500);
+        })
+        .catch(function() { alert('Planet-Update konnte nicht angefordert werden.'); });
+    }
+    loadPlanetUpdateStatus();
+    setInterval(loadPlanetUpdateStatus, 30000);
 
     var map = new maplibregl.Map({
       container: 'map',
@@ -1012,6 +1062,17 @@ data:
                     self._send_json({"error": self._friendly_error(exc, "Nominatim (Lookup)")}, 502)
                 return
 
+            if self.path == "/api/planet-update/status":
+                try:
+                    with open(PLANET_UPDATE_STATUS_FILE, "r", encoding="utf-8") as fh:
+                        data = json.load(fh)
+                    self._send_json(data)
+                except FileNotFoundError:
+                    self._send_json({"running": False, "last_success_at": "", "last_error": "", "output_file_mtime": ""})
+                except Exception as exc:
+                    self._send_json({"error": str(exc)}, 500)
+                return
+
             self._send_json({"error": "not found"}, 404)
 
         def do_POST(self):
@@ -1029,6 +1090,28 @@ data:
 
             if self.path == "/api/distance":
                 self._forward_distance(payload)
+                return
+
+            if self.path == "/api/planet-update/trigger":
+                try:
+                    # Check if a job is already running
+                    try:
+                        with open(PLANET_UPDATE_STATUS_FILE, "r", encoding="utf-8") as fh:
+                            status_data = json.load(fh)
+                        if status_data.get("running"):
+                            self._send_json({"error": "Planet-Update läuft bereits. Bitte warten.", "running": True}, 409)
+                            return
+                    except FileNotFoundError:
+                        pass
+                    # Write the trigger flag file
+                    import os as _os
+                    _os.makedirs(_os.path.dirname(PLANET_UPDATE_REQUEST_FILE), exist_ok=True)
+                    with open(PLANET_UPDATE_REQUEST_FILE, "w", encoding="utf-8") as fh:
+                        import datetime as _dt
+                        fh.write(_dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"))
+                    self._send_json({"message": "Planet-Update angefordert. Der Job wird in Kürze gestartet."})
+                except Exception as exc:
+                    self._send_json({"error": str(exc)}, 500)
                 return
 
             self._send_json({"error": "not found"}, 404)
@@ -1190,6 +1273,10 @@ spec:
               value: "http://tileserver-gl.osm.svc.cluster.local"
             - name: STATUS_URL
               value: ""
+            - name: PLANET_UPDATE_REQUEST_FILE
+              value: "/state/planet-update-request.flag"
+            - name: PLANET_UPDATE_STATUS_FILE
+              value: "/status/planet-update.json"
           ports:
             - containerPort: 8080
           volumeMounts:
@@ -1197,6 +1284,10 @@ spec:
               mountPath: /config
             - name: web-static
               mountPath: /data/static
+            - name: state
+              mountPath: /state
+            - name: planet-status
+              mountPath: /status
       volumes:
         - name: app-code
           configMap:
@@ -1204,6 +1295,14 @@ spec:
         - name: web-static
           hostPath:
             path: /mnt/OSM/web-static
+            type: DirectoryOrCreate
+        - name: state
+          hostPath:
+            path: /mnt/OSM/status
+            type: DirectoryOrCreate
+        - name: planet-status
+          hostPath:
+            path: /mnt/OSM/status
             type: DirectoryOrCreate
 ---
 apiVersion: v1
