@@ -69,8 +69,30 @@ spec:
               # Nach erfolgreichem Import: Warte auf Background-PostgreSQL-Prozesse,
               # erzwinge einen CHECKPOINT und stelle sicher, dass alle WAL-Einträge
               # auf die Festplatte geschrieben wurden, bevor der Marker gesetzt wird.
+              #
+              # The upstream init.sh stops PostgreSQL as part of its cleanup
+              # (sudo service postgresql stop), so we must restart it here before
+              # issuing the CHECKPOINT, otherwise psql fails with
+              # "No such file or directory" on the socket.
               echo "Nominatim-Import abgeschlossen. Warte 10 Sekunden auf Background-PostgreSQL-Prozesse..."
               sleep 10
+              echo "Stelle sicher, dass PostgreSQL läuft, bevor CHECKPOINT ausgeführt wird..."
+              if ! pg_isready -q 2>/dev/null; then
+                echo "PostgreSQL ist nicht erreichbar – starte Service neu..."
+                sudo service postgresql start
+                # Wait until the socket is available (up to 30 s).
+                _pg_wait=0
+                while [ "${_pg_wait}" -lt 30 ]; do
+                  pg_isready -q 2>/dev/null && break
+                  sleep 1
+                  _pg_wait=$(( _pg_wait + 1 ))
+                done
+                if ! pg_isready -q 2>/dev/null; then
+                  echo "ERROR: PostgreSQL konnte nach dem Neustart nicht erreicht werden; CHECKPOINT wird übersprungen." >&2
+                  exit 1
+                fi
+                echo "PostgreSQL erfolgreich neugestartet."
+              fi
               echo "Erzwinge PostgreSQL CHECKPOINT, um alle Daten auf Disk zu schreiben..."
               su -c "psql -c 'CHECKPOINT;'" postgres
               echo "Warte 5 Sekunden auf WAL-Flush..."

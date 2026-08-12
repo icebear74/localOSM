@@ -27,6 +27,7 @@ mkdir -p "${STATE_DIR}"
 # Removes everything *inside* a scratch directory on the (user-provided,
 # fast/SSD-backed) temp-dir mount without ever removing the directory (mount
 # point) itself, so temporary import data never lingers once a step is done.
+# Only called on the SUCCESSFUL path so no usable staged data is ever deleted.
 cleanup_temp_dir() {
   local dir="$1"
   [ -d "${dir}" ] || return 0
@@ -39,11 +40,49 @@ cleanup_temp_dir() {
 # Build/step-build can reuse it without re-downloading/re-merging (see
 # prepare_import_data's "reusing existing planet.osm.pbf" check). Only stray
 # intermediate merge artifacts left behind by a crashed/aborted merge are
-# removed here.
+# removed here.  These *.tmp / *.dedup files represent incomplete in-progress
+# work (not usable staged data) and are safe to remove on both success and
+# failure paths.
 cleanup_import_scratch() {
   local dir="${TEMP_DIR}/import"
   [ -d "${dir}" ] || return 0
   find "${dir}" -mindepth 1 -maxdepth 1 \( -name '*.tmp' -o -name '*.dedup' \) -exec rm -rf {} + 2>/dev/null || true
+}
+
+# Renames a directory to <dir>.<suffix>-<timestamp> to preserve its contents
+# for later recovery without blocking future runs from reusing the same path.
+# A fresh empty directory is created at <dir> afterwards so the original path
+# is always available as a valid empty scratch area.
+archive_dir() {
+  local dir="$1"
+  local suffix="$2"
+  [ -d "${dir}" ] || return 0
+  local ts
+  ts="$(date '+%Y%m%dT%H%M%S')"
+  local archive="${dir}.${suffix}-${ts}"
+  if mv "${dir}" "${archive}" 2>/dev/null; then
+    log "Archived ${dir} → ${archive}"
+  else
+    log "Warning: could not archive ${dir}; leaving in place."
+  fi
+  mkdir -p "${dir}" 2>/dev/null || true
+}
+
+# Renames a file to <file>.<suffix>-<timestamp> so it is preserved but no
+# longer picked up by the orchestrator's request-detection loop.
+archive_file() {
+  local file="$1"
+  local suffix="$2"
+  [ -f "${file}" ] || return 0
+  local ts
+  ts="$(date '+%Y%m%dT%H%M%S')"
+  local archive="${file}.${suffix}-${ts}"
+  if mv "${file}" "${archive}" 2>/dev/null; then
+    log "Archived ${file} → ${archive}"
+  else
+    log "Warning: could not archive ${file}; removing to avoid retry loop."
+    rm -f "${file}" 2>/dev/null || true
+  fi
 }
 
 log() {
@@ -641,11 +680,11 @@ run_step() {
   wait_for_job "${job_name}" || rc=$?
   if [ "${rc}" -eq 2 ]; then
     write_state false "aborted" 0 "${service} import aborted." "Import wurde vom Benutzer abgebrochen."
-    cleanup_temp_dir "$(dirname "${staging_dir}")"
+    archive_dir "$(dirname "${staging_dir}")" "aborted"
     return 2
   elif [ "${rc}" -ne 0 ]; then
     write_state false "failed" 0 "${service} import failed." "See job logs for details."
-    cleanup_temp_dir "$(dirname "${staging_dir}")"
+    archive_dir "$(dirname "${staging_dir}")" "failed"
     return 1
   fi
   if [ "${auto_promote}" != "true" ]; then
@@ -658,11 +697,11 @@ run_step() {
   swap_stage "${service}" "${active_dir}" "${staging_dir}" "${deployment}" || prc=$?
   if [ "${prc}" -eq 2 ]; then
     write_state false "aborted" 0 "${service} promotion aborted." "Import wurde vom Benutzer abgebrochen."
-    cleanup_temp_dir "$(dirname "${staging_dir}")"
+    archive_dir "$(dirname "${staging_dir}")" "aborted"
     return 2
   elif [ "${prc}" -ne 0 ]; then
     write_state false "failed" 0 "${service} promotion failed." "Rollout of deployment/${deployment} did not become ready."
-    cleanup_temp_dir "$(dirname "${staging_dir}")"
+    archive_dir "$(dirname "${staging_dir}")" "failed"
     return 1
   fi
   write_state false "${service}" 100 "${service} import promoted." "${service} is serving the newly imported data."
@@ -697,12 +736,13 @@ main() {
       prepare_import_data || prc=$?
       if [ "${prc}" -ne 0 ]; then
         if [ "${prc}" -eq 2 ]; then
-          log "Import aborted by user during preparation; discarding import request."
+          log "Import aborted by user during preparation; archiving import request and scratch data for recovery."
+          archive_file "${REQUEST_FILE}" "aborted"
         else
-          log "Import preparation failed; discarding import request to avoid retrying the same failing request in a loop."
+          log "Import preparation failed; archiving import request and scratch data to prevent retry loop while preserving data."
+          archive_file "${REQUEST_FILE}" "failed"
         fi
         cleanup_import_scratch
-        rm -f "${REQUEST_FILE}"
         clear_abort_flag
         clear_completed_steps
         continue
@@ -718,12 +758,13 @@ main() {
       run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${TEMP_DIR}/tileserver/staging" "tileserver-gl" "${AUTO_PROMOTE}" || src=$?
       if [ "${src}" -ne 0 ]; then
         if [ "${src}" -eq 2 ]; then
-          log "Import aborted by user during TileServer import; discarding import request."
+          log "Import aborted by user during TileServer import; archiving import request and scratch data for recovery."
+          archive_file "${REQUEST_FILE}" "aborted"
         else
-          log "TileServer import failed; discarding import request to avoid retrying the same failing request in a loop."
+          log "TileServer import failed; archiving import request and scratch data to prevent retry loop while preserving data."
+          archive_file "${REQUEST_FILE}" "failed"
         fi
         cleanup_import_scratch
-        rm -f "${REQUEST_FILE}"
         clear_abort_flag
         clear_completed_steps
         continue
@@ -739,12 +780,13 @@ main() {
       run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${TEMP_DIR}/nominatim/staging" "nominatim" "${AUTO_PROMOTE}" || nrc=$?
       if [ "${nrc}" -ne 0 ]; then
         if [ "${nrc}" -eq 2 ]; then
-          log "Import aborted by user during Nominatim import; discarding import request."
+          log "Import aborted by user during Nominatim import; archiving import request and scratch data for recovery."
+          archive_file "${REQUEST_FILE}" "aborted"
         else
-          log "Nominatim import failed; discarding import request to avoid retrying the same failing request in a loop."
+          log "Nominatim import failed; archiving import request and scratch data to prevent retry loop while preserving data."
+          archive_file "${REQUEST_FILE}" "failed"
         fi
         cleanup_import_scratch
-        rm -f "${REQUEST_FILE}"
         clear_abort_flag
         clear_completed_steps
         continue
@@ -760,12 +802,13 @@ main() {
       run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${TEMP_DIR}/valhalla/staging" "valhalla" "${AUTO_PROMOTE}" || vrc=$?
       if [ "${vrc}" -ne 0 ]; then
         if [ "${vrc}" -eq 2 ]; then
-          log "Import aborted by user during Valhalla import; discarding import request."
+          log "Import aborted by user during Valhalla import; archiving import request and scratch data for recovery."
+          archive_file "${REQUEST_FILE}" "aborted"
         else
-          log "Valhalla import failed; discarding import request to avoid retrying the same failing request in a loop."
+          log "Valhalla import failed; archiving import request and scratch data to prevent retry loop while preserving data."
+          archive_file "${REQUEST_FILE}" "failed"
         fi
         cleanup_import_scratch
-        rm -f "${REQUEST_FILE}"
         clear_abort_flag
         clear_completed_steps
         continue
@@ -786,12 +829,13 @@ main() {
       run_step "photon" "photon-import" "photon-import-job.yaml" "${DATA_DIR}/photon/active" "${TEMP_DIR}/photon/staging" "photon" "${AUTO_PROMOTE}" || prc2=$?
       if [ "${prc2}" -ne 0 ]; then
         if [ "${prc2}" -eq 2 ]; then
-          log "Import aborted by user during Photon import; discarding import request."
+          log "Import aborted by user during Photon import; archiving import request and scratch data for recovery."
+          archive_file "${REQUEST_FILE}" "aborted"
         else
-          log "Photon import failed; discarding import request to avoid retrying the same failing request in a loop."
+          log "Photon import failed; archiving import request and scratch data to prevent retry loop while preserving data."
+          archive_file "${REQUEST_FILE}" "failed"
         fi
         cleanup_import_scratch
-        rm -f "${REQUEST_FILE}"
         clear_abort_flag
         clear_completed_steps
         continue
