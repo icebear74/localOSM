@@ -1093,6 +1093,7 @@ INDEX_HTML = """<!doctype html>
     var running = !!(workflow && workflow.running);
     WORKFLOW_RUNNING = running;
     var phase = workflow && workflow.phase ? workflow.phase : 'idle';
+    var activeStep = ['tileserver', 'nominatim', 'valhalla', 'photon'].indexOf(phase) !== -1 ? phase : null;
     var pct = workflow && typeof workflow.progress === 'number' ? workflow.progress : 0;
     var statusClass = 'status-ready';
     var statusText = 'bereit';
@@ -1127,7 +1128,7 @@ INDEX_HTML = """<!doctype html>
     document.getElementById('check-updates-btn').disabled = running;
     ['tileserver', 'nominatim', 'valhalla', 'photon'].forEach(function(step) {
       var stepBtn = document.getElementById('build-step-' + step + '-btn');
-      if (stepBtn) stepBtn.disabled = running;
+      if (stepBtn) stepBtn.disabled = running && activeStep === step;
     });
     document.querySelectorAll('.remove-country-btn').forEach(function(btn) {
       btn.disabled = running;
