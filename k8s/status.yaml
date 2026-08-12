@@ -2078,8 +2078,6 @@ data:
 
         if os.path.exists(IMPORT_REQUEST_FILE):
             os.remove(IMPORT_REQUEST_FILE)
-        if os.path.exists(IMPORT_REQUEST_QUEUE_FILE):
-            save_json(IMPORT_REQUEST_QUEUE_FILE, [])
 
         for job_name in IMPORT_JOB_NAMES:
             try:
@@ -3344,11 +3342,16 @@ spec:
       serviceAccountName: status-manager
       containers:
         - name: status
-          image: python:3.12-alpine
+          image: python:3.12-slim
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
           args:
             - |
+              set -e
+              apt-get update
+              apt-get install -y --no-install-recommends osmium-tool
+              rm -rf /var/lib/apt/lists/*
+              command -v osmium >/dev/null 2>&1
               cp /config/app.py /tmp/app.py
               python /tmp/app.py
           env:

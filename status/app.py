@@ -2010,8 +2010,6 @@ def abort_import_workflow():
 
     if os.path.exists(IMPORT_REQUEST_FILE):
         os.remove(IMPORT_REQUEST_FILE)
-    if os.path.exists(IMPORT_REQUEST_QUEUE_FILE):
-        save_json(IMPORT_REQUEST_QUEUE_FILE, [])
 
     for job_name in IMPORT_JOB_NAMES:
         try:

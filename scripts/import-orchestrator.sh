@@ -18,6 +18,7 @@ LAST_CONFIG_CHECK=0
 CONFIG_CHECK_INTERVAL=60
 MV_SUPPORTS_T=false
 POD_TERMINATION_TIMEOUT_SECONDS=180
+PARALLEL_SUCCESSFUL_STEPS=()
 
 if mv --help 2>&1 | grep -q -- ' -T'; then
   MV_SUPPORTS_T=true
@@ -748,23 +749,32 @@ run_step() {
 run_parallel_step_group() {
   local -a steps=("$@")
   local -a pids=()
+  local -a launched_steps=()
   local step
   local overall_rc=0
   local child_rc=0
+  local index=0
+  local pid
+  local step_name
+
+  PARALLEL_SUCCESSFUL_STEPS=()
 
   for step in "${steps[@]}"; do
     case "${step}" in
       tileserver)
         run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${TEMP_DIR}/tileserver/staging" "tileserver-gl" "${AUTO_PROMOTE}" &
         pids+=("$!")
+        launched_steps+=("${step}")
         ;;
       nominatim)
         run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${TEMP_DIR}/nominatim/staging" "nominatim" "${AUTO_PROMOTE}" &
         pids+=("$!")
+        launched_steps+=("${step}")
         ;;
       valhalla)
         run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${TEMP_DIR}/valhalla/staging" "valhalla" "${AUTO_PROMOTE}" &
         pids+=("$!")
+        launched_steps+=("${step}")
         ;;
       *)
         log "Ignoring unsupported step ${step} requested for parallel execution."
@@ -775,9 +785,23 @@ run_parallel_step_group() {
   for pid in "${pids[@]}"; do
     wait "${pid}"
     child_rc=$?
+    step_name="${launched_steps[$index]}"
+    if [ "${child_rc}" -eq 2 ]; then
+      log "Abort signal received while running ${step_name}; stopping the remaining parallel import steps."
+      for (( index2 = index + 1; index2 < ${#pids[@]}; index2++ )); do
+        kill "${pids[$index2]}" 2>/dev/null || true
+        wait "${pids[$index2]}" 2>/dev/null || true
+      done
+      overall_rc=2
+      break
+    fi
     if [ "${child_rc}" -gt "${overall_rc}" ]; then
       overall_rc="${child_rc}"
     fi
+    if [ "${child_rc}" -eq 0 ]; then
+      PARALLEL_SUCCESSFUL_STEPS+=("${step_name}")
+    fi
+    index=$((index + 1))
   done
 
   return "${overall_rc}"
@@ -878,7 +902,7 @@ main() {
         clear_completed_steps
         continue
       fi
-      for step in "${parallel_steps[@]}"; do
+      for step in "${PARALLEL_SUCCESSFUL_STEPS[@]}"; do
         mark_step_done "${step}"
       done
     fi
