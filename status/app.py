@@ -49,6 +49,7 @@ CONFIG_FILE = os.path.join(STATUS_DIR, "config.json")
 # Live style used by TileServer-GL (k8s/tileserver.yaml mounts the same hostPath).
 TILESERVER_STYLE_PATH = os.path.join(DATA_DIR, "tileserver", "active", "style.json")
 IMPORT_REQUEST_FILE = os.path.join(STATUS_DIR, "import-request.json")
+IMPORT_REQUEST_QUEUE_FILE = os.path.join(STATUS_DIR, "import-request-queue.json")
 # import-orchestrator.sh writes its own live progress here (same hostPath as
 # STATUS_DIR, see k8s/import-orchestrator.yaml "state" volume) and watches for
 # ABORT_FLAG_FILE to cancel whatever it is currently doing.
@@ -1976,7 +1977,7 @@ def combined_workflow_state():
     progress so the dashboard reflects what is actually happening once a
     build request has been handed off (TileServer/Nominatim/Valhalla import
     phases), not just the initial "queued" message."""
-    request_pending = os.path.exists(IMPORT_REQUEST_FILE)
+    request_pending = os.path.exists(IMPORT_REQUEST_FILE) or bool(load_import_request_queue())
     orchestrator_state = read_orchestrator_state()
     if request_pending or orchestrator_state.get("running"):
         state = dict(orchestrator_state)
@@ -1999,7 +2000,7 @@ def abort_import_workflow():
     orchestrator's next poll (kubernetes garbage-collects a Job's pods when
     the Job itself is deleted).
     """
-    request_pending = os.path.exists(IMPORT_REQUEST_FILE)
+    request_pending = os.path.exists(IMPORT_REQUEST_FILE) or bool(load_import_request_queue())
     orchestrator_running = read_orchestrator_state().get("running")
     if not request_pending and not orchestrator_running:
         raise RuntimeError("No import is currently running.")
@@ -2009,6 +2010,8 @@ def abort_import_workflow():
 
     if os.path.exists(IMPORT_REQUEST_FILE):
         os.remove(IMPORT_REQUEST_FILE)
+    if os.path.exists(IMPORT_REQUEST_QUEUE_FILE):
+        save_json(IMPORT_REQUEST_QUEUE_FILE, [])
 
     for job_name in IMPORT_JOB_NAMES:
         try:
@@ -2392,6 +2395,44 @@ def collect_status():
     }
 
 
+def load_import_request_queue():
+    return load_json(IMPORT_REQUEST_QUEUE_FILE, [])
+
+
+def save_import_request_queue(queue):
+    save_json(IMPORT_REQUEST_QUEUE_FILE, queue)
+
+
+def import_request_signature(payload):
+    steps = payload.get("steps")
+    if steps is None:
+        steps = list(BUILD_STEPS)
+    if not isinstance(steps, list):
+        steps = [steps]
+    countries = payload.get("countries") or []
+    normalized_countries = [
+        {
+            "slug": str(country.get("slug", "")),
+            "name": str(country.get("name", "")),
+            "url": str(country.get("url", "")),
+            "continent": str(country.get("continent", "")),
+        }
+        for country in countries
+    ]
+    normalized_countries.sort(key=lambda item: (item["slug"], item["url"], item["name"]))
+    force_slugs = sorted(str(slug) for slug in (payload.get("force_slugs") or []))
+    return json.dumps(
+        {
+            "steps": [str(step) for step in steps],
+            "auto_promote": bool(payload.get("auto_promote", True)),
+            "merge_requested": bool(payload.get("merge_requested", True)),
+            "countries": normalized_countries,
+            "force_slugs": force_slugs,
+        },
+        sort_keys=True,
+    )
+
+
 def write_import_request(
     records,
     steps=None,
@@ -2427,7 +2468,23 @@ def write_import_request(
         "merge_requested": bool(merge_requested),
         "force_slugs": list(force_slugs) if force_slugs else [],
     }
-    save_json(IMPORT_REQUEST_FILE, payload)
+    queue = load_import_request_queue()
+    if not isinstance(queue, list):
+        queue = []
+    active_request = None
+    if os.path.exists(IMPORT_REQUEST_FILE):
+        try:
+            with open(IMPORT_REQUEST_FILE, encoding="utf-8") as handle:
+                active_request = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            active_request = None
+    for existing in queue:
+        if import_request_signature(existing) == import_request_signature(payload):
+            raise RuntimeError("An identical import request is already queued.")
+    if active_request and import_request_signature(active_request) == import_request_signature(payload):
+        raise RuntimeError("An identical import request is already running.")
+    queue.append(payload)
+    save_import_request_queue(queue)
     return payload
 
 
@@ -2597,7 +2654,7 @@ def merge_library_files(country, records=None):
 
 
 def workflow_import_is_active():
-    request_pending = os.path.exists(IMPORT_REQUEST_FILE)
+    request_pending = os.path.exists(IMPORT_REQUEST_FILE) or bool(load_import_request_queue())
     orchestrator_state = read_orchestrator_state()
     return request_pending or bool(orchestrator_state.get("running"))
 
@@ -2607,7 +2664,7 @@ def wait_for_import_workflow_completion(timeout_seconds=IMPORT_WORKFLOW_COMPLETI
     while True:
         if not workflow_import_is_active():
             return
-        if time.time() >= deadline:
+        if time.time() + 2 >= deadline:
             raise RuntimeError(
                 f"Timed out waiting for the import orchestrator to finish after {timeout_seconds} seconds."
             )
@@ -2855,8 +2912,6 @@ def start_queue_workflow(payload):
 
 
 def start_build_workflow(auto_promote=True):
-    if not WORKFLOW_LOCK.acquire(blocking=False):
-        raise RuntimeError("Another country library workflow is already running.")
     thread = threading.Thread(
         target=run_build_workflow, kwargs={"auto_promote": auto_promote}, daemon=True
     )
@@ -2872,8 +2927,6 @@ def start_build_workflow(auto_promote=True):
 def start_step_build_workflow(step):
     if step not in BUILD_STEPS:
         raise ValueError(f"Unknown build step '{step}'.")
-    if not WORKFLOW_LOCK.acquire(blocking=False):
-        raise RuntimeError("Another country library workflow is already running.")
     country = {"name": f"Build: {step}", "slug": f"build-{step}", "url": ""}
     thread = threading.Thread(
         target=run_build_workflow,
@@ -2893,8 +2946,6 @@ def start_step_build_workflow(step):
 
 def start_download_merge_workflow(payload=None):
     payload = payload or {}
-    if not WORKFLOW_LOCK.acquire(blocking=False):
-        raise RuntimeError("Another country library workflow is already running.")
     download_only = bool(payload.get("download_only", False))
     thread = threading.Thread(
         target=run_download_merge_workflow,

@@ -11,6 +11,7 @@ LOG_FILE="${STATE_DIR}/import-orchestrator.log"
 STATE_FILE="${STATE_DIR}/import-orchestrator.json"
 HASH_FILE="${STATE_DIR}/import-orchestrator.hash"
 REQUEST_FILE="${STATE_DIR}/import-request.json"
+REQUEST_QUEUE_FILE="${STATE_DIR}/import-request-queue.json"
 ABORT_FILE="${STATE_DIR}/import-abort.flag"
 COMPLETED_STEPS_FILE="${STATE_DIR}/import-completed-steps"
 LAST_CONFIG_CHECK=0
@@ -106,6 +107,31 @@ clear_abort_flag() {
 # loop reached its end) resumes instead of redoing already-promoted steps.
 request_fingerprint() {
   sha256sum "${REQUEST_FILE}" 2>/dev/null | awk '{print $1}'
+}
+
+# Pulls the next pending import request from the queue into the active
+# REQUEST_FILE slot so the orchestrator processes one request at a time.
+dequeue_next_request() {
+  python3 - "${REQUEST_QUEUE_FILE}" "${REQUEST_FILE}" <<'ORCH_PY'
+import json
+import sys
+
+queue_path, request_path = sys.argv[1:3]
+try:
+    with open(queue_path, encoding='utf-8') as handle:
+        queue = json.load(handle)
+except (FileNotFoundError, json.JSONDecodeError):
+    queue = []
+if not isinstance(queue, list):
+    queue = []
+if not queue:
+    sys.exit(1)
+request = queue.pop(0)
+with open(request_path, 'w', encoding='utf-8') as handle:
+    json.dump(request, handle, indent=2, sort_keys=True)
+with open(queue_path, 'w', encoding='utf-8') as handle:
+    json.dump(queue, handle, indent=2, sort_keys=True)
+ORCH_PY
 }
 
 # Ensures the completed-steps tracker matches the request currently being
@@ -714,11 +740,15 @@ main() {
   while true; do
     check_config_change
     if [ ! -s "${REQUEST_FILE}" ]; then
-      # No request pending: any leftover abort flag from a previous run is
-      # stale and must not affect the next request.
+      # No active request; try to pull the next queued request. Any leftover
+      # abort flag from a previous run is stale and must not affect the next
+      # request.
       clear_abort_flag
-      sleep 15
-      continue
+      if ! dequeue_next_request; then
+        sleep 15
+        continue
+      fi
+      log "Loaded next import request from ${REQUEST_QUEUE_FILE}."
     fi
 
     log "Detected import request at ${REQUEST_FILE}."
