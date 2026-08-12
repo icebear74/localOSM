@@ -95,7 +95,7 @@ spec:
             - --profile=/data/config/rollercoaster.yml
             - --force
             - --fetch-wikidata
-            # ÄNDRUNG: Wechsel auf Disk-Speicher für Nodes, um den RAM zu schonen
+            # ÄNDERUNG: Wechsel auf Disk-Speicher für Nodes, um den RAM zu schonen
             - --nodemap-type=sparsearray
             - --nodemap-storage=ram
             # ÄNDERUNG: Threads auf 14 hochgeschraubt
