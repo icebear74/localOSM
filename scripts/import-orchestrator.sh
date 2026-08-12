@@ -11,12 +11,15 @@ LOG_FILE="${STATE_DIR}/import-orchestrator.log"
 STATE_FILE="${STATE_DIR}/import-orchestrator.json"
 HASH_FILE="${STATE_DIR}/import-orchestrator.hash"
 REQUEST_FILE="${STATE_DIR}/import-request.json"
+REQUEST_QUEUE_FILE="${STATE_DIR}/import-request-queue.json"
+REQUEST_LOCK_FILE="${STATE_DIR}/import-request.lock"
 ABORT_FILE="${STATE_DIR}/import-abort.flag"
 COMPLETED_STEPS_FILE="${STATE_DIR}/import-completed-steps"
 LAST_CONFIG_CHECK=0
 CONFIG_CHECK_INTERVAL=60
 MV_SUPPORTS_T=false
 POD_TERMINATION_TIMEOUT_SECONDS=180
+PARALLEL_SUCCESSFUL_STEPS=()
 
 if mv --help 2>&1 | grep -q -- ' -T'; then
   MV_SUPPORTS_T=true
@@ -27,6 +30,7 @@ mkdir -p "${STATE_DIR}"
 # Removes everything *inside* a scratch directory on the (user-provided,
 # fast/SSD-backed) temp-dir mount without ever removing the directory (mount
 # point) itself, so temporary import data never lingers once a step is done.
+# Only called on the SUCCESSFUL path so no usable staged data is ever deleted.
 cleanup_temp_dir() {
   local dir="$1"
   [ -d "${dir}" ] || return 0
@@ -39,11 +43,49 @@ cleanup_temp_dir() {
 # Build/step-build can reuse it without re-downloading/re-merging (see
 # prepare_import_data's "reusing existing planet.osm.pbf" check). Only stray
 # intermediate merge artifacts left behind by a crashed/aborted merge are
-# removed here.
+# removed here.  These *.tmp / *.dedup files represent incomplete in-progress
+# work (not usable staged data) and are safe to remove on both success and
+# failure paths.
 cleanup_import_scratch() {
   local dir="${TEMP_DIR}/import"
   [ -d "${dir}" ] || return 0
   find "${dir}" -mindepth 1 -maxdepth 1 \( -name '*.tmp' -o -name '*.dedup' \) -exec rm -rf {} + 2>/dev/null || true
+}
+
+# Renames a directory to <dir>.<suffix>-<timestamp> to preserve its contents
+# for later recovery without blocking future runs from reusing the same path.
+# A fresh empty directory is created at <dir> afterwards so the original path
+# is always available as a valid empty scratch area.
+archive_dir() {
+  local dir="$1"
+  local suffix="$2"
+  [ -d "${dir}" ] || return 0
+  local ts
+  ts="$(date '+%Y%m%dT%H%M%S')"
+  local archive="${dir}.${suffix}-${ts}"
+  if mv "${dir}" "${archive}" 2>/dev/null; then
+    log "Archived ${dir} → ${archive}"
+  else
+    log "Warning: could not archive ${dir}; leaving in place."
+  fi
+  mkdir -p "${dir}" 2>/dev/null || true
+}
+
+# Renames a file to <file>.<suffix>-<timestamp> so it is preserved but no
+# longer picked up by the orchestrator's request-detection loop.
+archive_file() {
+  local file="$1"
+  local suffix="$2"
+  [ -f "${file}" ] || return 0
+  local ts
+  ts="$(date '+%Y%m%dT%H%M%S')"
+  local archive="${file}.${suffix}-${ts}"
+  if mv "${file}" "${archive}" 2>/dev/null; then
+    log "Archived ${file} → ${archive}"
+  else
+    log "Warning: could not archive ${file}; removing to avoid retry loop."
+    rm -f "${file}" 2>/dev/null || true
+  fi
 }
 
 log() {
@@ -67,6 +109,39 @@ clear_abort_flag() {
 # loop reached its end) resumes instead of redoing already-promoted steps.
 request_fingerprint() {
   sha256sum "${REQUEST_FILE}" 2>/dev/null | awk '{print $1}'
+}
+
+# Pulls the next pending import request from the queue into the active
+# REQUEST_FILE slot so the orchestrator processes one request at a time.
+dequeue_next_request() {
+  python3 - "${REQUEST_QUEUE_FILE}" "${REQUEST_FILE}" "${REQUEST_LOCK_FILE}" <<'ORCH_PY'
+import fcntl
+import json
+import os
+import sys
+
+queue_path, request_path, lock_path = sys.argv[1:4]
+os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+with open(lock_path, 'a+', encoding='utf-8') as lock_handle:
+    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+    try:
+        try:
+            with open(queue_path, encoding='utf-8') as handle:
+                queue = json.load(handle)
+        except (FileNotFoundError, json.JSONDecodeError):
+            queue = []
+        if not isinstance(queue, list):
+            queue = []
+        if not queue:
+            sys.exit(1)
+        request = queue.pop(0)
+        with open(request_path, 'w', encoding='utf-8') as handle:
+            json.dump(request, handle, indent=2, sort_keys=True)
+        with open(queue_path, 'w', encoding='utf-8') as handle:
+            json.dump(queue, handle, indent=2, sort_keys=True)
+    finally:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+ORCH_PY
 }
 
 # Ensures the completed-steps tracker matches the request currently being
@@ -502,7 +577,19 @@ if 'steps' in request:
     steps = request.get('steps') or []
 else:
     steps = ['tileserver', 'nominatim', 'valhalla', 'photon']
-print(' '.join(steps))
+normalized = []
+seen = set()
+for raw in steps:
+    step = str(raw).strip().lower()
+    if not step:
+        continue
+    if step not in {'tileserver', 'nominatim', 'valhalla', 'photon'}:
+        raise SystemExit(f'Unsupported step: {step}')
+    if step in seen:
+        raise SystemExit(f'Duplicate step requested: {step}')
+    seen.add(step)
+    normalized.append(step)
+print(' '.join(normalized))
 PY
 }
 
@@ -641,11 +728,11 @@ run_step() {
   wait_for_job "${job_name}" || rc=$?
   if [ "${rc}" -eq 2 ]; then
     write_state false "aborted" 0 "${service} import aborted." "Import wurde vom Benutzer abgebrochen."
-    cleanup_temp_dir "$(dirname "${staging_dir}")"
+    archive_dir "$(dirname "${staging_dir}")" "aborted"
     return 2
   elif [ "${rc}" -ne 0 ]; then
     write_state false "failed" 0 "${service} import failed." "See job logs for details."
-    cleanup_temp_dir "$(dirname "${staging_dir}")"
+    archive_dir "$(dirname "${staging_dir}")" "failed"
     return 1
   fi
   if [ "${auto_promote}" != "true" ]; then
@@ -658,14 +745,78 @@ run_step() {
   swap_stage "${service}" "${active_dir}" "${staging_dir}" "${deployment}" || prc=$?
   if [ "${prc}" -eq 2 ]; then
     write_state false "aborted" 0 "${service} promotion aborted." "Import wurde vom Benutzer abgebrochen."
-    cleanup_temp_dir "$(dirname "${staging_dir}")"
+    archive_dir "$(dirname "${staging_dir}")" "aborted"
     return 2
   elif [ "${prc}" -ne 0 ]; then
     write_state false "failed" 0 "${service} promotion failed." "Rollout of deployment/${deployment} did not become ready."
-    cleanup_temp_dir "$(dirname "${staging_dir}")"
+    archive_dir "$(dirname "${staging_dir}")" "failed"
     return 1
   fi
   write_state false "${service}" 100 "${service} import promoted." "${service} is serving the newly imported data."
+}
+
+run_parallel_step_group() {
+  local -a steps=("$@")
+  local -a pids=()
+  local -a launched_steps=()
+  local step
+  local overall_rc=0
+  local child_rc=0
+  local index=0
+  local pid
+  local step_name
+
+  PARALLEL_SUCCESSFUL_STEPS=()
+
+  for step in "${steps[@]}"; do
+    case "${step}" in
+      tileserver)
+        run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${TEMP_DIR}/tileserver/staging" "tileserver-gl" "${AUTO_PROMOTE}" &
+        pids+=("$!")
+        launched_steps+=("${step}")
+        ;;
+      nominatim)
+        run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${TEMP_DIR}/nominatim/staging" "nominatim" "${AUTO_PROMOTE}" &
+        pids+=("$!")
+        launched_steps+=("${step}")
+        ;;
+      valhalla)
+        run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${TEMP_DIR}/valhalla/staging" "valhalla" "${AUTO_PROMOTE}" &
+        pids+=("$!")
+        launched_steps+=("${step}")
+        ;;
+      *)
+        log "Ignoring unsupported step ${step} requested for parallel execution."
+        ;;
+    esac
+  done
+
+  for index in "${!pids[@]}"; do
+    pid="${pids[$index]}"
+    wait "${pid}"
+    child_rc=$?
+    step_name="${launched_steps[$index]}"
+    if [ "${child_rc}" -eq 2 ]; then
+      log "Abort signal received while running ${step_name}; stopping the remaining parallel import steps."
+      for other_index in "${!pids[@]}"; do
+        if [ "${other_index}" = "${index}" ]; then
+          continue
+        fi
+        kill "${pids[$other_index]}" 2>/dev/null || true
+        wait "${pids[$other_index]}" 2>/dev/null || true
+      done
+      overall_rc=2
+      break
+    fi
+    if [ "${child_rc}" -gt "${overall_rc}" ]; then
+      overall_rc="${child_rc}"
+    fi
+    if [ "${child_rc}" -eq 0 ]; then
+      PARALLEL_SUCCESSFUL_STEPS+=("${step_name}")
+    fi
+  done
+
+  return "${overall_rc}"
 }
 
 main() {
@@ -675,20 +826,31 @@ main() {
   while true; do
     check_config_change
     if [ ! -s "${REQUEST_FILE}" ]; then
-      # No request pending: any leftover abort flag from a previous run is
-      # stale and must not affect the next request.
+      # No active request; try to pull the next queued request. Any leftover
+      # abort flag from a previous run is stale and must not affect the next
+      # request.
       clear_abort_flag
-      sleep 15
-      continue
+      if ! dequeue_next_request; then
+        sleep 15
+        continue
+      fi
+      log "Loaded next import request from ${REQUEST_QUEUE_FILE}."
     fi
 
     log "Detected import request at ${REQUEST_FILE}."
-    write_state true "queued" 5 "Import request received." "Running TileServer, Nominatim, Valhalla and Photon sequentially."
+    write_state true "queued" 5 "Import request received." "Running requested import steps concurrently where possible."
     # Reconcile the completed-steps tracker with this request so that a
-    # container/pod restart in the middle of the sequential pipeline resumes
-    # at the next pending step instead of redoing already-promoted ones.
+    # container/pod restart in the middle of the workflow resumes at the next
+    # pending step instead of redoing already-promoted ones.
     sync_completed_steps
-    REQUESTED_STEPS="$(request_steps)"
+    if ! REQUESTED_STEPS="$(request_steps)"; then
+      log "Invalid import request steps; archiving request and scratch data to prevent retry loop."
+      archive_file "${REQUEST_FILE}" "failed"
+      cleanup_import_scratch
+      clear_abort_flag
+      clear_completed_steps
+      continue
+    fi
     AUTO_PROMOTE="$(request_auto_promote)"
     log "Requested steps: ${REQUESTED_STEPS} (auto_promote=${AUTO_PROMOTE})."
 
@@ -697,80 +859,64 @@ main() {
       prepare_import_data || prc=$?
       if [ "${prc}" -ne 0 ]; then
         if [ "${prc}" -eq 2 ]; then
-          log "Import aborted by user during preparation; discarding import request."
+          log "Import aborted by user during preparation; archiving import request and scratch data for recovery."
+          archive_file "${REQUEST_FILE}" "aborted"
         else
-          log "Import preparation failed; discarding import request to avoid retrying the same failing request in a loop."
+          log "Import preparation failed; archiving import request and scratch data to prevent retry loop while preserving data."
+          archive_file "${REQUEST_FILE}" "failed"
         fi
         cleanup_import_scratch
-        rm -f "${REQUEST_FILE}"
         clear_abort_flag
         clear_completed_steps
         continue
       fi
     fi
 
-    local src=0
+    local parallel_rc=0
+    local -a parallel_steps=()
+
     if ! step_requested "tileserver"; then
       log "TileServer step not requested for this import request; skipping."
     elif step_already_done "tileserver"; then
       log "TileServer already promoted for this request (resumed after restart); skipping re-import."
     else
-      run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${TEMP_DIR}/tileserver/staging" "tileserver-gl" "${AUTO_PROMOTE}" || src=$?
-      if [ "${src}" -ne 0 ]; then
-        if [ "${src}" -eq 2 ]; then
-          log "Import aborted by user during TileServer import; discarding import request."
-        else
-          log "TileServer import failed; discarding import request to avoid retrying the same failing request in a loop."
-        fi
-        cleanup_import_scratch
-        rm -f "${REQUEST_FILE}"
-        clear_abort_flag
-        clear_completed_steps
-        continue
-      fi
-      mark_step_done "tileserver"
+      parallel_steps+=("tileserver")
     fi
-    local nrc=0
+
     if ! step_requested "nominatim"; then
       log "Nominatim step not requested for this import request; skipping."
     elif step_already_done "nominatim"; then
       log "Nominatim already promoted for this request (resumed after restart); skipping re-import."
     else
-      run_step "nominatim" "nominatim-import" "nominatim-import-job.yaml" "${DATA_DIR}/nominatim/active" "${TEMP_DIR}/nominatim/staging" "nominatim" "${AUTO_PROMOTE}" || nrc=$?
-      if [ "${nrc}" -ne 0 ]; then
-        if [ "${nrc}" -eq 2 ]; then
-          log "Import aborted by user during Nominatim import; discarding import request."
-        else
-          log "Nominatim import failed; discarding import request to avoid retrying the same failing request in a loop."
-        fi
-        cleanup_import_scratch
-        rm -f "${REQUEST_FILE}"
-        clear_abort_flag
-        clear_completed_steps
-        continue
-      fi
-      mark_step_done "nominatim"
+      parallel_steps+=("nominatim")
     fi
-    local vrc=0
+
     if ! step_requested "valhalla"; then
       log "Valhalla step not requested for this import request; skipping."
     elif step_already_done "valhalla"; then
       log "Valhalla already promoted for this request (resumed after restart); skipping re-import."
     else
-      run_step "valhalla" "valhalla-import" "valhalla-import-job.yaml" "${DATA_DIR}/valhalla/active" "${TEMP_DIR}/valhalla/staging" "valhalla" "${AUTO_PROMOTE}" || vrc=$?
-      if [ "${vrc}" -ne 0 ]; then
-        if [ "${vrc}" -eq 2 ]; then
-          log "Import aborted by user during Valhalla import; discarding import request."
+      parallel_steps+=("valhalla")
+    fi
+
+    if [ "${#parallel_steps[@]}" -gt 0 ]; then
+      run_parallel_step_group "${parallel_steps[@]}" || parallel_rc=$?
+      if [ "${parallel_rc}" -ne 0 ]; then
+        if [ "${parallel_rc}" -eq 2 ]; then
+          log "Import aborted by user during the parallel import step group; archiving import request and scratch data for recovery."
+          archive_file "${REQUEST_FILE}" "aborted"
         else
-          log "Valhalla import failed; discarding import request to avoid retrying the same failing request in a loop."
+          log "One or more parallel import steps failed; archiving import request and scratch data to prevent retry loop while preserving data."
+          archive_file "${REQUEST_FILE}" "failed"
         fi
         cleanup_import_scratch
-        rm -f "${REQUEST_FILE}"
         clear_abort_flag
         clear_completed_steps
         continue
       fi
-      mark_step_done "valhalla"
+      for step in "${PARALLEL_SUCCESSFUL_STEPS[@]}"; do
+        mark_step_done "${step}"
+      done
     fi
 
     local prc2=0
@@ -782,16 +928,17 @@ main() {
       # Photon builds its full-text search index directly from the running
       # Nominatim Postgres instance (see the nominatim-postgres Service and
       # k8s/photon-import-job.yaml), so it must run after the nominatim step
-      # above rather than in parallel with it.
+      # group above rather than in parallel with it.
       run_step "photon" "photon-import" "photon-import-job.yaml" "${DATA_DIR}/photon/active" "${TEMP_DIR}/photon/staging" "photon" "${AUTO_PROMOTE}" || prc2=$?
       if [ "${prc2}" -ne 0 ]; then
         if [ "${prc2}" -eq 2 ]; then
-          log "Import aborted by user during Photon import; discarding import request."
+          log "Import aborted by user during Photon import; archiving import request and scratch data for recovery."
+          archive_file "${REQUEST_FILE}" "aborted"
         else
-          log "Photon import failed; discarding import request to avoid retrying the same failing request in a loop."
+          log "Photon import failed; archiving import request and scratch data to prevent retry loop while preserving data."
+          archive_file "${REQUEST_FILE}" "failed"
         fi
         cleanup_import_scratch
-        rm -f "${REQUEST_FILE}"
         clear_abort_flag
         clear_completed_steps
         continue
