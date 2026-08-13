@@ -111,5 +111,5 @@ spec:
             type: DirectoryOrCreate
         - name: photon-data
           hostPath:
-            path: __OSM_TEMP_DIR__/photon/staging
+            path: /mnt/OSM/TempDir/photon/staging
             type: DirectoryOrCreate

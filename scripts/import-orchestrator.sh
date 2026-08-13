@@ -14,6 +14,7 @@ REQUEST_FILE="${STATE_DIR}/import-request.json"
 REQUEST_QUEUE_FILE="${STATE_DIR}/import-request-queue.json"
 REQUEST_LOCK_FILE="${STATE_DIR}/import-request.lock"
 ABORT_FILE="${STATE_DIR}/import-abort.flag"
+PLANET_UPDATE_REQUEST_FILE="${STATE_DIR}/planet-update-request.flag"
 COMPLETED_STEPS_FILE="${STATE_DIR}/import-completed-steps"
 LAST_CONFIG_CHECK=0
 CONFIG_CHECK_INTERVAL=60
@@ -819,12 +820,35 @@ run_parallel_step_group() {
   return "${overall_rc}"
 }
 
+handle_planet_update_request() {
+  log "Planet-Update-Anforderung erkannt – starte planet-update Job."
+  # Prüfe ob ein planet-update Job bereits läuft
+  if kubectl -n "${NAMESPACE}" get pods -l osm-job-type=planet-update       --field-selector=status.phase=Running --no-headers 2>/dev/null | grep -q .; then
+    log "Planet-Update Job läuft bereits – überspringe neue Anforderung."
+    rm -f "${PLANET_UPDATE_REQUEST_FILE}" 2>/dev/null || true
+    return 0
+  fi
+  # Alten abgeschlossenen Job löschen (sonst schlägt apply fehl)
+  kubectl -n "${NAMESPACE}" delete job planet-update --ignore-not-found >/dev/null 2>&1 || true
+  # Job starten
+  if kubectl -n "${NAMESPACE}" apply -f "${MANIFEST_DIR}/planet-update-job.yaml" >/dev/null 2>&1; then
+    log "Planet-Update Job erfolgreich gestartet."
+  else
+    log "Planet-Update Job konnte nicht gestartet werden – prüfe kubectl-Ausgabe."
+  fi
+  rm -f "${PLANET_UPDATE_REQUEST_FILE}" 2>/dev/null || true
+}
+
 main() {
   log "Import orchestrator started."
   write_state false "idle" 0 "Import-Orchestrator bereit." "Warte auf einen Import-Request."
 
   while true; do
     check_config_change
+    # Planet-Update-Trigger verarbeiten
+    if [ -f "${PLANET_UPDATE_REQUEST_FILE}" ]; then
+      handle_planet_update_request
+    fi
     if [ ! -s "${REQUEST_FILE}" ]; then
       # No active request; try to pull the next queued request. Any leftover
       # abort flag from a previous run is stale and must not affect the next

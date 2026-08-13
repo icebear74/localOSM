@@ -118,11 +118,11 @@ spec:
       volumes:
         - name: osm-data
           hostPath:
-            path: __OSM_TEMP_DIR__/tileserver/staging
+            path: /mnt/OSM/TempDir/tileserver/staging
             type: DirectoryOrCreate
         - name: import-data
           hostPath:
-            path: __OSM_TEMP_DIR__/import
+            path: /mnt/OSM/TempDir/import
             type: DirectoryOrCreate
         - name: planetiler-profile-config
           configMap:
