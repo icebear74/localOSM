@@ -62,9 +62,17 @@ spec:
                 cp /style-source/style.json /data/style.json
                 echo "[INFO] TileServer: installed style.json from ConfigMap tileserver-style"
               fi
+              if [ -f /style-source/dark_style.json ] && [ ! -f /data/dark_style.json ]; then
+                cp /style-source/dark_style.json /data/dark_style.json
+                echo "[INFO] TileServer: installed dark_style.json from ConfigMap tileserver-style"
+              fi
 
               if [ -f /data/map.mbtiles ]; then
-                printf '%s\n' '{"options":{"paths":{"root":"/","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true,"cors":true},"styles":{"osm":{"style":"/data/style.json"}},"data":{"v3":{"mbtiles":"/data/map.mbtiles"}}}' > /data/config.json
+                if [ -f /data/dark_style.json ]; then
+                  printf '%s\n' '{"options":{"paths":{"root":"/","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true,"cors":true},"styles":{"osm":{"style":"/data/style.json"},"osm-dark":{"style":"/data/dark_style.json"}},"data":{"v3":{"mbtiles":"/data/map.mbtiles"}}}' > /data/config.json
+                else
+                  printf '%s\n' '{"options":{"paths":{"root":"/","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true,"cors":true},"styles":{"osm":{"style":"/data/style.json"}},"data":{"v3":{"mbtiles":"/data/map.mbtiles"}}}' > /data/config.json
+                fi
                 if [ ! -f /data/style.json ]; then
                   printf '%s\n' '{"version":8,"name":"LocalOSM","sources":{"openmaptiles":{"type":"vector","url":"mbtiles://{v3}"}},"glyphs":"{fontstack}/{range}.pbf","layers":[{"id":"background","type":"background","paint":{"background-color":"#f2efe9"}}]}' > /data/style.json
                 fi
@@ -72,6 +80,8 @@ spec:
                 printf '{"options":{"paths":{"root":"","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true,"cors":true},"styles":{},"data":{}}\n' > /data/config.json
               fi
           resources:
+
+
             requests:
               cpu: "50m"
               memory: "64Mi"

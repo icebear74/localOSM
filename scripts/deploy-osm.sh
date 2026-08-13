@@ -287,9 +287,11 @@ terminate_existing_pods
 kubectl apply -f "${BASE_DIR}/manifests/namespace.yaml"
 
 if [ -f "${REPO_ROOT}/k8s/style.json" ]; then
-  kubectl -n "${NAMESPACE}" create configmap tileserver-style \
-    --from-file=style.json="${REPO_ROOT}/k8s/style.json" \
-    --dry-run=client -o yaml | kubectl apply -f -
+  style_files=("--from-file=style.json=${REPO_ROOT}/k8s/style.json")
+  if [ -f "${REPO_ROOT}/k8s/dark_style.json" ]; then
+    style_files+=("--from-file=dark_style.json=${REPO_ROOT}/k8s/dark_style.json")
+  fi
+  kubectl -n "${NAMESPACE}" create configmap tileserver-style "${style_files[@]}" --dry-run=client -o yaml | kubectl apply -f -
 fi
 
 for manifest in tileserver.yaml nominatim.yaml nominatim-postgres-tuning-config.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml photon-config.yaml photon.yaml status-config.yaml status.yaml status-deployment.yaml nominatim-import-config.yaml tileserver-import-config.yaml tileserver-import-profile-config.yaml import-orchestrator.yaml web.yaml style-editor.yaml; do
