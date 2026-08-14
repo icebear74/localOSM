@@ -18,7 +18,7 @@ JAPAN_GEOJSON="${CONF_DIR}/japan.geojson"
 PRIVAT_OSM="${CONF_DIR}/privat.osm"
 WELT_FILTER="${CONF_DIR}/welt_filter.txt"
 
-OUTPUT_PBF="${WORK_DIR}/europa_und_parks.osm.pbf"
+OUTPUT_PBF="${WORK_DIR}/europa.osm.pbf"
 STATUS_FILE="${STATUS_DIR}/planet-update.json"
 LOCK_FILE="${WORK_DIR}/.planet-update.lock"
 
@@ -240,6 +240,8 @@ osmium extract -p "${TEMP_MASKE}" "${PLANET_FILE}" -o "${TEMP_EXTRACT_PBF}" --ov
 
 log "[7/7] Merge extrahierte Daten mit deiner privat.osm..."
 osmium merge "${TEMP_EXTRACT_PBF}" "${PRIVAT_OSM}" "${TEMP_HILF_WELT}" -o "${OUTPUT_PBF}" --overwrite
+log "Trimming Filesystem. "
+fstrim . -v || log "⚠️ fstrim übersprungen oder nicht unterstützt."
 
 log "----------------------------------------------------------------------"
 log "✅ FERTIG! Die Datei '${OUTPUT_PBF}' wurde erfolgreich erstellt."
