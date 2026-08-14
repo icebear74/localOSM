@@ -739,8 +739,6 @@ run_step() {
   if [ "${service}" = "tileserver" ]; then
     if [ "${auto_promote}" != "true" ]; then
       log "${service} import already promotes data inside the tileserver-gl PVC; auto-promote=false has no separate staging step to keep."
-      write_state false "${service}" 100 "${service} import promoted." "tileserver-gl is serving the newly imported data from its PVC."
-      return 0
     fi
     write_state false "${service}" 100 "${service} import promoted." "tileserver-gl is serving the newly imported data from its PVC."
     return 0
