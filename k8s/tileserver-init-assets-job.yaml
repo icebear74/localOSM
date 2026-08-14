@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tileserver-init-assets
+  namespace: osm
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+      containers:
+        - name: tileserver-init-assets
+          image: alpine:3.20
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              mkdir -p /tileserver-gl
+              cp -a /bootstrap/. /tileserver-gl/
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+          volumeMounts:
+            - name: bootstrap-assets
+              mountPath: /bootstrap
+              readOnly: true
+            - name: tileserver-gl
+              mountPath: /tileserver-gl
+      volumes:
+        - name: bootstrap-assets
+          hostPath:
+            path: /mnt/OSM/tileserver/bootstrap
+            type: DirectoryOrCreate
+        - name: tileserver-gl
+          persistentVolumeClaim:
+            claimName: tileserver-gl

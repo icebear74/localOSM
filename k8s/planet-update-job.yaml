@@ -16,6 +16,9 @@ spec:
         osm-job-type: planet-update
     spec:
       restartPolicy: Never
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
       # Init-container: Duplikatschutz – verhindert Start wenn ein planet-update-Job bereits läuft
       initContainers:
         - name: preflight-dedup
@@ -122,6 +125,9 @@ spec:
             osm-job-type: planet-update
         spec:
           restartPolicy: Never
+          securityContext:
+            fsGroup: 1000
+            runAsUser: 1000
           containers:
             - name: planet-update
               image: 127.0.0.1:5000/planet-update:latest

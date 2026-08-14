@@ -16,6 +16,32 @@ spec:
         app: status
     spec:
       serviceAccountName: status-manager
+      securityContext:
+        fsGroup: 1000
+      initContainers:
+        - name: init-status-config
+          image: busybox:1.36
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              mkdir -p /status
+              if [ ! -f /status/config.json ]; then
+                cp /seed/config.json /status/config.json
+              fi
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "16Mi"
+            limits:
+              cpu: "50m"
+              memory: "64Mi"
+          volumeMounts:
+            - name: status-config-seed
+              mountPath: /seed
+              readOnly: true
+            - name: status-data
+              mountPath: /status
       containers:
         - name: status
           image: python:3.12-slim
@@ -62,12 +88,22 @@ spec:
               mountPath: /config
             - name: data
               mountPath: /mnt/OSM
+            - name: status-data
+              mountPath: /mnt/OSM/status
             - name: temp-data
               mountPath: __OSM_TEMP_DIR__
+            - name: tileserver-active
+              mountPath: /mnt/OSM/tileserver/active
       volumes:
         - name: status-config
           configMap:
             name: osm-status-app
+        - name: status-config-seed
+          configMap:
+            name: osm-status-config
+        - name: status-data
+          persistentVolumeClaim:
+            claimName: osm-status
         - name: data
           hostPath:
             path: /mnt/OSM
@@ -76,6 +112,9 @@ spec:
           hostPath:
             path: __OSM_TEMP_DIR__
             type: DirectoryOrCreate
+        - name: tileserver-active
+          persistentVolumeClaim:
+            claimName: tileserver-gl
 ---
 apiVersion: v1
 kind: Service

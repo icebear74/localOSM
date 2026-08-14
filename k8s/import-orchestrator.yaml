@@ -53,6 +53,9 @@ spec:
         app: import-orchestrator
     spec:
       serviceAccountName: import-orchestrator
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
       containers:
         - name: import-orchestrator
           image: alpine/k8s:1.30.0
@@ -107,9 +110,8 @@ spec:
             path: /mnt/OSM/manifests
             type: DirectoryOrCreate
         - name: state
-          hostPath:
-            path: /mnt/OSM/status
-            type: DirectoryOrCreate
+          persistentVolumeClaim:
+            claimName: osm-status
         - name: status-config
           configMap:
             name: osm-status-config

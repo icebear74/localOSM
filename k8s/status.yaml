@@ -116,12 +116,12 @@ data:
     COUNTRIES_FILE = os.path.join(STATUS_DIR, "countries.json")
     STATE_FILE = os.path.join(STATUS_DIR, "library-state.json")
     CONFIG_FILE = os.path.join(STATUS_DIR, "config.json")
-    # Live style used by TileServer-GL (k8s/tileserver.yaml mounts the same hostPath).
+    # Live style used by TileServer-GL (k8s/tileserver-gl-deployment.yaml mounts the same tileserver-gl PVC path).
     TILESERVER_STYLE_PATH = os.path.join(DATA_DIR, "tileserver", "active", "style.json")
     IMPORT_REQUEST_FILE = os.path.join(STATUS_DIR, "import-request.json")
     IMPORT_REQUEST_QUEUE_FILE = os.path.join(STATUS_DIR, "import-request-queue.json")
     IMPORT_REQUEST_LOCK_FILE = os.path.join(STATUS_DIR, "import-request.lock")
-    # import-orchestrator.sh writes its own live progress here (same hostPath as
+    # import-orchestrator.sh writes its own live progress here (same shared state path as
     # STATUS_DIR, see k8s/import-orchestrator.yaml "state" volume) and watches for
     # ABORT_FLAG_FILE to cancel whatever it is currently doing.
     ORCHESTRATOR_STATE_FILE = os.path.join(STATUS_DIR, "import-orchestrator.json")
@@ -598,7 +598,7 @@ data:
         "venezuela": (-73.35, 0.64, -59.76, 12.20),
     }
 
-    # MapLibre GL base style – kept in sync with k8s/tileserver.yaml init container.
+    # MapLibre GL base style – kept in sync with k8s/tileserver-gl-deployment.yaml init container.
     _STYLE_JSON = (
         '{"version":8,"name":"LocalOSM","sources":{"openmaptiles":{"type":"vector","url":"mbtiles://{v3}"}},'
         '"glyphs":"{fontstack}/{range}.pbf","layers":['

@@ -19,7 +19,11 @@ A self-hosted OSM stack on K3s with a read-only status dashboard, a routing web 
 | `k8s/import-orchestrator.yaml` | Orchestrator deployment, RBAC, and config mounts |
 | `k8s/nominatim-import-job.yaml` | Nominatim import job |
 | `k8s/valhalla-import-job.yaml` | Valhalla import job |
-| `k8s/tileserver-import-job.yaml` | TileServer/Planetiler import job |
+| `k8s/planetiler-import-job.yaml` | TileServer/Planetiler import job on the Longhorn PVCs |
+| `k8s/tileserver-gl-deployment.yaml` | TileServer-GL deployment and service using the `tileserver-gl` PVC |
+| `k8s/osm-persistentvolumeclaims.yaml` | Longhorn PVC definitions for `planet`, `tileserver-gl-temp`, `tileserver-gl`, and `osm-status` |
+| `k8s/planetiler-rbac.yaml` | ServiceAccount/Role/RoleBinding for the Planetiler import job |
+| `k8s/tileserver-init-assets-job.yaml` | One-shot job that copies static TileServer assets from the host bootstrap directory into the PVC |
 | `k8s/status.yaml` | Read-only status dashboard |
 | `k8s/web.yaml` | Browser routing UI |
 | `k8s/style-editor.yaml` | Maputnik style editor (edits the live TileServer-GL style.json via the status dashboard API) |
@@ -29,37 +33,45 @@ A self-hosted OSM stack on K3s with a read-only status dashboard, a routing web 
 
 ## Host data
 
-Persistent (final) data lives under `/mnt/data/OSM`. All temporary/scratch
-data produced while an import is running lives under a separate directory,
-`/mnt/data/OSM/TempDir` by default (override with `--temp-dir` or the
-`OSM_TEMP_DIR` environment variable when running `scripts/deploy-osm.sh`,
-which also templates that value into the deployed manifests). Create and
-mount the temp directory on fast storage (e.g. an SSD) yourself — the
-scripts only manage its *contents*, never the directory/mount point itself,
-and they clear those contents as soon as an import step has finished
-(successfully or not) so nothing lingers on the fast disk.
+Host-side orchestration data still lives under `/mnt/OSM` by default (override
+the scratch path with `--temp-dir` / `OSM_TEMP_DIR` when running
+`scripts/deploy-osm.sh`). The deploy script keeps templated manifests, the
+status dashboard state and the one-time TileServer bootstrap assets on the
+host, while the heavy OSM datasets now live on Longhorn PVCs in Kubernetes.
 
-Important subdirectories under `/mnt/data/OSM` (final data only):
+Longhorn PVCs managed by `k8s/osm-persistentvolumeclaims.yaml`:
+
+- `planet` (250Gi, RWO) – contains `/planet/europa.osm.pbf`
+- `tileserver-gl-temp` (400Gi, RWO) – fast Planetiler scratch space
+- `tileserver-gl` (150Gi, RWO) – live TileServer assets (`planet.mbtiles`, fonts, styles, sprites)
+- `osm-status` (10Mi, RWX) – shared status/log files
+
+Important host subdirectories under `/mnt/OSM`:
 
 - `library/` – downloaded/cached `.osm.pbf` country extracts, reused across imports
-- `nominatim/active`
-- `valhalla/active`
-- `tileserver/active`
 - `manifests/` – static YAML copies used by the orchestrator pod
 - `scripts/` – mounted orchestration script
 - `status/` – dashboard and orchestrator state files
+- `tileserver/bootstrap` – source directory for `tileserver-init-assets-job.yaml`
 
-Important subdirectories under `/mnt/data/OSM/TempDir` (scratch data only, cleared after each import step):
+Important scratch paths under the Kubernetes-mounted temp area (`OSM_TEMP_DIR` on the host, `tileserver-gl-temp` for Planetiler itself):
 
-- `import/` – merged/downloaded `planet.osm.pbf` used as the shared input for the TileServer, Nominatim and Valhalla import jobs
+- `import/` – merged/downloaded `planet.osm.pbf` used as the shared input for Nominatim, Valhalla and Photon
 - `nominatim/staging` – osm2pgsql/PostgreSQL working data while Nominatim import runs
 - `valhalla/staging` – routing graph/tile build working data
-- `tileserver/staging` – Planetiler working data (mbtiles output, downloaded source files)
+- `photon/staging` – Photon index build working data
 
 ## Deploy
 
 ```bash
 bash scripts/deploy-osm.sh
+```
+
+On a fresh cluster/PVC setup, run the one-shot asset bootstrap once before the
+first TileServer import:
+
+```bash
+kubectl apply -f /mnt/OSM/manifests/tileserver-init-assets-job.yaml
 ```
 
 ## Import data
@@ -112,8 +124,8 @@ The status dashboard's **Style-Editor** card opens Maputnik (pre-loaded with the
 TileServer-GL style via `GET /api/style` on the status dashboard). After editing visually, export the
 style in Maputnik (Menu ▸ Export style ▸ Download) and upload the exported `style.json` back through
 the "Style aktivieren" button on the status dashboard. The status app validates the style, writes it
-to the same host path TileServer-GL serves from, and restarts the `tileserver-gl` deployment so the
-new style becomes active within seconds — without any manual `scp`/`kubectl` steps.
+back into the mounted `tileserver-gl` PVC, and restarts the `tileserver-gl` deployment so the new
+style becomes active within seconds — without any manual `scp`/`kubectl` steps.
 
 ## Notes
 

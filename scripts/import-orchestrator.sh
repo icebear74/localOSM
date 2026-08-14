@@ -736,6 +736,15 @@ run_step() {
     archive_dir "$(dirname "${staging_dir}")" "failed"
     return 1
   fi
+  if [ "${service}" = "tileserver" ]; then
+    if [ "${auto_promote}" != "true" ]; then
+      log "${service} import already promotes data inside the tileserver-gl PVC; auto-promote=false has no separate staging step to keep."
+      write_state false "${service}" 100 "${service} import promoted." "tileserver-gl is serving the newly imported data from its PVC."
+      return 0
+    fi
+    write_state false "${service}" 100 "${service} import promoted." "tileserver-gl is serving the newly imported data from its PVC."
+    return 0
+  fi
   if [ "${auto_promote}" != "true" ]; then
     log "${service} import staged; auto-promote disabled, leaving deployment/${deployment} untouched."
     write_state false "${service}" 100 "${service} import staged." "Staged data is ready; promote it manually when you are ready."
@@ -772,7 +781,7 @@ run_parallel_step_group() {
   for step in "${steps[@]}"; do
     case "${step}" in
       tileserver)
-        run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${TEMP_DIR}/tileserver/staging" "tileserver-gl" "${AUTO_PROMOTE}" &
+        run_step "tileserver" "tileserver-import" "planetiler-import-job.yaml" "${DATA_DIR}/tileserver/active" "${TEMP_DIR}/tileserver/staging" "tileserver-gl" "${AUTO_PROMOTE}" &
         pids+=("$!")
         launched_steps+=("${step}")
         ;;

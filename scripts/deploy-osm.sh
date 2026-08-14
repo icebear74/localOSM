@@ -154,7 +154,7 @@ echo ">>> Creating host directories under ${BASE_DIR} …"
 for dir in \
   "${BASE_DIR}/library" \
   "${BASE_DIR}/tileserver/active" \
-  "${BASE_DIR}/tileserver/fonts" \
+  "${BASE_DIR}/tileserver/bootstrap" \
   "${BASE_DIR}/nominatim/active" \
   "${BASE_DIR}/valhalla/active" \
   "${BASE_DIR}/photon/active" \
@@ -213,7 +213,9 @@ echo ">>> Copying static manifests and orchestrator script …"
 # too, not just by the directories this script creates below.
 for manifest in \
   namespace.yaml \
-  tileserver.yaml \
+  osm-persistentvolumeclaims.yaml \
+  planetiler-rbac.yaml \
+  tileserver-gl-deployment.yaml \
   nominatim.yaml \
   valhalla.yaml \
   valhalla-config.yaml \
@@ -230,7 +232,8 @@ for manifest in \
   nominatim-postgres-tuning-config.yaml \
   tileserver-import-config.yaml \
   tileserver-import-profile-config.yaml \
-  tileserver-import-job.yaml \
+  planetiler-import-job.yaml \
+  tileserver-init-assets-job.yaml \
   import-orchestrator.yaml \
   web.yaml \
   style-editor.yaml; do
@@ -240,8 +243,27 @@ ${SUDO} cp "${REPO_ROOT}/scripts/import-orchestrator.sh" "${BASE_DIR}/scripts/im
 ${SUDO} chmod +x "${BASE_DIR}/scripts/import-orchestrator.sh"
 
 if [ -d "${REPO_ROOT}/fonts" ]; then
-  ${SUDO} find "${BASE_DIR}/tileserver/fonts" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-  ${SUDO} cp -a "${REPO_ROOT}/fonts/." "${BASE_DIR}/tileserver/fonts/"
+  ${SUDO} mkdir -p "${BASE_DIR}/tileserver/bootstrap/fonts"
+  ${SUDO} find "${BASE_DIR}/tileserver/bootstrap/fonts" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+  ${SUDO} cp -a "${REPO_ROOT}/fonts/." "${BASE_DIR}/tileserver/bootstrap/fonts/"
+fi
+
+if [ -f "${REPO_ROOT}/k8s/style.json" ]; then
+  ${SUDO} cp "${REPO_ROOT}/k8s/style.json" "${BASE_DIR}/tileserver/bootstrap/style.json"
+fi
+if [ -f "${REPO_ROOT}/k8s/dark_style.json" ]; then
+  ${SUDO} cp "${REPO_ROOT}/k8s/dark_style.json" "${BASE_DIR}/tileserver/bootstrap/dark_style.json"
+else
+  ${SUDO} rm -f "${BASE_DIR}/tileserver/bootstrap/dark_style.json"
+fi
+if [ -f "${BASE_DIR}/tileserver/bootstrap/dark_style.json" ]; then
+  cat <<'EOF' | ${SUDO} tee "${BASE_DIR}/tileserver/bootstrap/config.json" >/dev/null
+{"options":{"paths":{"root":"/","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true,"cors":true},"styles":{"osm":{"style":"/data/style.json"},"osm-dark":{"style":"/data/dark_style.json"}},"data":{"v3":{"mbtiles":"/data/planet.mbtiles"}}}
+EOF
+else
+  cat <<'EOF' | ${SUDO} tee "${BASE_DIR}/tileserver/bootstrap/config.json" >/dev/null
+{"options":{"paths":{"root":"/","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true,"cors":true},"styles":{"osm":{"style":"/data/style.json"}},"data":{"v3":{"mbtiles":"/data/planet.mbtiles"}}}
+EOF
 fi
 
 CONFIG_PATH="${BASE_DIR}/status/config.json"
@@ -294,7 +316,9 @@ if [ -f "${REPO_ROOT}/k8s/style.json" ]; then
   kubectl -n "${NAMESPACE}" create configmap tileserver-style "${style_files[@]}" --dry-run=client -o yaml | kubectl apply -f -
 fi
 
-for manifest in tileserver.yaml nominatim.yaml nominatim-postgres-tuning-config.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml photon-config.yaml photon.yaml status-config.yaml status.yaml status-deployment.yaml nominatim-import-config.yaml tileserver-import-config.yaml tileserver-import-profile-config.yaml import-orchestrator.yaml web.yaml style-editor.yaml; do
+kubectl -n "${NAMESPACE}" create configmap osm-status-config --from-file=config.json="${CONFIG_PATH}" --dry-run=client -o yaml | kubectl apply -f -
+
+for manifest in osm-persistentvolumeclaims.yaml planetiler-rbac.yaml tileserver-gl-deployment.yaml nominatim.yaml nominatim-postgres-tuning-config.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml photon-config.yaml photon.yaml status.yaml status-deployment.yaml nominatim-import-config.yaml tileserver-import-config.yaml tileserver-import-profile-config.yaml import-orchestrator.yaml web.yaml style-editor.yaml; do
   echo ">>> Applying ${manifest}"
   kubectl apply -f "${BASE_DIR}/manifests/${manifest}"
 done

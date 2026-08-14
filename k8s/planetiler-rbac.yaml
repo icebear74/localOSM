@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: planetiler-import
+  namespace: osm
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: planetiler-import
+  namespace: osm
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["get", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: planetiler-import
+  namespace: osm
+subjects:
+  - kind: ServiceAccount
+    name: planetiler-import
+    namespace: osm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: planetiler-import
