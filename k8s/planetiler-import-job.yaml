@@ -29,7 +29,7 @@ spec:
               set -eu
               echo '=== Planetiler Tile Generation ==='
               test -f /planet/europa.osm.pbf
-              mkdir -p /tileserver-gl /tileserver-gl-temp /tileserver-gl-temp/planetiler-work /tileserver-gl-temp/sources /tools /osm-status
+              mkdir -p /tileserver-gl /tileserver-gl-temp /tileserver-gl-temp/planetiler-work /tileserver-gl-temp/sources /tileserver-gl-temp/data/sources /tools /osm-status
           resources:
             requests:
               cpu: "50m"
@@ -77,7 +77,7 @@ spec:
           args:
             - |
               set -eu
-              mkdir -p /tileserver-gl-temp/sources /tileserver-gl-temp/planetiler-work
+              mkdir -p /tileserver-gl-temp/sources /tileserver-gl-temp/planetiler-work /tileserver-gl-temp/data/sources
               if [ ! -s /tileserver-gl-temp/sources/lake_centerline.shp.zip ]; then
                 wget -q -O /tileserver-gl-temp/sources/lake_centerline.shp.zip https://github.com/acalcutt/osm-lakelines/releases/latest/download/lake_centerline.shp.zip
               fi
@@ -101,6 +101,11 @@ spec:
         - name: tileserver-import
           image: eclipse-temurin:22-jdk
           imagePullPolicy: Always
+          workingDir: /tileserver-gl-temp
+          securityContext:
+            capabilities:
+              add:
+                - SYS_ADMIN
           resources:
             requests:
               memory: "16Gi"
@@ -145,7 +150,7 @@ spec:
               trap cleanup EXIT
 
               rm -f "${OUTPUT_NEW}"
-              mkdir -p "${TEMP_DIR}" "${TEMP_SOURCES}"
+              mkdir -p "${TEMP_DIR}" "${TEMP_SOURCES}" "data/sources"
 
               if [ -f /config/CustomProfile.java ]; then
                 java -Xmx64g -cp "${PLANETILER_JAR}" /config/CustomProfile.java \
