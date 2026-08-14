@@ -29,7 +29,7 @@ spec:
               set -eu
               echo '=== Planetiler Tile Generation ==='
               test -f /planet/europa.osm.pbf
-              mkdir -p /tileserver-gl /tileserver-gl-temp /tileserver-gl-temp/sources /tools /osm-status
+              mkdir -p /tileserver-gl /tileserver-gl-temp /tileserver-gl-temp/planetiler-work /tileserver-gl-temp/sources /tools /osm-status
           resources:
             requests:
               cpu: "50m"
@@ -77,6 +77,7 @@ spec:
           args:
             - |
               set -eu
+              mkdir -p /tileserver-gl-temp/sources /tileserver-gl-temp/planetiler-work
               if [ ! -s /tileserver-gl-temp/sources/lake_centerline.shp.zip ]; then
                 wget -q -O /tileserver-gl-temp/sources/lake_centerline.shp.zip https://github.com/acalcutt/osm-lakelines/releases/latest/download/lake_centerline.shp.zip
               fi
@@ -115,7 +116,7 @@ spec:
               KUBECTL=/tools/kubectl
               PLANETILER_JAR=/tools/planetiler.jar
               SOURCE_OSM=/planet/europa.osm.pbf
-              TEMP_DIR=/tileserver-gl-temp
+              TEMP_DIR=/tileserver-gl-temp/planetiler-work
               TEMP_SOURCES=/tileserver-gl-temp/sources
               OUTPUT_NEW=/tileserver-gl/planet-NEW.mbtiles
               OUTPUT_ACTIVE=/tileserver-gl/planet.mbtiles
@@ -144,6 +145,7 @@ spec:
               trap cleanup EXIT
 
               rm -f "${OUTPUT_NEW}"
+              mkdir -p "${TEMP_DIR}" "${TEMP_SOURCES}"
 
               if [ -f /config/CustomProfile.java ]; then
                 java -Xmx64g -cp "${PLANETILER_JAR}" /config/CustomProfile.java \
@@ -151,6 +153,7 @@ spec:
                   --tmpdir="${TEMP_DIR}" \
                   --output="${OUTPUT_NEW}" \
                   --force \
+                  --download=true \
                   --fetch-wikidata \
                   --nodemap-type=sparsearray \
                   --nodemap-storage=ram \
@@ -168,6 +171,7 @@ spec:
                   --tmpdir="${TEMP_DIR}" \
                   --output="${OUTPUT_NEW}" \
                   --force \
+                  --download=true \
                   --fetch-wikidata \
                   --nodemap-type=sparsearray \
                   --nodemap-storage=ram \
