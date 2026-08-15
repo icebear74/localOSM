@@ -58,7 +58,11 @@ spec:
                 curl -fsSL -o /tools/planetiler.jar https://github.com/onthegomap/planetiler/releases/latest/download/planetiler.jar
               fi
               if [ ! -x /tools/kubectl ]; then
-                curl -fsSL -o /tools/kubectl https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl
+                KUBECTL_VERSION=$(curl -fsSL https://dl.k8s.io/release/stable.txt 2>/dev/null || true)
+                if [ -z "${KUBECTL_VERSION}" ]; then
+                  KUBECTL_VERSION="v1.30.0"
+                fi
+                curl -fsSL -o /tools/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
                 chmod 0755 /tools/kubectl
               fi
           resources:
@@ -103,7 +107,6 @@ spec:
           imagePullPolicy: Always
           workingDir: /tileserver-gl-temp
           securityContext:
-            privileged: true
             runAsUser: 0
             runAsGroup: 0
             capabilities:
