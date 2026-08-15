@@ -45,7 +45,7 @@ Longhorn PVCs managed by `k8s/osm-persistentvolumeclaims.yaml`:
 - `tileserver-gl-temp` (400Gi, RWO) – fast Planetiler scratch space
 - `tileserver-gl` (150Gi, RWO) – live TileServer assets (`planet.mbtiles`, fonts, styles, sprites)
 - `nominatim-temp` (400Gi, RWX) – temporary Nominatim import/Postgres working data
-- `nominatim` (150Gi, RWX) – production Nominatim/Postgres data promoted by the PVC promotion job
+- `nominatim` (150Gi, RWX) – production Nominatim/Postgres data promoted by the Nominatim import job itself
 - `osm-status` (10Mi, RWX) – shared status/log files
 
 Important host subdirectories under `/mnt/OSM`:
@@ -59,7 +59,7 @@ Important host subdirectories under `/mnt/OSM`:
 Important scratch paths under the Kubernetes-mounted temp area (`OSM_TEMP_DIR` on the host, `tileserver-gl-temp` for Planetiler itself):
 
 - `import/` – merged/downloaded `planet.osm.pbf` used as the shared input for Nominatim, Valhalla and Photon
-- `nominatim/staging` – legacy host-side scratch path retained for compatibility; the Nominatim import now uses the dedicated `nominatim-temp` PVC and the promotion job swaps the compacted database into the `nominatim` PVC
+- `nominatim/staging` – legacy host-side scratch path retained for compatibility; the Nominatim import now uses the dedicated `nominatim-temp` PVC and the import job swaps the compacted database into the `nominatim` PVC
 - `valhalla/staging` – routing graph/tile build working data
 - `photon/staging` – Photon index build working data
 

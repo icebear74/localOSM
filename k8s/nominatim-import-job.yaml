@@ -35,6 +35,8 @@ spec:
                   key: import_cache_mb
             - name: PGDATA
               value: /nominatim-data/current
+            - name: PGDATA_TARGET_ROOT
+              value: /nominatim-data-prod
           resources:
             requests:
               memory: "48Gi"
@@ -105,14 +107,65 @@ spec:
               echo "Warte 5 Sekunden auf WAL-Flush..."
               sleep 5
 
+              SOURCE_DATA_DIR="${PGDATA:-/nominatim-data/current}"
+              TARGET_ROOT="${PGDATA_TARGET_ROOT:-/nominatim-data-prod}"
+              TARGET_CURRENT="${TARGET_ROOT}/current"
+              TARGET_STAGED="${TARGET_ROOT}/staged"
+              TARGET_PREVIOUS="${TARGET_ROOT}/previous"
+
+              echo "Promotiere die kompaktierte Datenbank in das Produktions-Volume..."
+              mkdir -p "${TARGET_ROOT}"
+              rm -rf "${TARGET_STAGED}" "${TARGET_PREVIOUS}" 2>/dev/null || true
+              mkdir -p "${TARGET_STAGED}"
+
+              echo "Starte PostgreSQL, um die temporäre Datenbank vor dem Copy-Upgrade zu bereinigen..."
+              mkdir -p /etc/postgresql/16/main/conf.d
+              cat > /etc/postgresql/16/main/conf.d/zz-promotion.conf <<EOF
+              data_directory = '${SOURCE_DATA_DIR}'
+              EOF
+              service postgresql start
+              for _ in $(seq 1 60); do
+                if pg_isready -q; then
+                  break
+                fi
+                sleep 2
+              done
+              if ! pg_isready -q; then
+                echo "ERROR: PostgreSQL konnte für die Promotion nicht gestartet werden." >&2
+                exit 1
+              fi
+
+              echo "Führe Datenbankbereinigung und Compaction auf der temporären Datenbank aus..."
+              sudo -u postgres psql -v ON_ERROR_STOP=1 -d nominatim <<'SQL'
+              VACUUM (FULL, ANALYZE);
+              REINDEX DATABASE nominatim;
+              CHECKPOINT;
+              SQL
+
+              echo "Stoppe PostgreSQL vor dem Kopieren des Datenverzeichnisses..."
+              service postgresql stop
+
+              echo "Kopiere die kompaktierte Datenbank in das Produktions-Volume..."
+              tar -czf /tmp/nominatim-db.tar.gz -C "$(dirname "${SOURCE_DATA_DIR}")" "$(basename "${SOURCE_DATA_DIR}")"
+              tar -xzf /tmp/nominatim-db.tar.gz -C "${TARGET_STAGED}" --strip-components=1
+              chown -R 100:100 "${TARGET_STAGED}"
+              touch "${TARGET_STAGED}/import-finished"
+
+              if [ -d "${TARGET_CURRENT}" ]; then
+                mv "${TARGET_CURRENT}" "${TARGET_PREVIOUS}"
+              fi
+              mv "${TARGET_STAGED}" "${TARGET_CURRENT}"
+              fstrim -av "${TARGET_ROOT}" >/dev/null 2>&1 || true
 
               echo "WAL-Flush abgeschlossen. Setze import-finished Marker..."
-              touch "${PGDATA:-/nominatim-data/current}/import-finished"
+              touch "${SOURCE_DATA_DIR}/import-finished"
           volumeMounts:
             - name: import-data
               mountPath: /nominatim/data/import
             - name: nominatim-data
               mountPath: /nominatim-data
+            - name: nominatim-production-data
+              mountPath: /nominatim-data-prod
             - name: nominatim-postgres-tuning
               mountPath: /etc/postgresql/16/main/conf.d/zz-tuning.conf
               subPath: import-tuning.conf
@@ -127,6 +180,9 @@ spec:
         - name: nominatim-data
           persistentVolumeClaim:
             claimName: nominatim-temp
+        - name: nominatim-production-data
+          persistentVolumeClaim:
+            claimName: nominatim
         - name: nominatim-postgres-tuning
           configMap:
             name: nominatim-postgres-tuning
