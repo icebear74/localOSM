@@ -103,6 +103,9 @@ spec:
           imagePullPolicy: Always
           workingDir: /tileserver-gl-temp
           securityContext:
+            privileged: true
+            runAsUser: 0
+            runAsGroup: 0
             capabilities:
               add:
                 - SYS_ADMIN
@@ -131,9 +134,17 @@ spec:
                 mountpoint="$1"
                 if command -v fstrim >/dev/null 2>&1; then
                   echo "[INFO] fstrim ${mountpoint}"
-                  fstrim "${mountpoint}" || true
+                  if ! fstrim "${mountpoint}"; then
+                    echo "[WARN] fstrim failed for ${mountpoint}; continuing"
+                  fi
                 else
                   echo "[INFO] fstrim not available for ${mountpoint}; continuing."
+                fi
+              }
+
+              cleanup_temp_dir() {
+                if [ -d "${TEMP_DIR}" ]; then
+                  find "${TEMP_DIR}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
                 fi
               }
 
@@ -142,6 +153,7 @@ spec:
                   echo "[INFO] Restoring deployment/tileserver-gl after premature exit"
                   "${KUBECTL}" scale deployment tileserver-gl --replicas=1 -n osm || true
                 fi
+                cleanup_temp_dir
                 trim_mount /planet
                 trim_mount /tileserver-gl-temp
                 trim_mount /tileserver-gl
@@ -193,7 +205,7 @@ spec:
               trim_mount /tileserver-gl
               trim_mount /tileserver-gl-temp
 
-              "${KUBECTL}" scale deployment tileserver-gl --replicas=0 -n osm
+              "${KUBECTL}" scale deployment tileserver-gl --replicas=0 -n osm || true
               SCALED_DOWN=1
 
               rm -f "${OUTPUT_ACTIVE}"
@@ -201,10 +213,10 @@ spec:
 
               trim_mount /tileserver-gl
 
-              "${KUBECTL}" scale deployment tileserver-gl --replicas=1 -n osm
+              "${KUBECTL}" scale deployment tileserver-gl --replicas=1 -n osm || true
               SCALED_DOWN=0
 
-              find "${TEMP_DIR}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+              cleanup_temp_dir
 
               trim_mount /tileserver-gl-temp
           volumeMounts:
