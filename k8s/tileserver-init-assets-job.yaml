@@ -20,7 +20,7 @@ spec:
             - |
               set -eu
               mkdir -p /tileserver-gl
-              cp -a /bootstrap/. /tileserver-gl/
+              cp -R /bootstrap/. /tileserver-gl/
           resources:
             requests:
               cpu: "50m"
