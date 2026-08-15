@@ -169,7 +169,7 @@ spec:
               mkdir -p "${TEMP_DIR}" "${TEMP_SOURCES}" "${DATA_SOURCES}"
 
               if [ -f /config/CustomProfile.java ]; then
-                java -Xmx64g -cp "${PLANETILER_JAR}" /config/CustomProfile.java \
+                java -Xmx80g -cp "${PLANETILER_JAR}" /config/CustomProfile.java \
                   --osm-path="${SOURCE_OSM}" \
                   --tmpdir="${TEMP_DIR}" \
                   --output="${OUTPUT_NEW}" \
@@ -187,7 +187,7 @@ spec:
                   --maxzoom=16 \
                   --extra-osm-tags=shop,building,construction,name,wheelchair,amenity,highway,landuse
               else
-                java -Xmx64g -jar "${PLANETILER_JAR}" \
+                java -Xmx80g -jar "${PLANETILER_JAR}" \
                   --osm-path="${SOURCE_OSM}" \
                   --tmpdir="${TEMP_DIR}" \
                   --output="${OUTPUT_NEW}" \
@@ -215,8 +215,7 @@ spec:
                 echo "[WARN] Could not scale deployment/tileserver-gl to 0; continuing"
               fi
 
-              rm -f "${OUTPUT_ACTIVE}"
-              mv "${OUTPUT_NEW}" "${OUTPUT_ACTIVE}"
+              mv -f "${OUTPUT_NEW}" "${OUTPUT_ACTIVE}"
 
               trim_mount /tileserver-gl
 

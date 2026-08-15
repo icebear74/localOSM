@@ -639,25 +639,24 @@ swap_stage() {
 
   log "Scaling deployment/${deployment} down to 0 before promoting ${service} to release file locks."
   if ! kubectl -n "${NAMESPACE}" scale "deployment/${deployment}" --replicas=0 >/dev/null; then
-    log "Failed to scale deployment/${deployment} down before promoting ${service}."
-    return 1
+    log "Failed to scale deployment/${deployment} down before promoting ${service}; continuing without the scale operation."
+  else
+    wait_start="$(date +%s)"
+    selector="$(deployment_selector "${deployment}")"
+    while kubectl -n "${NAMESPACE}" get pods -l "${selector}" --no-headers 2>/dev/null | grep -q .; do
+      check_config_change
+      if abort_requested; then
+        log "Abort requested while waiting for deployment/${deployment} pods to terminate."
+        kubectl -n "${NAMESPACE}" scale "deployment/${deployment}" --replicas=1 >/dev/null 2>&1 || true
+        return 2
+      fi
+      if [ "$(( $(date +%s) - wait_start ))" -gt "${POD_TERMINATION_TIMEOUT_SECONDS}" ]; then
+        log "Timed out waiting for deployment/${deployment} pods to terminate before promoting ${service}."
+        return 1
+      fi
+      sleep 3
+    done
   fi
-
-  wait_start="$(date +%s)"
-  selector="$(deployment_selector "${deployment}")"
-  while kubectl -n "${NAMESPACE}" get pods -l "${selector}" --no-headers 2>/dev/null | grep -q .; do
-    check_config_change
-    if abort_requested; then
-      log "Abort requested while waiting for deployment/${deployment} pods to terminate."
-      kubectl -n "${NAMESPACE}" scale "deployment/${deployment}" --replicas=1 >/dev/null 2>&1 || true
-      return 2
-    fi
-    if [ "$(( $(date +%s) - wait_start ))" -gt "${POD_TERMINATION_TIMEOUT_SECONDS}" ]; then
-      log "Timed out waiting for deployment/${deployment} pods to terminate before promoting ${service}."
-      return 1
-    fi
-    sleep 3
-  done
 
   rm -rf "${backup_dir}" 2>/dev/null || true
   if [ -d "${active_dir}" ]; then
@@ -698,8 +697,8 @@ swap_stage() {
 
   log "Scaling deployment/${deployment} back to 1 after promoting ${service}."
   if ! kubectl -n "${NAMESPACE}" scale "deployment/${deployment}" --replicas=1 >/dev/null; then
-    log "Failed to scale deployment/${deployment} back up after promoting ${service}."
-    return 1
+    log "Failed to scale deployment/${deployment} back up after promoting ${service}; continuing without the scale operation."
+    return 0
   fi
   if [ "${deployment}" = "nominatim" ]; then
     if ! wait_for_nominatim_rollout 600; then
