@@ -48,10 +48,12 @@ spec:
           args:
             - |
               set -euo pipefail
-              mkdir -p "${PGDATA:-/nominatim-data/current}"
+              PGDATA_DIR="${PGDATA:-/nominatim-data/current}"
+              mkdir -p "${PGDATA_DIR}"
+              chown -R 100:100 "${PGDATA_DIR}" 2>/dev/null || true
               mkdir -p /etc/postgresql/16/main/conf.d
               cat > /etc/postgresql/16/main/conf.d/zz-nominatim-data.conf <<EOF
-              data_directory = '${PGDATA:-/nominatim-data/current}'
+              data_directory = '${PGDATA_DIR}'
               EOF
               /app/config.sh
               if id nominatim >/dev/null 2>&1; then
