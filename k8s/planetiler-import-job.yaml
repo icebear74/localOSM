@@ -129,6 +129,7 @@ spec:
               SOURCE_OSM=/planet/europa.osm.pbf
               TEMP_DIR=/tileserver-gl-temp/planetiler-work
               TEMP_SOURCES=/tileserver-gl-temp/sources
+              DATA_SOURCES=/tileserver-gl-temp/data/sources
               OUTPUT_NEW=/tileserver-gl/planet-NEW.mbtiles
               OUTPUT_ACTIVE=/tileserver-gl/planet.mbtiles
               SCALED_DOWN=0
@@ -165,7 +166,7 @@ spec:
               trap cleanup EXIT
 
               rm -f "${OUTPUT_NEW}"
-              mkdir -p "${TEMP_DIR}" "${TEMP_SOURCES}" "data/sources"
+              mkdir -p "${TEMP_DIR}" "${TEMP_SOURCES}" "${DATA_SOURCES}"
 
               if [ -f /config/CustomProfile.java ]; then
                 java -Xmx64g -cp "${PLANETILER_JAR}" /config/CustomProfile.java \
@@ -208,8 +209,11 @@ spec:
               trim_mount /tileserver-gl
               trim_mount /tileserver-gl-temp
 
-              "${KUBECTL}" scale deployment tileserver-gl --replicas=0 -n osm || true
-              SCALED_DOWN=1
+              if "${KUBECTL}" scale deployment tileserver-gl --replicas=0 -n osm; then
+                SCALED_DOWN=1
+              else
+                echo "[WARN] Could not scale deployment/tileserver-gl to 0; continuing"
+              fi
 
               rm -f "${OUTPUT_ACTIVE}"
               mv "${OUTPUT_NEW}" "${OUTPUT_ACTIVE}"
