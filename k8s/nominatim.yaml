@@ -40,12 +40,15 @@ spec:
       initContainers:
         - name: wait-for-data
           image: busybox:1.36
+          env:
+            - name: PGDATA
+              value: /nominatim-data/current
           command: ["/bin/sh", "-c"]
           args:
             - |
               trap 'echo "Terminating wait script..."; exit 0' TERM INT
-              DB=/nominatim-db/PG_VERSION
-              IMPORT_FINISHED=/nominatim-db/import-finished
+              DB="${PGDATA}/PG_VERSION"
+              IMPORT_FINISHED="${PGDATA}/import-finished"
               LAST_MISSING=""
               until [ -f "$DB" ] && [ -f "$IMPORT_FINISHED" ]; do
                 MISSING=""
@@ -67,7 +70,7 @@ spec:
               memory: "64Mi"
           volumeMounts:
             - name: nominatim-data
-              mountPath: /nominatim-db
+              mountPath: /nominatim-data
               readOnly: true
       containers:
         - name: nominatim
@@ -100,6 +103,8 @@ spec:
                 configMapKeyRef:
                   name: osm-photon-config
                   key: photon_db_password
+            - name: PGDATA
+              value: /nominatim-data/current
             # pg_ctl (invoked internally by `service postgresql start`/`stop`
             # via pg_ctlcluster) defaults to only waiting 60 seconds for
             # Postgres to become ready/stop. On this planet-scale database a
@@ -130,6 +135,13 @@ spec:
               PG_CTL_CONF=/etc/postgresql/16/main/pg_ctl.conf
               mkdir -p "$(dirname "${PG_CTL_CONF}")"
               echo "pg_ctl_options = '-t ${PGCTLTIMEOUT}'" > "${PG_CTL_CONF}"
+              PG_DATA_DIR="${PGDATA:-/var/lib/postgresql/16/main}"
+              mkdir -p "${PG_DATA_DIR}"
+              mkdir -p /etc/postgresql/16/main/conf.d
+              cat > /etc/postgresql/16/main/conf.d/zz-nominatim-data.conf <<EOF
+              data_directory = '${PG_DATA_DIR}'
+              EOF
+              chown -R 100:100 "${PG_DATA_DIR}" 2>/dev/null || true
               # Photon (k8s/photon-import-job.yaml) builds its search index directly
               # from this running Nominatim's embedded Postgres over the network (via
               # the nominatim-postgres Service below) instead of downloading OSM data
@@ -225,7 +237,7 @@ spec:
             timeoutSeconds: 5
           volumeMounts:
             - name: nominatim-data
-              mountPath: /var/lib/postgresql/16/main
+              mountPath: /nominatim-data
             # Tunable Postgres settings for the running service (see
             # k8s/nominatim-postgres-tuning-config.yaml); loaded from conf.d
             # last, so these values win over any defaults.
@@ -235,9 +247,8 @@ spec:
               readOnly: true
       volumes:
         - name: nominatim-data
-          hostPath:
-            path: /mnt/OSM/nominatim/active
-            type: DirectoryOrCreate
+          persistentVolumeClaim:
+            claimName: nominatim
         - name: nominatim-postgres-tuning
           configMap:
             name: nominatim-postgres-tuning

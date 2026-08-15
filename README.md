@@ -21,7 +21,7 @@ A self-hosted OSM stack on K3s with a read-only status dashboard, a routing web 
 | `k8s/valhalla-import-job.yaml` | Valhalla import job |
 | `k8s/planetiler-import-job.yaml` | TileServer/Planetiler import job on the Longhorn PVCs |
 | `k8s/tileserver-gl-deployment.yaml` | TileServer-GL deployment and service using the `tileserver-gl` PVC |
-| `k8s/osm-persistentvolumeclaims.yaml` | Longhorn PVC definitions for `planet`, `tileserver-gl-temp`, `tileserver-gl`, and `osm-status` |
+| `k8s/osm-persistentvolumeclaims.yaml` | Longhorn PVC definitions for `planet`, `tileserver-gl-temp`, `tileserver-gl`, `nominatim-temp`, `nominatim`, and `osm-status` |
 | `k8s/planetiler-rbac.yaml` | ServiceAccount/Role/RoleBinding for the Planetiler import job |
 | `k8s/tileserver-init-assets-job.yaml` | One-shot job that copies static TileServer assets from the host bootstrap directory into the PVC |
 | `k8s/status.yaml` | Read-only status dashboard |
@@ -44,6 +44,8 @@ Longhorn PVCs managed by `k8s/osm-persistentvolumeclaims.yaml`:
 - `planet` (250Gi, RWO) – contains `/planet/europa.osm.pbf`
 - `tileserver-gl-temp` (400Gi, RWO) – fast Planetiler scratch space
 - `tileserver-gl` (150Gi, RWO) – live TileServer assets (`planet.mbtiles`, fonts, styles, sprites)
+- `nominatim-temp` (400Gi, RWX) – temporary Nominatim import/Postgres working data
+- `nominatim` (150Gi, RWX) – production Nominatim/Postgres data promoted by the PVC promotion job
 - `osm-status` (10Mi, RWX) – shared status/log files
 
 Important host subdirectories under `/mnt/OSM`:
@@ -57,7 +59,7 @@ Important host subdirectories under `/mnt/OSM`:
 Important scratch paths under the Kubernetes-mounted temp area (`OSM_TEMP_DIR` on the host, `tileserver-gl-temp` for Planetiler itself):
 
 - `import/` – merged/downloaded `planet.osm.pbf` used as the shared input for Nominatim, Valhalla and Photon
-- `nominatim/staging` – osm2pgsql/PostgreSQL working data while Nominatim import runs
+- `nominatim/staging` – legacy host-side scratch path retained for compatibility; the Nominatim import now uses the dedicated `nominatim-temp` PVC and the promotion job swaps the compacted database into the `nominatim` PVC
 - `valhalla/staging` – routing graph/tile build working data
 - `photon/staging` – Photon index build working data
 

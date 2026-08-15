@@ -713,6 +713,63 @@ swap_stage() {
   return 0
 }
 
+run_nominatim_promotion() {
+  local auto_promote="$1"
+  if [ "${auto_promote}" != "true" ]; then
+    log "Nominatim import staged; auto-promote disabled, leaving deployment/nominatim untouched."
+    write_state false "nominatim" 100 "nominatim import staged." "Staged data is ready; promote it manually when you are ready."
+    return 0
+  fi
+  write_state true "nominatim" 90 "nominatim import completed." "Promoting staged data into the production PVC."
+  log "Scaling deployment/nominatim down to 0 before switching the production PVC data directory."
+  if ! kubectl -n "${NAMESPACE}" scale deployment/nominatim --replicas=0 >/dev/null; then
+    log "Failed to scale deployment/nominatim down before promoting the Nominatim database; aborting promotion."
+    write_state false "failed" 0 "nominatim promotion failed." "Failed to scale deployment/nominatim down before promoting the database."
+    return 1
+  fi
+  local wait_start selector
+  wait_start="$(date +%s)"
+  selector="$(deployment_selector "nominatim")"
+  while kubectl -n "${NAMESPACE}" get pods -l "${selector}" --no-headers 2>/dev/null | grep -q .; do
+    check_config_change
+    if abort_requested; then
+      log "Abort requested while waiting for deployment/nominatim to terminate."
+      kubectl -n "${NAMESPACE}" scale deployment/nominatim --replicas=1 >/dev/null 2>&1 || true
+      write_state false "aborted" 0 "nominatim promotion aborted." "Import wurde vom Benutzer abgebrochen."
+      return 2
+    fi
+    if [ "$(( $(date +%s) - wait_start ))" -gt "${POD_TERMINATION_TIMEOUT_SECONDS}" ]; then
+      log "Timed out waiting for deployment/nominatim pods to terminate before promotion."
+      write_state false "failed" 0 "nominatim promotion failed." "Timed out waiting for deployment/nominatim pods to terminate."
+      return 1
+    fi
+    sleep 3
+  done
+
+  kubectl -n "${NAMESPACE}" delete job nominatim-promotion --ignore-not-found >/dev/null 2>&1 || true
+  kubectl -n "${NAMESPACE}" apply -f "${MANIFEST_DIR}/nominatim-promotion-job.yaml" >/dev/null
+  local rc=0
+  wait_for_job "nominatim-promotion" || rc=$?
+  if [ "${rc}" -eq 2 ]; then
+    write_state false "aborted" 0 "nominatim promotion aborted." "Import wurde vom Benutzer abgebrochen."
+    return 2
+  elif [ "${rc}" -ne 0 ]; then
+    write_state false "failed" 0 "nominatim promotion failed." "Nominatim promotion job did not complete successfully."
+    return 1
+  fi
+
+  log "Scaling deployment/nominatim back up after the PVC swap."
+  if ! kubectl -n "${NAMESPACE}" scale deployment/nominatim --replicas=1 >/dev/null; then
+    write_state false "failed" 0 "nominatim promotion failed." "Failed to scale deployment/nominatim back up after the promotion."
+    return 1
+  fi
+  if ! wait_for_nominatim_rollout 600; then
+    return 1
+  fi
+  write_state false "nominatim" 100 "nominatim import promoted." "nominatim is serving the newly imported data."
+  return 0
+}
+
 run_step() {
   local service="$1" job_name="$2" manifest="$3" active_dir="$4" staging_dir="$5" deployment="$6"
   local auto_promote="${7:-true}"
@@ -737,6 +794,10 @@ run_step() {
     write_state false "failed" 0 "${service} import failed." "See job logs for details."
     archive_dir "$(dirname "${staging_dir}")" "failed"
     return 1
+  fi
+  if [ "${service}" = "nominatim" ]; then
+    run_nominatim_promotion "${auto_promote}"
+    return $?
   fi
   if [ "${service}" = "tileserver" ]; then
     if [ "${auto_promote}" != "true" ]; then

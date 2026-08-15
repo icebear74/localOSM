@@ -1,0 +1,95 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nominatim-promotion
+  namespace: osm
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        fsGroup: 100
+      containers:
+        - name: nominatim-promotion
+          image: mediagis/nominatim:4.5
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PGDATA
+              value: /source/current
+            - name: PGDATA_TARGET_CURRENT
+              value: /target/current
+            - name: PGDATA_TARGET_STAGED
+              value: /target/staged
+            - name: PGDATA_TARGET_PREVIOUS
+              value: /target/previous
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              mkdir -p /source /target
+              if [ ! -f "${PGDATA}/PG_VERSION" ]; then
+                echo "ERROR: source database is missing at ${PGDATA}" >&2
+                exit 1
+              fi
+              rm -rf "${PGDATA_TARGET_STAGED}" "${PGDATA_TARGET_PREVIOUS}" 2>/dev/null || true
+              mkdir -p "${PGDATA_TARGET_STAGED}"
+
+              echo "Starting PostgreSQL to run cleanup on the temporary database..."
+              mkdir -p /etc/postgresql/16/main/conf.d
+              cat > /etc/postgresql/16/main/conf.d/zz-promotion.conf <<'EOF'
+              data_directory = '/source/current'
+              EOF
+              service postgresql start
+              for _ in $(seq 1 60); do
+                if pg_isready -q; then
+                  break
+                fi
+                sleep 2
+              done
+              if ! pg_isready -q; then
+                echo "ERROR: PostgreSQL could not be started for cleanup." >&2
+                exit 1
+              fi
+
+              echo "Running database cleanup and compaction on the temporary database..."
+              sudo -u postgres psql -v ON_ERROR_STOP=1 -d nominatim <<'SQL'
+              VACUUM (FULL, ANALYZE);
+              REINDEX DATABASE nominatim;
+              CHECKPOINT;
+              SQL
+
+              echo "Stopping PostgreSQL before copying the data directory..."
+              service postgresql stop
+
+              echo "Copying the compacted database into the production volume..."
+              tar -czf /tmp/nominatim-db.tar.gz -C /source current
+              tar -xzf /tmp/nominatim-db.tar.gz -C "${PGDATA_TARGET_STAGED}" --strip-components=1
+              chown -R 100:100 "${PGDATA_TARGET_STAGED}"
+              touch "${PGDATA_TARGET_STAGED}/import-finished"
+
+              if [ -d "${PGDATA_TARGET_CURRENT}" ]; then
+                mv "${PGDATA_TARGET_CURRENT}" "${PGDATA_TARGET_PREVIOUS}"
+              fi
+              mv "${PGDATA_TARGET_STAGED}" "${PGDATA_TARGET_CURRENT}"
+              fstrim -av /target >/dev/null 2>&1 || true
+          resources:
+            requests:
+              cpu: "2"
+              memory: "4Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+          volumeMounts:
+            - name: nominatim-temp
+              mountPath: /source
+            - name: nominatim
+              mountPath: /target
+      volumes:
+        - name: nominatim-temp
+          persistentVolumeClaim:
+            claimName: nominatim-temp
+        - name: nominatim
+          persistentVolumeClaim:
+            claimName: nominatim
