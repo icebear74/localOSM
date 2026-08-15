@@ -152,6 +152,15 @@ spec:
                 fi
               }
 
+              scale_deployment() {
+                local replicas="$1"
+                if "${KUBECTL}" scale deployment tileserver-gl --replicas="${replicas}" -n osm >/dev/null 2>&1; then
+                  return 0
+                fi
+                echo "[WARN] Could not scale deployment/tileserver-gl to ${replicas}; continuing without a deployment restart"
+                return 1
+              }
+
               cleanup() {
                 if [ "${SCALED_DOWN}" = "1" ]; then
                   echo "[INFO] Restoring deployment/tileserver-gl after premature exit"
@@ -209,18 +218,18 @@ spec:
               trim_mount /tileserver-gl
               trim_mount /tileserver-gl-temp
 
-              if "${KUBECTL}" scale deployment tileserver-gl --replicas=0 -n osm; then
+              if scale_deployment 0; then
                 SCALED_DOWN=1
-              else
-                echo "[WARN] Could not scale deployment/tileserver-gl to 0; continuing"
               fi
 
               mv -f "${OUTPUT_NEW}" "${OUTPUT_ACTIVE}"
 
               trim_mount /tileserver-gl
 
-              "${KUBECTL}" scale deployment tileserver-gl --replicas=1 -n osm || true
-              SCALED_DOWN=0
+              if [ "${SCALED_DOWN}" = "1" ]; then
+                scale_deployment 1 || true
+                SCALED_DOWN=0
+              fi
 
               cleanup_temp_dir
 

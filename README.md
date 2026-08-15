@@ -80,7 +80,7 @@ kubectl apply -f /mnt/OSM/manifests/tileserver-init-assets-job.yaml
 bash scripts/run-import.sh --url https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf
 ```
 
-The script downloads the extract and writes an import request. The orchestrator pod processes requests strictly in sequence:
+The script downloads the extract and writes an import request. The orchestrator pod processes requests strictly in sequence. Import jobs are intended to be autonomous: the orchestrator only submits them, while each job should manage its own deployment lifecycle (scale/rollout/restart) and data promotion steps internally.
 
 1. Nominatim
 2. Valhalla

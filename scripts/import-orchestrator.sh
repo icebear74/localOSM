@@ -720,6 +720,9 @@ run_step() {
   # Start from a clean temp-dir scratch area in case a previous run crashed
   # before it could clean up after itself.
   cleanup_temp_dir "$(dirname "${staging_dir}")"
+  # Import jobs are expected to be autonomous: the orchestrator only submits
+  # them and should not own the service-level rollout/restart logic. Each job
+  # should manage its own deployment lifecycle and data promotion steps.
   log "Starting ${service} import job."
   write_state true "${service}" 10 "${service} import started." "Submitting ${job_name}."
   kubectl -n "${NAMESPACE}" delete job "${job_name}" --ignore-not-found >/dev/null 2>&1 || true
