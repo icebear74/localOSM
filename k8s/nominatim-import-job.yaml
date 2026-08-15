@@ -17,7 +17,7 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - name: PBF_PATH
-              value: /nominatim/data/import/planet.osm.pbf
+              value: /planet/europa.osm.pbf
             - name: NOMINATIM_PASSWORD
               valueFrom:
                 configMapKeyRef:
@@ -49,8 +49,18 @@ spec:
             - |
               set -euo pipefail
               PGDATA_DIR="${PGDATA:-/nominatim-data/current}"
+              PBF_SOURCE="${PBF_PATH:-/planet/europa.osm.pbf}"
               mkdir -p "${PGDATA_DIR}"
               chown -R 100:100 "${PGDATA_DIR}" 2>/dev/null || true
+              if [ ! -f "${PBF_SOURCE}" ]; then
+                echo "ERROR: expected OSM PBF input at ${PBF_SOURCE}" >&2
+                exit 1
+              fi
+              if [ ! -f "${PGDATA_DIR}/PG_VERSION" ]; then
+                echo "Initializing PostgreSQL data directory at ${PGDATA_DIR}"
+                sudo -u postgres initdb -D "${PGDATA_DIR}" --encoding=UTF8 --locale=C.UTF-8 --auth-local=peer --auth-host=scram-sha-256 >/dev/null
+                chown -R 100:100 "${PGDATA_DIR}" 2>/dev/null || true
+              fi
               mkdir -p /etc/postgresql/16/main/conf.d
               cat > /etc/postgresql/16/main/conf.d/zz-nominatim-data.conf <<EOF
               data_directory = '${PGDATA_DIR}'
@@ -164,6 +174,8 @@ spec:
           volumeMounts:
             - name: import-data
               mountPath: /nominatim/data/import
+            - name: planet
+              mountPath: /planet
             - name: nominatim-data
               mountPath: /nominatim-data
             - name: nominatim-production-data
@@ -179,6 +191,9 @@ spec:
           hostPath:
             path: /mnt/OSM/TempDir/import
             type: DirectoryOrCreate
+        - name: planet
+          persistentVolumeClaim:
+            claimName: planet
         - name: nominatim-data
           persistentVolumeClaim:
             claimName: nominatim-temp

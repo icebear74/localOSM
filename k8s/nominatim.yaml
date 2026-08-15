@@ -92,7 +92,7 @@ spec:
             # nominatim-import-job.yaml and start.sh only uses this file when the
             # import-finished marker is missing. Without it the container crash-loops.
             - name: PBF_PATH
-              value: /nominatim/data/import/planet.osm.pbf
+              value: /planet/europa.osm.pbf
             - name: PHOTON_DB_USER
               valueFrom:
                 configMapKeyRef:
@@ -238,6 +238,9 @@ spec:
           volumeMounts:
             - name: nominatim-data
               mountPath: /nominatim-data
+            - name: planet
+              mountPath: /planet
+              readOnly: true
             # Tunable Postgres settings for the running service (see
             # k8s/nominatim-postgres-tuning-config.yaml); loaded from conf.d
             # last, so these values win over any defaults.
@@ -249,6 +252,9 @@ spec:
         - name: nominatim-data
           persistentVolumeClaim:
             claimName: nominatim
+        - name: planet
+          persistentVolumeClaim:
+            claimName: planet
         - name: nominatim-postgres-tuning
           configMap:
             name: nominatim-postgres-tuning
