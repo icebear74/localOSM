@@ -51,7 +51,7 @@ spec:
           # Das Image wird aus auto-update/Dockerfile gebaut.
           # Ersetze den Image-Namen mit dem tatsächlichen Registry-Pfad.
           image: 127.0.0.1:5000/planet-update:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           env:
             - name: WORK_DIR
               value: /work
