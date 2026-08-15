@@ -56,16 +56,27 @@ spec:
                 echo "ERROR: expected OSM PBF input at ${PBF_SOURCE}" >&2
                 exit 1
               fi
-              if [ ! -f "${PGDATA_DIR}/PG_VERSION" ]; then
-                echo "Initializing PostgreSQL data directory at ${PGDATA_DIR}"
-                sudo -u postgres initdb -D "${PGDATA_DIR}" --encoding=UTF8 --locale=C.UTF-8 --auth-local=peer --auth-host=scram-sha-256 >/dev/null
-                chown -R 100:100 "${PGDATA_DIR}" 2>/dev/null || true
-              fi
               mkdir -p /etc/postgresql/16/main/conf.d
               cat > /etc/postgresql/16/main/conf.d/zz-nominatim-data.conf <<EOF
               data_directory = '${PGDATA_DIR}'
               EOF
               /app/config.sh
+              if [ ! -f "${PGDATA_DIR}/PG_VERSION" ]; then
+                echo "Initializing PostgreSQL data directory at ${PGDATA_DIR}"
+                INITDB_BIN=""
+                for candidate in /usr/lib/postgresql/16/bin/initdb /usr/bin/initdb; do
+                  if [ -x "${candidate}" ]; then
+                    INITDB_BIN="${candidate}"
+                    break
+                  fi
+                done
+                if [ -z "${INITDB_BIN}" ]; then
+                  echo "ERROR: could not find a usable PostgreSQL initdb binary for ${PGDATA_DIR}" >&2
+                  exit 1
+                fi
+                sudo -u postgres "${INITDB_BIN}" -D "${PGDATA_DIR}" --encoding=UTF8 --locale=C.UTF-8 --auth-local=peer --auth-host=scram-sha-256 >/dev/null
+                chown -R 100:100 "${PGDATA_DIR}" 2>/dev/null || true
+              fi
               if id nominatim >/dev/null 2>&1; then
                 echo "user nominatim already exists"
               else
