@@ -50,6 +50,8 @@ spec:
               set -euo pipefail
               PGDATA_DIR="${PGDATA:-/nominatim-data/current}"
               PBF_SOURCE="${PBF_PATH:-/planet/europa.osm.pbf}"
+              echo "Resetting Nominatim temp database at ${PGDATA_DIR}"
+              rm -rf "${PGDATA_DIR}" 2>/dev/null || true
               mkdir -p "${PGDATA_DIR}"
               chown -R 100:100 "${PGDATA_DIR}" 2>/dev/null || true
               if [ ! -f "${PBF_SOURCE}" ]; then
