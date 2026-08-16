@@ -217,7 +217,6 @@ for manifest in \
   planetiler-rbac.yaml \
   tileserver-gl-deployment.yaml \
   nominatim.yaml \
-  nominatim-promotion-job.yaml \
   valhalla.yaml \
   valhalla-config.yaml \
   valhalla-import-config.yaml \

@@ -134,14 +134,9 @@ spec:
 
               SOURCE_DATA_DIR="${PGDATA:-/nominatim-data/current}"
               TARGET_ROOT="${PGDATA_TARGET_ROOT:-/nominatim-data-prod}"
+              TARGET_STAGED="${TARGET_ROOT}/staging"
               TARGET_CURRENT="${TARGET_ROOT}/current"
-              TARGET_STAGED="${TARGET_ROOT}/staged"
               TARGET_PREVIOUS="${TARGET_ROOT}/previous"
-
-              echo "Promotiere die kompaktierte Datenbank in das Produktions-Volume..."
-              mkdir -p "${TARGET_ROOT}"
-              rm -rf "${TARGET_STAGED}" "${TARGET_PREVIOUS}" 2>/dev/null || true
-              mkdir -p "${TARGET_STAGED}"
 
               echo "Starte PostgreSQL, um die temporäre Datenbank vor dem Copy-Upgrade zu bereinigen..."
               mkdir -p /etc/postgresql/16/main/conf.d
@@ -170,19 +165,22 @@ spec:
               echo "Stoppe PostgreSQL vor dem Kopieren des Datenverzeichnisses..."
               service postgresql stop
 
-              echo "Kopiere die Datenbank direkt in das Produktions-Volume..."
+              echo "Bereite die kompaktierte Datenbank im Produktions-Staging-Verzeichnis vor..."
+              mkdir -p "${TARGET_ROOT}"
+              rm -rf "${TARGET_STAGED}" "${TARGET_PREVIOUS}" 2>/dev/null || true
+              mkdir -p "${TARGET_STAGED}"
+
+              echo "Kopiere die Datenbank in das Produktions-Staging-Verzeichnis..."
               cp -a "${SOURCE_DATA_DIR}/." "${TARGET_STAGED}/"
               chown -R 100:100 "${TARGET_STAGED}"
+              chmod 0700 "${TARGET_STAGED}" 2>/dev/null || true
               touch "${TARGET_STAGED}/import-finished"
-
-              if [ -d "${TARGET_CURRENT}" ]; then
-                mv "${TARGET_CURRENT}" "${TARGET_PREVIOUS}"
-              fi
-              mv "${TARGET_STAGED}" "${TARGET_CURRENT}"
-              fstrim -av "${TARGET_ROOT}" >/dev/null 2>&1 || true
 
               echo "WAL-Flush abgeschlossen. Setze import-finished Marker..."
               touch "${SOURCE_DATA_DIR}/import-finished"
+
+              echo "Führe ein finales Filesystem-Cleanup auf dem Produktions-Volume durch..."
+              fstrim -av "${TARGET_ROOT}" >/dev/null 2>&1 || true
           volumeMounts:
             - name: import-data
               mountPath: /nominatim/data/import

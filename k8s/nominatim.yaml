@@ -47,13 +47,18 @@ spec:
           args:
             - |
               trap 'echo "Terminating wait script..."; exit 0' TERM INT
+              PGDATA_ROOT="$(dirname "${PGDATA}")"
               DB="${PGDATA}/PG_VERSION"
               IMPORT_FINISHED="${PGDATA}/import-finished"
+              STAGING_DB="${PGDATA_ROOT}/staging/PG_VERSION"
+              STAGING_IMPORT_FINISHED="${PGDATA_ROOT}/staging/import-finished"
               LAST_MISSING=""
-              until [ -f "$DB" ] && [ -f "$IMPORT_FINISHED" ]; do
+              until { [ -f "$DB" ] && [ -f "$IMPORT_FINISHED" ]; } || { [ -f "$STAGING_DB" ] && [ -f "$STAGING_IMPORT_FINISHED" ]; }; do
                 MISSING=""
                 [ -f "$DB" ] || MISSING="$DB"
                 [ -f "$IMPORT_FINISHED" ] || MISSING="${MISSING:+$MISSING, }$IMPORT_FINISHED"
+                [ -f "$STAGING_DB" ] || MISSING="${MISSING:+$MISSING, }$STAGING_DB"
+                [ -f "$STAGING_IMPORT_FINISHED" ] || MISSING="${MISSING:+$MISSING, }$STAGING_IMPORT_FINISHED"
                 if [ "$MISSING" != "$LAST_MISSING" ]; then
                   echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for imported Nominatim database markers at $MISSING ..."
                   LAST_MISSING="$MISSING"
@@ -136,12 +141,31 @@ spec:
               mkdir -p "$(dirname "${PG_CTL_CONF}")"
               echo "pg_ctl_options = '-t ${PGCTLTIMEOUT}'" > "${PG_CTL_CONF}"
               PG_DATA_DIR="${PGDATA:-/var/lib/postgresql/16/main}"
+              PG_DATA_ROOT="$(dirname "${PG_DATA_DIR}")"
+              STAGING_DATA_DIR="${PG_DATA_ROOT}/staging"
+              CURRENT_DATA_DIR="${PG_DATA_DIR}"
+              PREVIOUS_DATA_DIR="${PG_DATA_ROOT}/previous"
               mkdir -p "${PG_DATA_DIR}"
               mkdir -p /etc/postgresql/16/main/conf.d
               cat > /etc/postgresql/16/main/conf.d/zz-nominatim-data.conf <<EOF
               data_directory = '${PG_DATA_DIR}'
               EOF
               chown -R 100:100 "${PG_DATA_DIR}" 2>/dev/null || true
+              if [ -d "${STAGING_DATA_DIR}" ] && [ -f "${STAGING_DATA_DIR}/PG_VERSION" ] && [ -f "${STAGING_DATA_DIR}/import-finished" ]; then
+                echo "Promoting staged Nominatim data from ${STAGING_DATA_DIR} to ${CURRENT_DATA_DIR}"
+                if [ -d "${CURRENT_DATA_DIR}" ]; then
+                  rm -rf "${PREVIOUS_DATA_DIR}" 2>/dev/null || true
+                  mv "${CURRENT_DATA_DIR}" "${PREVIOUS_DATA_DIR}"
+                fi
+                if ! mv "${STAGING_DATA_DIR}" "${CURRENT_DATA_DIR}"; then
+                  echo "ERROR: failed to promote staged Nominatim data" >&2
+                  exit 1
+                fi
+                chown -R 100:100 "${CURRENT_DATA_DIR}" 2>/dev/null || true
+                chmod 0700 "${CURRENT_DATA_DIR}" 2>/dev/null || true
+                touch "${CURRENT_DATA_DIR}/import-finished"
+                fstrim -av "${PG_DATA_ROOT}" >/dev/null 2>&1 || true
+              fi
               # Photon (k8s/photon-import-job.yaml) builds its search index directly
               # from this running Nominatim's embedded Postgres over the network (via
               # the nominatim-postgres Service below) instead of downloading OSM data
