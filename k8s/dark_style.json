@@ -167,7 +167,7 @@
         ]
       ],
       "paint": {
-        "line-color": "#7b8898",
+        "line-color": "#ff4d4d",
         "line-width": {
           "stops": [
             [
@@ -201,7 +201,7 @@
         4
       ],
       "paint": {
-        "line-color": "#7b8898",
+        "line-color": "#ff9e9e",
         "line-width": {
           "stops": [
             [
@@ -218,6 +218,28 @@
           2,
           2
         ]
+      }
+    },
+    {
+      "id": "housenumber-labels",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "housenumber",
+      "minzoom": 14,
+      "layout": {
+        "text-field": [
+          "get",
+          "housenumber"
+        ],
+        "text-font": [
+          "NotoSansRegular"
+        ],
+        "text-size": 10
+      },
+      "paint": {
+        "text-color": "#e6e2d7",
+        "text-halo-color": "#10151d",
+        "text-halo-width": 1
       }
     },
     {

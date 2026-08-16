@@ -170,9 +170,8 @@ spec:
               echo "Stoppe PostgreSQL vor dem Kopieren des Datenverzeichnisses..."
               service postgresql stop
 
-              echo "Kopiere die kompaktierte Datenbank in das Produktions-Volume..."
-              tar -czf /tmp/nominatim-db.tar.gz -C "$(dirname "${SOURCE_DATA_DIR}")" "$(basename "${SOURCE_DATA_DIR}")"
-              tar -xzf /tmp/nominatim-db.tar.gz -C "${TARGET_STAGED}" --strip-components=1
+              echo "Kopiere die Datenbank direkt in das Produktions-Volume..."
+              cp -a "${SOURCE_DATA_DIR}/." "${TARGET_STAGED}/"
               chown -R 100:100 "${TARGET_STAGED}"
               touch "${TARGET_STAGED}/import-finished"
 

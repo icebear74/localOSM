@@ -64,8 +64,7 @@ spec:
               service postgresql stop
 
               echo "Copying the compacted database into the production volume..."
-              tar -czf /tmp/nominatim-db.tar.gz -C /source current
-              tar -xzf /tmp/nominatim-db.tar.gz -C "${PGDATA_TARGET_STAGED}" --strip-components=1
+              cp -a /source/current/. "${PGDATA_TARGET_STAGED}/"
               chown -R 100:100 "${PGDATA_TARGET_STAGED}"
               touch "${PGDATA_TARGET_STAGED}/import-finished"
 
