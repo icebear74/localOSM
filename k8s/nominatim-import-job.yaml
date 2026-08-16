@@ -165,12 +165,12 @@ spec:
               echo "Stoppe PostgreSQL vor dem Kopieren des Datenverzeichnisses..."
               service postgresql stop
 
-              echo "Bereite die kompaktierte Datenbank im Produktions-Staging-Verzeichnis vor..."
+              echo "Preparing the compacted database in the production staging directory..."
               mkdir -p "${TARGET_ROOT}"
               rm -rf "${TARGET_STAGED}" "${TARGET_PREVIOUS}" 2>/dev/null || true
               mkdir -p "${TARGET_STAGED}"
 
-              echo "Kopiere die Datenbank in das Produktions-Staging-Verzeichnis..."
+              echo "Copying the database into the production staging directory..."
               cp -a "${SOURCE_DATA_DIR}/." "${TARGET_STAGED}/"
               chown -R 100:100 "${TARGET_STAGED}"
               chmod 0700 "${TARGET_STAGED}" 2>/dev/null || true
@@ -179,7 +179,7 @@ spec:
               echo "WAL-Flush abgeschlossen. Setze import-finished Marker..."
               touch "${SOURCE_DATA_DIR}/import-finished"
 
-              echo "Führe ein finales Filesystem-Cleanup auf dem Produktions-Volume durch..."
+              echo "Running final filesystem cleanup on the production volume..."
               fstrim -av "${TARGET_ROOT}" >/dev/null 2>&1 || true
           volumeMounts:
             - name: import-data

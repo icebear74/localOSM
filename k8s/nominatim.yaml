@@ -54,11 +54,19 @@ spec:
               STAGING_IMPORT_FINISHED="${PGDATA_ROOT}/staging/import-finished"
               LAST_MISSING=""
               until { [ -f "$DB" ] && [ -f "$IMPORT_FINISHED" ]; } || { [ -f "$STAGING_DB" ] && [ -f "$STAGING_IMPORT_FINISHED" ]; }; do
+                CURRENT_READY=false
+                STAGING_READY=false
+                [ -f "$DB" ] && [ -f "$IMPORT_FINISHED" ] && CURRENT_READY=true
+                [ -f "$STAGING_DB" ] && [ -f "$STAGING_IMPORT_FINISHED" ] && STAGING_READY=true
                 MISSING=""
-                [ -f "$DB" ] || MISSING="$DB"
-                [ -f "$IMPORT_FINISHED" ] || MISSING="${MISSING:+$MISSING, }$IMPORT_FINISHED"
-                [ -f "$STAGING_DB" ] || MISSING="${MISSING:+$MISSING, }$STAGING_DB"
-                [ -f "$STAGING_IMPORT_FINISHED" ] || MISSING="${MISSING:+$MISSING, }$STAGING_IMPORT_FINISHED"
+                if [ "$CURRENT_READY" != true ]; then
+                  [ -f "$DB" ] || MISSING="$DB"
+                  [ -f "$IMPORT_FINISHED" ] || MISSING="${MISSING:+$MISSING, }$IMPORT_FINISHED"
+                fi
+                if [ "$STAGING_READY" != true ]; then
+                  [ -f "$STAGING_DB" ] || MISSING="${MISSING:+$MISSING, }$STAGING_DB"
+                  [ -f "$STAGING_IMPORT_FINISHED" ] || MISSING="${MISSING:+$MISSING, }$STAGING_IMPORT_FINISHED"
+                fi
                 if [ "$MISSING" != "$LAST_MISSING" ]; then
                   echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for imported Nominatim database markers at $MISSING ..."
                   LAST_MISSING="$MISSING"
