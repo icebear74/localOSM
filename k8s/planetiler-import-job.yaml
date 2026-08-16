@@ -117,7 +117,7 @@ spec:
               memory: "16Gi"
               cpu: "5"
             limits:
-              memory: "80Gi"
+              memory: "96Gi"
               cpu: "20"
           command: ["/bin/sh", "-c"]
           args:

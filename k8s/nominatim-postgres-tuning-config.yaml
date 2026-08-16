@@ -9,8 +9,8 @@ data:
   # the main Postgres' import-time tuning at that scale.
   import-tuning.conf: |
     # SPEICHER
-    shared_buffers = 48GB
-    maintenance_work_mem = 24GB          # Sehr wichtig für die Index-Erstellung
+    shared_buffers = 64GB
+    maintenance_work_mem = 32GB          # Sehr wichtig für die Index-Erstellung
     work_mem = 256MB
     wal_buffers = 64MB
     effective_cache_size = 80GB          # Signalisiert Postgres den freien Page Cache
