@@ -35,6 +35,8 @@ spec:
               fi
               rm -rf "${PGDATA_TARGET_STAGED}" "${PGDATA_TARGET_PREVIOUS}" 2>/dev/null || true
               mkdir -p "${PGDATA_TARGET_STAGED}"
+              chown -R 100:100 "${PGDATA}" "${PGDATA_TARGET_STAGED}" 2>/dev/null || true
+              chmod 0700 "${PGDATA}" "${PGDATA_TARGET_STAGED}" 2>/dev/null || true
 
               echo "Starting PostgreSQL to run cleanup on the temporary database..."
               mkdir -p /etc/postgresql/16/main/conf.d
