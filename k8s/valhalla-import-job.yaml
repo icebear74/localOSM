@@ -65,7 +65,7 @@ spec:
             - |
               set -euo pipefail
               echo '=== Valhalla Import Job ==='
-              SOURCE_PBF=/osm-temp/import/planet.osm.pbf
+              SOURCE_PBF=/osm-temp/europa.osm.pbf
               WORK_ROOT=/osm-temp/valhalla
               WORK_DIR="${WORK_ROOT}/work"
               NEXT_DIR=/service-data/next
