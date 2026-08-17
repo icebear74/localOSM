@@ -175,7 +175,7 @@ spec:
               trap cleanup EXIT
 
               rm -f "${OUTPUT_NEW}"
-              mkdir -p "${TEMP_DIR}" "${TEMP_SOURCES}" data/sources /data/sources
+              mkdir -p "${TEMP_DIR}" "${TEMP_SOURCES}" data/sources
 
               if [ -f /config/CustomProfile.java ]; then
                 java -Xmx80g -cp "${PLANETILER_JAR}" /config/CustomProfile.java \
