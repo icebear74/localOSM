@@ -105,8 +105,8 @@ spec:
               memory: "4Gi"
               cpu: "2"
             limits:
-              memory: "64Gi"
-              cpu: "16"
+              memory: "96Gi"
+              cpu: "20"
           command: ["/bin/bash", "-c"]
           args:
             - |
@@ -166,7 +166,7 @@ spec:
               cd "${WORK_DIR}"
               DB_SECRET="${PHOTON_DB_PASSWORD}"
               DB_PASSWORD_FLAG="-pass""word"
-              java -Xms16g -Xmx32g -XX:+UseG1GC -jar "/service-data/bin/photon-${PHOTON_VERSION}.jar" import \
+              java -Xms16g -Xmx64g -XX:+UseG1GC -jar "/service-data/bin/photon-${PHOTON_VERSION}.jar" import \
                 -host "${NOMINATIM_DB_HOST}" -port "${NOMINATIM_DB_PORT}" \
                 -database "${NOMINATIM_DB_NAME}" -user "${PHOTON_DB_USER}" \
                 "${DB_PASSWORD_FLAG}" "${DB_SECRET}" \
