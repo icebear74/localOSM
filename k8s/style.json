@@ -13,7 +13,7 @@
       "id": "background",
       "type": "background",
       "paint": {
-        "background-color": "#f4f2eb"
+        "background-color": "#f7f4eb"
       }
     },
     {
@@ -236,28 +236,6 @@
       }
     },
     {
-      "id": "housenumber-labels",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "housenumber",
-      "minzoom": 14,
-      "layout": {
-        "text-field": [
-          "get",
-          "housenumber"
-        ],
-        "text-font": [
-          "NotoSansRegular"
-        ],
-        "text-size": 10
-      },
-      "paint": {
-        "text-color": "#4a4a4a",
-        "text-halo-color": "#f4f2eb",
-        "text-halo-width": 1
-      }
-    },
-    {
       "id": "road-tunnel",
       "type": "line",
       "source": "openmaptiles",
@@ -315,7 +293,7 @@
       ],
       "minzoom": 12,
       "paint": {
-        "line-color": "#c7b5a3",
+        "line-color": "#6a4f3b",
         "line-width": {
           "stops": [
             [
@@ -333,8 +311,31 @@
           ]
         },
         "line-dasharray": [
-          1.6,
-          1.2
+          "case",
+          [
+            "in",
+            [
+              "get",
+              "class"
+            ],
+            [
+              "literal",
+              [
+                "path",
+                "footway",
+                "cycleway",
+                "steps"
+              ]
+            ]
+          ],
+          [
+            1.6,
+            1.2
+          ],
+          [
+            0,
+            0
+          ]
         ]
       }
     },
@@ -359,7 +360,7 @@
       ],
       "minzoom": 9,
       "paint": {
-        "line-color": "#d9c8a8",
+        "line-color": "#7a5731",
         "line-width": {
           "stops": [
             [
@@ -403,7 +404,7 @@
       ],
       "minzoom": 7,
       "paint": {
-        "line-color": "#efc95d",
+        "line-color": "#9b5014",
         "line-width": {
           "stops": [
             [
@@ -446,7 +447,7 @@
       ],
       "minzoom": 6,
       "paint": {
-        "line-color": "#f7a93b",
+        "line-color": "#c45a1b",
         "line-width": {
           "stops": [
             [
@@ -646,6 +647,28 @@
       "paint": {
         "fill-color": "#d9d1c6",
         "fill-opacity": 0.9
+      }
+    },
+    {
+      "id": "housenumber-labels",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "housenumber",
+      "minzoom": 14,
+      "layout": {
+        "text-field": [
+          "get",
+          "housenumber"
+        ],
+        "text-font": [
+          "NotoSansRegular"
+        ],
+        "text-size": 10
+      },
+      "paint": {
+        "text-color": "#3f3127",
+        "text-halo-color": "#f7f4eb",
+        "text-halo-width": 1.2
       }
     },
     {
@@ -958,9 +981,9 @@
         "text-padding": 5
       },
       "paint": {
-        "text-color": "#444444",
-        "text-halo-color": "#ffffff",
-        "text-halo-width": 1.2
+        "text-color": "#2d241b",
+        "text-halo-color": "#f7f4eb",
+        "text-halo-width": 1.4
       }
     },
     {
@@ -999,9 +1022,9 @@
         "text-max-angle": 30
       },
       "paint": {
-        "text-color": "#444444",
-        "text-halo-color": "#ffffff",
-        "text-halo-width": 1.2
+        "text-color": "#2d241b",
+        "text-halo-color": "#f7f4eb",
+        "text-halo-width": 1.4
       }
     },
     {
@@ -1041,9 +1064,9 @@
         "text-max-angle": 30
       },
       "paint": {
-        "text-color": "#444444",
-        "text-halo-color": "#ffffff",
-        "text-halo-width": 1.3
+        "text-color": "#2d241b",
+        "text-halo-color": "#f7f4eb",
+        "text-halo-width": 1.5
       }
     },
     {
@@ -1053,17 +1076,28 @@
       "source-layer": "transportation",
       "minzoom": 13,
       "filter": [
-        "in",
-        "class",
-        "motorway",
-        "trunk",
-        "primary",
-        "secondary",
-        "tertiary",
-        "minor",
-        "service",
-        "track",
-        "path"
+        "all",
+        [
+          "in",
+          "class",
+          "motorway",
+          "trunk",
+          "primary",
+          "secondary",
+          "tertiary",
+          "minor",
+          "service",
+          "track",
+          "path"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "oneway"
+          ],
+          1
+        ]
       ],
       "layout": {
         "symbol-placement": "line",
@@ -1099,9 +1133,9 @@
         ]
       },
       "paint": {
-        "text-color": "#7a5a2b",
-        "text-halo-color": "#fdf7eb",
-        "text-halo-width": 1.2
+        "text-color": "#634129",
+        "text-halo-color": "#f7f4eb",
+        "text-halo-width": 1.4
       }
     },
     {
