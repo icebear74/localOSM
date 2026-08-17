@@ -661,7 +661,7 @@
           "housenumber"
         ],
         "text-font": [
-          "NotoSansRegular"
+          "KlokanTech Noto Sans Regular"
         ],
         "text-size": 10
       },
@@ -729,7 +729,7 @@
           ]
         ],
         "text-font": [
-          "NotoSansRegular"
+          "KlokanTech Noto Sans Regular"
         ],
         "text-size": 11,
         "text-padding": 4,
@@ -775,7 +775,7 @@
           ]
         ],
         "text-font": [
-          "NotoSansRegular"
+          "KlokanTech Noto Sans Regular"
         ],
         "text-size": 11,
         "text-offset": [
@@ -823,7 +823,7 @@
           ]
         ],
         "text-font": [
-          "NotoSansRegular"
+          "KlokanTech Noto Sans Regular"
         ],
         "text-size": {
           "stops": [
@@ -871,7 +871,7 @@
           ]
         ],
         "text-font": [
-          "NotoSansRegular"
+          "KlokanTech Noto Sans Regular"
         ],
         "text-size": {
           "stops": [
@@ -920,7 +920,7 @@
           ]
         ],
         "text-font": [
-          "NotoSansRegular"
+          "KlokanTech Noto Sans Regular"
         ],
         "text-size": {
           "stops": [
@@ -973,7 +973,7 @@
           ]
         ],
         "text-font": [
-          "NotoSansRegular"
+          "KlokanTech Noto Sans Regular"
         ],
         "symbol-placement": "line",
         "text-size": 10,
@@ -1015,7 +1015,7 @@
           ]
         ],
         "text-font": [
-          "NotoSansRegular"
+          "KlokanTech Noto Sans Regular"
         ],
         "symbol-placement": "line",
         "text-size": 11,
@@ -1057,7 +1057,7 @@
           ]
         ],
         "text-font": [
-          "NotoSansRegular"
+          "KlokanTech Noto Sans Regular"
         ],
         "symbol-placement": "line",
         "text-size": 12,
@@ -1103,7 +1103,7 @@
         "symbol-placement": "line",
         "text-field": "\u2192",
         "text-font": [
-          "NotoSansRegular"
+          "KlokanTech Noto Sans Regular"
         ],
         "text-size": {
           "stops": [
@@ -1162,7 +1162,7 @@
           "ref"
         ],
         "text-font": [
-          "NotoSansRegular"
+          "KlokanTech Noto Sans Regular"
         ],
         "text-size": 10,
         "symbol-placement": "line",
@@ -1200,7 +1200,7 @@
           "ref"
         ],
         "text-font": [
-          "NotoSansRegular"
+          "KlokanTech Noto Sans Regular"
         ],
         "text-size": 9.5,
         "symbol-placement": "line",
@@ -1240,7 +1240,7 @@
           ]
         ],
         "text-font": [
-          "NotoSansRegular"
+          "KlokanTech Noto Sans Regular"
         ],
         "text-size": {
           "stops": [
@@ -1294,7 +1294,7 @@
           ]
         ],
         "text-font": [
-          "NotoSansRegular"
+          "KlokanTech Noto Sans Regular"
         ],
         "text-size": {
           "stops": [
@@ -1342,7 +1342,7 @@
           ]
         ],
         "text-font": [
-          "NotoSansRegular"
+          "KlokanTech Noto Sans Regular"
         ],
         "text-size": {
           "stops": [
@@ -1395,7 +1395,7 @@
           ]
         ],
         "text-font": [
-          "NotoSansRegular"
+          "KlokanTech Noto Sans Regular"
         ],
         "text-size": {
           "stops": [
@@ -1448,7 +1448,7 @@
           ]
         ],
         "text-font": [
-          "NotoSansRegular"
+          "KlokanTech Noto Sans Regular"
         ],
         "text-size": {
           "stops": [
@@ -1499,7 +1499,7 @@
           ]
         ],
         "text-font": [
-          "NotoSansRegular"
+          "KlokanTech Noto Sans Regular"
         ],
         "text-size": 11
       },
