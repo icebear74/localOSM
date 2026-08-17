@@ -800,6 +800,7 @@ data:
         ['unpaved_penalty_enabled', defaults.unpaved_penalty_enabled === true],
         ['living_street_penalty_enabled', defaults.use_living_streets_enabled === true || defaults.living_street_penalty_enabled === true],
         ['primary_penalty_enabled', defaults.use_primary_enabled === true || defaults.primary_penalty_enabled === true],
+        ['use_primary_enabled', defaults.use_primary_select_enabled != null ? defaults.use_primary_select_enabled : (defaults.use_primary_enabled === true || defaults.primary_penalty_enabled === true)],
         ['top_speed_enabled', defaults.top_speed_enabled === true],
         ['width_enabled', defaults.width_enabled === true],
         ['height_enabled', defaults.height_enabled === true],
@@ -810,8 +811,7 @@ data:
         ['use_service_enabled', defaults.use_service_enabled === true],
         ['use_trails_enabled', defaults.use_trails_enabled === true],
         ['use_tracks_enabled', defaults.use_tracks_enabled === true],
-        ['use_residential_enabled', defaults.use_residential_enabled === true],
-        ['use_primary_enabled', defaults.use_primary_enabled === true]
+        ['use_residential_enabled', defaults.use_residential_enabled === true]
       ];
       toggleEntries.forEach(function(item) {
         setFieldValue(item[0], item[1]);
@@ -855,24 +855,47 @@ data:
         advanced_options_enabled: advancedOptionsEnabled
       };
       if (advancedOptionsEnabled) {
-        if (document.getElementById('toll_penalty_enabled').checked) payload.use_tolls = parseFloat(document.getElementById('toll_penalty').value);
-        if (document.getElementById('ferry_penalty_enabled').checked) payload.use_ferry = parseFloat(document.getElementById('ferry_penalty').value);
-        if (document.getElementById('tunnel_penalty_enabled').checked) payload.tunnel_penalty = parseFloat(document.getElementById('tunnel_penalty').value);
-        if (document.getElementById('highway_penalty_enabled').checked) payload.use_highways = parseFloat(document.getElementById('highway_penalty').value);
-        if (document.getElementById('unpaved_penalty_enabled').checked) payload.unpaved_penalty = parseFloat(document.getElementById('unpaved_penalty').value);
-        if (document.getElementById('living_street_penalty_enabled').checked) payload.use_living_streets = parseFloat(document.getElementById('living_street_penalty').value);
-        if (document.getElementById('primary_penalty_enabled').checked) payload.use_primary = parseFloat(document.getElementById('primary_penalty').value);
-        if (document.getElementById('top_speed_enabled').checked) payload.top_speed = parseFloat(document.getElementById('top_speed').value);
-        if (document.getElementById('width_enabled').checked) payload.width = parseFloat(document.getElementById('width').value);
-        if (document.getElementById('height_enabled').checked) payload.height = parseFloat(document.getElementById('height').value);
-        if (document.getElementById('length_enabled').checked) payload.length = parseFloat(document.getElementById('length').value);
-        if (document.getElementById('weight_enabled').checked) payload.weight = parseFloat(document.getElementById('weight').value);
-        if (document.getElementById('axle_load_enabled').checked) payload.axle_load = parseFloat(document.getElementById('axle_load').value);
-        if (document.getElementById('hazmat_enabled').checked) payload.hazmat = document.getElementById('hazmat').value === 'true';
-        if (document.getElementById('use_service_enabled').checked) payload.use_service = document.getElementById('use_service').value === 'true';
-        if (document.getElementById('use_trails_enabled').checked) payload.use_trails = document.getElementById('use_trails').value === 'true';
-        if (document.getElementById('use_tracks_enabled').checked) payload.use_tracks = document.getElementById('use_tracks').value === 'true';
-        if (document.getElementById('use_residential_enabled').checked) payload.use_residential = document.getElementById('use_residential').value === 'true';
+        payload.use_tolls_enabled = document.getElementById('toll_penalty_enabled').checked;
+        payload.use_ferry_enabled = document.getElementById('ferry_penalty_enabled').checked;
+        payload.tunnel_penalty_enabled = document.getElementById('tunnel_penalty_enabled').checked;
+        payload.use_highways_enabled = document.getElementById('highway_penalty_enabled').checked;
+        payload.unpaved_penalty_enabled = document.getElementById('unpaved_penalty_enabled').checked;
+        payload.use_living_streets_enabled = document.getElementById('living_street_penalty_enabled').checked;
+        payload.use_primary_enabled = document.getElementById('primary_penalty_enabled').checked;
+        payload.use_primary_select_enabled = document.getElementById('use_primary_enabled').checked;
+        payload.top_speed_enabled = document.getElementById('top_speed_enabled').checked;
+        payload.width_enabled = document.getElementById('width_enabled').checked;
+        payload.height_enabled = document.getElementById('height_enabled').checked;
+        payload.length_enabled = document.getElementById('length_enabled').checked;
+        payload.weight_enabled = document.getElementById('weight_enabled').checked;
+        payload.axle_load_enabled = document.getElementById('axle_load_enabled').checked;
+        payload.hazmat_enabled = document.getElementById('hazmat_enabled').checked;
+        payload.use_service_enabled = document.getElementById('use_service_enabled').checked;
+        payload.use_trails_enabled = document.getElementById('use_trails_enabled').checked;
+        payload.use_tracks_enabled = document.getElementById('use_tracks_enabled').checked;
+        payload.use_residential_enabled = document.getElementById('use_residential_enabled').checked;
+        if (payload.use_tolls_enabled) payload.use_tolls = parseFloat(document.getElementById('toll_penalty').value);
+        if (payload.use_ferry_enabled) payload.use_ferry = parseFloat(document.getElementById('ferry_penalty').value);
+        if (payload.tunnel_penalty_enabled) payload.tunnel_penalty = parseFloat(document.getElementById('tunnel_penalty').value);
+        if (payload.use_highways_enabled) payload.use_highways = parseFloat(document.getElementById('highway_penalty').value);
+        if (payload.unpaved_penalty_enabled) payload.unpaved_penalty = parseFloat(document.getElementById('unpaved_penalty').value);
+        if (payload.use_living_streets_enabled) payload.use_living_streets = parseFloat(document.getElementById('living_street_penalty').value);
+        if (payload.use_primary_enabled) {
+          payload.use_primary = parseFloat(document.getElementById('primary_penalty').value);
+        } else if (document.getElementById('use_primary_enabled').checked) {
+          payload.use_primary = document.getElementById('use_primary').value === 'true' ? 1.0 : 0.0;
+        }
+        if (payload.top_speed_enabled) payload.top_speed = parseFloat(document.getElementById('top_speed').value);
+        if (payload.width_enabled) payload.width = parseFloat(document.getElementById('width').value);
+        if (payload.height_enabled) payload.height = parseFloat(document.getElementById('height').value);
+        if (payload.length_enabled) payload.length = parseFloat(document.getElementById('length').value);
+        if (payload.weight_enabled) payload.weight = parseFloat(document.getElementById('weight').value);
+        if (payload.axle_load_enabled) payload.axle_load = parseFloat(document.getElementById('axle_load').value);
+        if (payload.hazmat_enabled) payload.hazmat = document.getElementById('hazmat').value === 'true';
+        if (payload.use_service_enabled) payload.use_service = document.getElementById('use_service').value === 'true';
+        if (payload.use_trails_enabled) payload.use_trails = document.getElementById('use_trails').value === 'true';
+        if (payload.use_tracks_enabled) payload.use_tracks = document.getElementById('use_tracks').value === 'true';
+        if (payload.use_residential_enabled) payload.use_residential = document.getElementById('use_residential').value === 'true';
       }
       return payload;
     }
@@ -1656,7 +1679,7 @@ data:
                 if payload.get("hazmat") is not None:
                     options["hazmat"] = bool(payload.get("hazmat", False))
 
-                for key in ["top_speed", "width", "height", "length", "weight", "axle_load"]:
+                for key in ["top_speed", "width", "height", "length", "weight", "axle_load", "tunnel_penalty", "unpaved_penalty"]:
                     value = payload.get(key)
                     if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)):
                         options[key] = value
