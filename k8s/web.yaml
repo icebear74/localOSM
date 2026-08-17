@@ -169,10 +169,14 @@ data:
         </div>
         <div class="row2">
           <div><label>Primärstraßen-Penalty</label><input id="primary_penalty" type="number" min="0" step="1" value="0"></div>
-          <div><label>Kürzeste Route</label><select id="shortest"><option value="false">Nein</option><option value="true">Ja</option></select></div>
+          <div>
+            <label>Route-Tradeoff</label>
+            <input id="shortest" type="range" min="0" max="1" step="0.1" value="0.2">
+            <div class="hint" id="shortest-value" style="margin-top:0.25rem">0.2 (0.0 = eher schnell, 1.0 = eher kurz)</div>
+          </div>
         </div>
         <div class="row2">
-          <div><label>Max. Geschwindigkeit (km/h)</label><input id="top_speed" type="number" min="1" step="1" value="80"></div>
+          <div><label>Max. Geschwindigkeit (km/h)</label><input id="top_speed" type="number" min="1" step="1" value="120"></div>
           <div><label>Fahrzeugbreite (m)</label><input id="width" type="number" min="0.1" step="0.1" value="2.0"></div>
         </div>
         <div class="row2">
@@ -188,8 +192,8 @@ data:
           <div><label>Service-Strecken</label><select id="use_service"><option value="true">Erlauben</option><option value="false">Vermeiden</option></select></div>
         </div>
         <div class="row2">
-          <div><label>Wegenetz: Pfade</label><select id="use_trails"><option value="true">Erlauben</option><option value="false">Vermeiden</option></select></div>
-          <div><label>Wegenetz: Tracks</label><select id="use_tracks"><option value="true">Erlauben</option><option value="false">Vermeiden</option></select></div>
+          <div><label>Wegenetz: Pfade</label><select id="use_trails"><option value="true">Erlauben</option><option value="false" selected>Vermeiden</option></select></div>
+          <div><label>Wegenetz: Tracks</label><select id="use_tracks"><option value="true">Erlauben</option><option value="false" selected>Vermeiden</option></select></div>
         </div>
         <div class="row2">
           <div><label>Wegenetz: Wohnstraßen</label><select id="use_residential"><option value="true">Erlauben</option><option value="false">Vermeiden</option></select></div>
@@ -203,7 +207,8 @@ data:
         <button class="btn btn-secondary" onclick="doDistance()">&#8596; Nur Distanz</button>
         <p class="hint">Tipp: Klicke auf die Karte, um Start- (1. Klick) und Zielpunkt (2. Klick) zu setzen. Die erweiterten Optionen lassen sich als Browser-Standard speichern.</p>
         <div id="result-box">Noch keine Anfrage.</div>
-
+        <div id="route-instructions" class="hint" style="margin-top:0.75rem"></div>
+        
         <div class="section-title">Planet-Update</div>
         <div id="planet-update-box">
           <div id="pu-status-line" class="pu-status">Lade Status...</div>
@@ -460,6 +465,77 @@ data:
       return h + ' h ' + (m > 0 ? m + ' min' : '');
     }
 
+    function updateShortestLabel() {
+      var el = document.getElementById('shortest');
+      var valueEl = document.getElementById('shortest-value');
+      if (!el || !valueEl) return;
+      var value = parseFloat(el.value);
+      if (!isFinite(value)) value = 0.2;
+      valueEl.textContent = value.toFixed(1) + ' (0.0 = eher schnell, 1.0 = eher kurz)';
+    }
+
+    function formatGermanInstruction(maneuver) {
+      var type = (maneuver && maneuver.type || '').toLowerCase();
+      var modifier = (maneuver && maneuver.modifier || '').toLowerCase();
+      var streetNames = [];
+      if (Array.isArray(maneuver && maneuver.street_names)) streetNames = maneuver.street_names;
+      else if (Array.isArray(maneuver && maneuver.streets)) streetNames = maneuver.streets;
+      var streetText = streetNames.length ? ' auf ' + streetNames.join(', ') : '';
+      switch (type) {
+        case 'depart':
+          return 'Starten Sie' + streetText + '.';
+        case 'arrive':
+          return 'Ziel erreicht.';
+        case 'turn':
+          if (modifier === 'right') return 'Biegen Sie rechts ab' + streetText + '.';
+          if (modifier === 'left') return 'Biegen Sie links ab' + streetText + '.';
+          if (modifier === 'slight right') return 'Leicht rechts weiter' + streetText + '.';
+          if (modifier === 'slight left') return 'Leicht links weiter' + streetText + '.';
+          if (modifier === 'u_turn') return 'Wenden Sie' + streetText + '.';
+          return 'Biegen Sie ab' + streetText + '.';
+        case 'continue':
+          return 'Weiterfahren' + streetText + '.';
+        case 'merge':
+          return 'Fahren Sie auf die Hauptstraße' + streetText + '.';
+        case 'roundabout':
+          return 'Fahren Sie in den Kreisverkehr und verlassen Sie ihn an der gewünschten Ausfahrt.';
+        case 'exit roundabout':
+          return 'Verlassen Sie den Kreisverkehr' + streetText + '.';
+        case 'fork':
+          return 'An der Abzweigung halten Sie sich an die Richtung' + streetText + '.';
+        case 'ramp':
+          return 'Fahren Sie auf die Auffahrt' + streetText + '.';
+        case 'use lane':
+          return 'Nutzen Sie die passende Spur' + streetText + '.';
+        case 'destination':
+          return 'Ziel erreichen' + streetText + '.';
+        default:
+          return maneuver && maneuver.instruction ? maneuver.instruction : 'Weiterfahren.';
+      }
+    }
+
+    function buildRouteInstructions(trip) {
+      var instructions = [];
+      (trip && trip.legs || []).forEach(function(leg) {
+        (leg.maneuvers || []).forEach(function(maneuver, index) {
+          var text = formatGermanInstruction(maneuver);
+          if (text) instructions.push((index + 1) + '. ' + text);
+        });
+      });
+      return instructions;
+    }
+
+    function renderRouteInstructions(trip) {
+      var container = document.getElementById('route-instructions');
+      if (!container) return;
+      var instructions = buildRouteInstructions(trip);
+      if (!instructions.length) {
+        container.innerHTML = '';
+        return;
+      }
+      container.innerHTML = '<div class="section-title">Route-Anweisungen</div><ol style="margin:0.25rem 0 0 1rem;padding:0;display:grid;gap:0.35rem">' + instructions.map(function(text) { return '<li>' + text + '</li>'; }).join('') + '</ol>';
+    }
+ 
     var ROUTE_DEFAULTS_KEY = 'localosm.routing.defaults';
 
     function getRouteDefaults() {
@@ -485,6 +561,12 @@ data:
 
     function applyRouteDefaults() {
       var defaults = getRouteDefaults();
+      var shortestValue = defaults.shortest;
+      if (typeof shortestValue === 'boolean') {
+        shortestValue = shortestValue ? 1 : 0;
+      } else if (typeof shortestValue !== 'number' || !isFinite(shortestValue)) {
+        shortestValue = 0.2;
+      }
       var entries = [
         ['costing', defaults.costing || 'auto'],
         ['units', defaults.units || 'km'],
@@ -495,8 +577,8 @@ data:
         ['unpaved_penalty', defaults.unpaved_penalty == null ? 0 : defaults.unpaved_penalty],
         ['living_street_penalty', defaults.living_street_penalty == null ? 0 : defaults.living_street_penalty],
         ['primary_penalty', defaults.primary_penalty == null ? 0 : defaults.primary_penalty],
-        ['shortest', defaults.shortest === true ? 'true' : 'false'],
-        ['top_speed', defaults.top_speed == null ? 80 : defaults.top_speed],
+        ['shortest', shortestValue],
+        ['top_speed', defaults.top_speed == null ? 120 : defaults.top_speed],
         ['width', defaults.width == null ? 2.0 : defaults.width],
         ['height', defaults.height == null ? 2.0 : defaults.height],
         ['length', defaults.length == null ? 5.0 : defaults.length],
@@ -504,14 +586,15 @@ data:
         ['axle_load', defaults.axle_load == null ? 1000 : defaults.axle_load],
         ['hazmat', defaults.hazmat ? 'true' : ''],
         ['use_service', defaults.use_service === false ? 'false' : 'true'],
-        ['use_trails', defaults.use_trails === false ? 'false' : 'true'],
-        ['use_tracks', defaults.use_tracks === false ? 'false' : 'true'],
+        ['use_trails', defaults.use_trails === true ? 'true' : 'false'],
+        ['use_tracks', defaults.use_tracks === true ? 'true' : 'false'],
         ['use_residential', defaults.use_residential === false ? 'false' : 'true'],
         ['use_primary', defaults.use_primary === false ? 'false' : 'true']
       ];
       entries.forEach(function(item) {
         setFieldValue(item[0], item[1]);
       });
+      updateShortestLabel();
     }
 
     function saveRouteDefaults() {
@@ -533,6 +616,9 @@ data:
     }
 
     function getPayload() {
+      var shortestRaw = document.getElementById('shortest').value;
+      var shortestValue = parseFloat(shortestRaw);
+      if (!isFinite(shortestValue)) shortestValue = 0.2;
       return {
         start: { lat: parseFloat(document.getElementById('startLat').value),
                  lon: parseFloat(document.getElementById('startLon').value) },
@@ -547,7 +633,7 @@ data:
         unpaved_penalty: parseFloat(document.getElementById('unpaved_penalty').value),
         living_street_penalty: parseFloat(document.getElementById('living_street_penalty').value),
         primary_penalty: parseFloat(document.getElementById('primary_penalty').value),
-        shortest: document.getElementById('shortest').value === 'true',
+        shortest: shortestValue,
         top_speed: parseFloat(document.getElementById('top_speed').value),
         width: parseFloat(document.getElementById('width').value),
         height: parseFloat(document.getElementById('height').value),
@@ -568,8 +654,13 @@ data:
              isFinite(payload.end.lat) && isFinite(payload.end.lon);
     }
 
+    var shortestInput = document.getElementById('shortest');
+    if (shortestInput) {
+      shortestInput.addEventListener('input', updateShortestLabel);
+      shortestInput.addEventListener('change', updateShortestLabel);
+    }
     applyRouteDefaults();
-
+ 
     async function doRoute() {
       var box = document.getElementById('result-box');
       var payload = getPayload();
@@ -593,7 +684,12 @@ data:
         var time = data.time_seconds != null ? fmtDuration(Math.round(data.time_seconds)) : '?';
         box.innerHTML = '<span class="ok">&#10003; Route gefunden</span><br>' +
           'Distanz: <b>' + dist + '</b><br>Fahrzeit: <b>' + time + '</b>';
-        if (data.trip) drawRoute(data.trip);
+        if (data.trip) {
+          drawRoute(data.trip);
+          renderRouteInstructions(data.trip);
+        } else {
+          renderRouteInstructions(null);
+        }
         setMarker('start', payload.start.lat, payload.start.lon);
         setMarker('end', payload.end.lat, payload.end.lon);
       } catch(err) {
@@ -1321,7 +1417,13 @@ data:
                 if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)):
                     options[option_key] = value
 
-            for key in ["shortest", "use_service", "use_trails", "use_tracks", "use_residential", "use_primary"]:
+            if "shortest" in payload:
+                shortest_value = payload.get("shortest")
+                if isinstance(shortest_value, (int, float)) and not isinstance(shortest_value, bool) and math.isfinite(float(shortest_value)):
+                    options["shortest"] = float(shortest_value) >= 0.5
+                else:
+                    options["shortest"] = bool(shortest_value)
+            for key in ["use_service", "use_trails", "use_tracks", "use_residential", "use_primary"]:
                 if key in payload:
                     options[key] = bool(payload.get(key, False))
             if payload.get("hazmat") is not None:
