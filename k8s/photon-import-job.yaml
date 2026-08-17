@@ -140,7 +140,7 @@ spec:
 
               cleanup() {
                 if [ "${SCALED_DOWN}" = "1" ]; then
-                  "${KUBECTL}" scale deployment photon --replicas=1 -n osm || true
+                  "${KUBECTL}" scale deployment photon --replicas="${ORIGINAL_REPLICAS}" -n osm || true
                 fi
                 trim_mount /osm-temp
                 trim_mount /service-data
@@ -205,7 +205,7 @@ spec:
 
               if [ "${SCALED_DOWN}" = "1" ]; then
                 echo '=== Scaling Photon back up ...'
-                "${KUBECTL}" scale deployment photon --replicas=1 -n osm >/dev/null
+                "${KUBECTL}" scale deployment photon --replicas="${ORIGINAL_REPLICAS}" -n osm >/dev/null
                 SCALED_DOWN=0
                 "${KUBECTL}" rollout status deployment/photon -n osm --timeout=600s >/dev/null
               else

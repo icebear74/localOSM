@@ -164,7 +164,7 @@ spec:
               cleanup() {
                 if [ "${SCALED_DOWN}" = "1" ] && [ "${ORIGINAL_REPLICAS}" -gt 0 ]; then
                   echo "[INFO] Restoring deployment/tileserver-gl after premature exit"
-                  "${KUBECTL}" scale deployment tileserver-gl --replicas=1 -n osm || true
+                  "${KUBECTL}" scale deployment tileserver-gl --replicas="${ORIGINAL_REPLICAS}" -n osm || true
                 fi
                 cleanup_temp_dir
                 trim_mount /planet
@@ -222,8 +222,10 @@ spec:
 
               ORIGINAL_REPLICAS=$("${KUBECTL}" get deployment tileserver-gl -n osm -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
               ORIGINAL_REPLICAS="${ORIGINAL_REPLICAS:-0}"
-              if scale_deployment 0; then
-                SCALED_DOWN=1
+              if [ "${ORIGINAL_REPLICAS}" -gt 0 ]; then
+                if scale_deployment 0; then
+                  SCALED_DOWN=1
+                fi
               fi
 
               mv -f "${OUTPUT_NEW}" "${OUTPUT_ACTIVE}"
@@ -231,7 +233,7 @@ spec:
               trim_mount /tileserver-gl
 
               if [ "${SCALED_DOWN}" = "1" ] && [ "${ORIGINAL_REPLICAS}" -gt 0 ]; then
-                scale_deployment 1 || true
+                scale_deployment "${ORIGINAL_REPLICAS}" || true
                 SCALED_DOWN=0
               fi
 
