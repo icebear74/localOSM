@@ -56,8 +56,20 @@ spec:
               until { [ -f "$DB" ] && [ -f "$IMPORT_FINISHED" ]; } || { [ -f "$STAGING_DB" ] && [ -f "$STAGING_IMPORT_FINISHED" ]; }; do
                 CURRENT_READY=false
                 STAGING_READY=false
+                CURRENT_DIR_PRESENT=false
+                STAGING_DIR_PRESENT=false
+                if [ -d "${PGDATA}" ] && [ -n "$(ls -A "${PGDATA}" 2>/dev/null)" ]; then
+                  CURRENT_DIR_PRESENT=true
+                fi
+                if [ -d "${PGDATA_ROOT}/staging" ] && [ -n "$(ls -A "${PGDATA_ROOT}/staging" 2>/dev/null)" ]; then
+                  STAGING_DIR_PRESENT=true
+                fi
                 [ -f "$DB" ] && [ -f "$IMPORT_FINISHED" ] && CURRENT_READY=true
                 [ -f "$STAGING_DB" ] && [ -f "$STAGING_IMPORT_FINISHED" ] && STAGING_READY=true
+                if [ "$CURRENT_DIR_PRESENT" != true ] && [ "$STAGING_DIR_PRESENT" != true ]; then
+                  echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') No active or staged Nominatim database found under ${PGDATA_ROOT}; refusing to start an import from the deployment pod."
+                  exit 1
+                fi
                 MISSING=""
                 if [ "$CURRENT_READY" != true ]; then
                   [ -f "$DB" ] || MISSING="$DB"
@@ -146,6 +158,8 @@ spec:
               # whose "pg_ctl_options" value is appended verbatim to the
               # pg_ctl command line, so set the timeout there instead.
               PG_CTL_CONF=/etc/postgresql/16/main/pg_ctl.conf
+              LEGACY_PGDATA_DIR=/var/lib/postgresql/16/main
+              LEGACY_IMPORT_FINISHED="${LEGACY_PGDATA_DIR}/import-finished"
               mkdir -p "$(dirname "${PG_CTL_CONF}")"
               echo "pg_ctl_options = '-t ${PGCTLTIMEOUT}'" > "${PG_CTL_CONF}"
               PG_DATA_DIR="${PGDATA:-/var/lib/postgresql/16/main}"
@@ -174,6 +188,12 @@ spec:
                 touch "${CURRENT_DATA_DIR}/import-finished"
                 fstrim -av "${PG_DATA_ROOT}" >/dev/null 2>&1 || true
               fi
+              if [ ! -f "${CURRENT_DATA_DIR}/PG_VERSION" ] || [ ! -f "${CURRENT_DATA_DIR}/import-finished" ]; then
+                echo "ERROR: no imported Nominatim database is available at ${CURRENT_DATA_DIR}, and no staged database could be promoted." >&2
+                exit 1
+              fi
+              mkdir -p "${LEGACY_PGDATA_DIR}"
+              ln -sfn "${CURRENT_DATA_DIR}/import-finished" "${LEGACY_IMPORT_FINISHED}"
               # Photon (k8s/photon-import-job.yaml) builds its search index directly
               # from this running Nominatim's embedded Postgres over the network (via
               # the nominatim-postgres Service below) instead of downloading OSM data
