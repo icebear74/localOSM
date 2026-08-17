@@ -37,8 +37,8 @@ spec:
       volumes:
         - name: bootstrap-assets
           hostPath:
-            path: /mnt/OSM
-            type: DirectoryOrCreate
+            path: /mnt/OSM/tileserver/bootstrap
+            type: Directory
         - name: tileserver-gl
           persistentVolumeClaim:
             claimName: tileserver-gl
