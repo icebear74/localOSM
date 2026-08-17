@@ -218,7 +218,12 @@ data:
     </div>
 
     <script src="/static/maplibre-gl.js"></script>
+    <script id="service-targets-json" type="application/json">{{SERVICE_TARGETS_JSON}}</script>
     <script>
+    var SERVICE_TARGETS = {};
+    try {
+      SERVICE_TARGETS = JSON.parse(document.getElementById('service-targets-json').textContent || '{}');
+    } catch (e) {}
     function resolveServiceTarget(key, fallbackBase) {
       var configured = (SERVICE_TARGETS && SERVICE_TARGETS[key]) || '';
       if (configured) return configured.replace(/\/+$/, '');
