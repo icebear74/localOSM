@@ -115,6 +115,21 @@
       }
     },
     {
+      "id": "landuse-construction",
+      "type": "fill",
+      "source": "openmaptiles",
+      "source-layer": "landuse",
+      "filter": [
+        "==",
+        "class",
+        "construction"
+      ],
+      "paint": {
+        "fill-color": "#7f4e3c",
+        "fill-opacity": 0.78
+      }
+    },
+    {
       "id": "water",
       "type": "fill",
       "source": "openmaptiles",
@@ -494,6 +509,135 @@
       }
     },
     {
+      "id": "transportation-attraction",
+      "type": "line",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "==",
+        "class",
+        "transit"
+      ],
+      "minzoom": 11,
+      "paint": {
+        "line-color": "#ff8a65",
+        "line-width": {
+          "stops": [
+            [
+              11,
+              1.2
+            ],
+            [
+              13,
+              2.2
+            ],
+            [
+              16,
+              4.2
+            ]
+          ]
+        },
+        "line-dasharray": [
+          2,
+          1.2
+        ]
+      }
+    },
+    {
+      "id": "transportation-construction",
+      "type": "line",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "==",
+        "class",
+        "construction"
+      ],
+      "minzoom": 11,
+      "paint": {
+        "line-color": "#d7a47a",
+        "line-width": {
+          "stops": [
+            [
+              11,
+              1.2
+            ],
+            [
+              13,
+              2.2
+            ],
+            [
+              16,
+              3.8
+            ]
+          ]
+        },
+        "line-dasharray": [
+          1.6,
+          1.0
+        ]
+      }
+    },
+    {
+      "id": "building-extrusion",
+      "type": "fill-extrusion",
+      "source": "openmaptiles",
+      "source-layer": "building",
+      "minzoom": 14,
+      "paint": {
+        "fill-extrusion-color": [
+          "case",
+          [
+            "==",
+            [
+              "get",
+              "class"
+            ],
+            "construction"
+          ],
+          "#7f4e3c",
+          "#7c8988"
+        ],
+        "fill-extrusion-height": [
+          "coalesce",
+          [
+            "to-number",
+            [
+              "get",
+              "height"
+            ]
+          ],
+          [
+            "to-number",
+            [
+              "get",
+              "render_height"
+            ]
+          ],
+          12
+        ],
+        "fill-extrusion-base": [
+          "coalesce",
+          [
+            "to-number",
+            [
+              "get",
+              "min_height"
+            ]
+          ],
+          [
+            "to-number",
+            [
+              "get",
+              "render_min_height"
+            ]
+          ],
+          0
+        ],
+        "fill-extrusion-opacity": 0.9
+      }
+    },
+    {
       "id": "building",
       "type": "fill",
       "source": "openmaptiles",
@@ -578,6 +722,49 @@
         "text-color": "#f0efe8",
         "text-halo-color": "#10151d",
         "text-halo-width": 1.4
+      }
+    },
+    {
+      "id": "poi-attractions",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "poi",
+      "minzoom": 12,
+      "filter": [
+        "==",
+        "class",
+        "attraction"
+      ],
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name_de"
+          ],
+          [
+            "get",
+            "name_en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
+        "text-font": [
+          "NotoSansRegular"
+        ],
+        "text-size": 11,
+        "text-offset": [
+          0,
+          0.8
+        ],
+        "text-anchor": "top"
+      },
+      "paint": {
+        "text-color": "#ffb38a",
+        "text-halo-color": "#10151d",
+        "text-halo-width": 1.2
       }
     },
     {
