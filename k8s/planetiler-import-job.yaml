@@ -29,7 +29,7 @@ spec:
               set -eu
               echo '=== Planetiler Tile Generation ==='
               test -f /planet/europa.osm.pbf
-              mkdir -p /tileserver-gl /tileserver-gl-temp /tileserver-gl-temp/planetiler-work /tileserver-gl-temp/sources /tileserver-gl-temp/data/sources /tools /osm-status
+              mkdir -p /tileserver-gl /osm-temp/tileserver/work /osm-temp/tileserver/downloads /tools /osm-status
           resources:
             requests:
               cpu: "50m"
@@ -42,8 +42,8 @@ spec:
               mountPath: /planet
             - name: tileserver-gl
               mountPath: /tileserver-gl
-            - name: tileserver-gl-temp
-              mountPath: /tileserver-gl-temp
+            - name: osm-temp
+              mountPath: /osm-temp
             - name: tools
               mountPath: /tools
             - name: osm-status
@@ -81,15 +81,15 @@ spec:
           args:
             - |
               set -eu
-              mkdir -p /tileserver-gl-temp/sources /tileserver-gl-temp/planetiler-work /tileserver-gl-temp/data/sources
-              if [ ! -s /tileserver-gl-temp/sources/lake_centerline.shp.zip ]; then
-                wget -q -O /tileserver-gl-temp/sources/lake_centerline.shp.zip https://github.com/acalcutt/osm-lakelines/releases/latest/download/lake_centerline.shp.zip
+              mkdir -p /osm-temp/tileserver/downloads /osm-temp/tileserver/work
+              if [ ! -s /osm-temp/tileserver/downloads/lake_centerline.shp.zip ]; then
+                wget -q -O /osm-temp/tileserver/downloads/lake_centerline.shp.zip https://github.com/acalcutt/osm-lakelines/releases/latest/download/lake_centerline.shp.zip
               fi
-              if [ ! -s /tileserver-gl-temp/sources/water-polygons-split-3857.zip ]; then
-                wget -q -O /tileserver-gl-temp/sources/water-polygons-split-3857.zip https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip
+              if [ ! -s /osm-temp/tileserver/downloads/water-polygons-split-3857.zip ]; then
+                wget -q -O /osm-temp/tileserver/downloads/water-polygons-split-3857.zip https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip
               fi
-              if [ ! -s /tileserver-gl-temp/sources/natural_earth_vector.sqlite.zip ]; then
-                wget -q -O /tileserver-gl-temp/sources/natural_earth_vector.sqlite.zip https://naciscdn.org/naturalearth/packages/natural_earth_vector.sqlite.zip
+              if [ ! -s /osm-temp/tileserver/downloads/natural_earth_vector.sqlite.zip ]; then
+                wget -q -O /osm-temp/tileserver/downloads/natural_earth_vector.sqlite.zip https://naciscdn.org/naturalearth/packages/natural_earth_vector.sqlite.zip
               fi
           resources:
             requests:
@@ -99,13 +99,13 @@ spec:
               cpu: "200m"
               memory: "512Mi"
           volumeMounts:
-            - name: tileserver-gl-temp
-              mountPath: /tileserver-gl-temp
+            - name: osm-temp
+              mountPath: /osm-temp
       containers:
         - name: tileserver-import
           image: eclipse-temurin:22-jdk
           imagePullPolicy: Always
-          workingDir: /tileserver-gl-temp
+          workingDir: /osm-temp/tileserver
           securityContext:
             runAsUser: 0
             runAsGroup: 0
@@ -127,9 +127,8 @@ spec:
               KUBECTL=/tools/kubectl
               PLANETILER_JAR=/tools/planetiler.jar
               SOURCE_OSM=/planet/europa.osm.pbf
-              TEMP_DIR=/tileserver-gl-temp/planetiler-work
-              TEMP_SOURCES=/tileserver-gl-temp/sources
-              DATA_SOURCES=/tileserver-gl-temp/data/sources
+              TEMP_DIR=/osm-temp/tileserver/work
+              TEMP_SOURCES=/osm-temp/tileserver/downloads
               OUTPUT_NEW=/tileserver-gl/planet-NEW.mbtiles
               OUTPUT_ACTIVE=/tileserver-gl/planet.mbtiles
               SCALED_DOWN=0
@@ -168,7 +167,7 @@ spec:
                 fi
                 cleanup_temp_dir
                 trim_mount /planet
-                trim_mount /tileserver-gl-temp
+                trim_mount /osm-temp
                 trim_mount /tileserver-gl
                 trim_mount /osm-status
               }
@@ -216,7 +215,7 @@ spec:
               fi
 
               trim_mount /tileserver-gl
-              trim_mount /tileserver-gl-temp
+              trim_mount /osm-temp
 
               if scale_deployment 0; then
                 SCALED_DOWN=1
@@ -233,14 +232,14 @@ spec:
 
               cleanup_temp_dir
 
-              trim_mount /tileserver-gl-temp
+              trim_mount /osm-temp
           volumeMounts:
             - name: planet
               mountPath: /planet
             - name: tileserver-gl
               mountPath: /tileserver-gl
-            - name: tileserver-gl-temp
-              mountPath: /tileserver-gl-temp
+            - name: osm-temp
+              mountPath: /osm-temp
             - name: osm-status
               mountPath: /osm-status
             - name: tools
@@ -252,9 +251,9 @@ spec:
         - name: planet
           persistentVolumeClaim:
             claimName: planet
-        - name: tileserver-gl-temp
+        - name: osm-temp
           persistentVolumeClaim:
-            claimName: tileserver-gl-temp
+            claimName: osm-temp
         - name: tileserver-gl
           persistentVolumeClaim:
             claimName: tileserver-gl

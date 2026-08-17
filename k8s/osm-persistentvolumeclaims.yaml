@@ -14,15 +14,15 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: tileserver-gl-temp
+  name: osm-temp
   namespace: osm
 spec:
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteMany
   storageClassName: longhorn
   resources:
     requests:
-      storage: 400Gi
+      storage: 700Gi
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -36,19 +36,6 @@ spec:
   resources:
     requests:
       storage: 150Gi
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: nominatim-temp
-  namespace: osm
-spec:
-  accessModes:
-    - ReadWriteMany
-  storageClassName: longhorn
-  resources:
-    requests:
-      storage: 400Gi
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

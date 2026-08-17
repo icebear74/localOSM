@@ -386,6 +386,7 @@ spec:
               from pathlib import Path
 
               data_dir = Path('/data')
+              temp_dir = Path('/temp')
               request_file = data_dir / 'status' / 'import-request.json'
               with request_file.open('r', encoding='utf-8') as handle:
                   request = json.load(handle)
@@ -404,7 +405,7 @@ spec:
               merge_requested = bool(request.get('merge_requested', True))
 
               library_dir = data_dir / 'library'
-              import_dir = data_dir / 'import'
+              import_dir = temp_dir / 'import'
               library_dir.mkdir(parents=True, exist_ok=True)
               import_dir.mkdir(parents=True, exist_ok=True)
 
@@ -522,16 +523,15 @@ spec:
             - name: osm-data
               mountPath: /data
             - name: temp-data
-              mountPath: /data/import
+              mountPath: /temp
       volumes:
         - name: osm-data
           hostPath:
             path: ${DATA_DIR}
             type: DirectoryOrCreate
         - name: temp-data
-          hostPath:
-            path: ${TEMP_DIR}/import
-            type: DirectoryOrCreate
+          persistentVolumeClaim:
+            claimName: osm-temp
 EOF
   local rc=0
   wait_for_job "${job_name}" || rc=$?
@@ -739,7 +739,7 @@ run_step() {
     archive_dir "$(dirname "${staging_dir}")" "failed"
     return 1
   fi
-  if [ "${service}" = "nominatim" ]; then
+  if [ "${service}" = "nominatim" ] || [ "${service}" = "valhalla" ] || [ "${service}" = "photon" ]; then
     write_state false "${service}" 100 "${service} import completed." "The import job handles promotion and cleanup internally."
     return 0
   fi

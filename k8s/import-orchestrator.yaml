@@ -129,6 +129,5 @@ spec:
             path: /mnt/OSM
             type: DirectoryOrCreate
         - name: temp-data
-          hostPath:
-            path: __OSM_TEMP_DIR__
-            type: DirectoryOrCreate
+          persistentVolumeClaim:
+            claimName: osm-temp

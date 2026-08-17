@@ -17,7 +17,7 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - name: PGDATA
-              value: /source/current
+              value: /source/nominatim/work/current
             - name: PGDATA_TARGET_CURRENT
               value: /target/current
             - name: PGDATA_TARGET_STAGED
@@ -41,7 +41,7 @@ spec:
               echo "Starting PostgreSQL to run cleanup on the temporary database..."
               mkdir -p /etc/postgresql/16/main/conf.d
               cat > /etc/postgresql/16/main/conf.d/zz-promotion.conf <<'EOF'
-              data_directory = '/source/current'
+              data_directory = '/source/nominatim/work/current'
               EOF
               service postgresql start
               for _ in $(seq 1 60); do
@@ -66,7 +66,7 @@ spec:
               service postgresql stop
 
               echo "Copying the compacted database into the production volume..."
-              cp -a /source/current/. "${PGDATA_TARGET_STAGED}/"
+              cp -a "${PGDATA}/." "${PGDATA_TARGET_STAGED}/"
               chown -R 100:100 "${PGDATA_TARGET_STAGED}"
               touch "${PGDATA_TARGET_STAGED}/import-finished"
 
@@ -83,14 +83,14 @@ spec:
               cpu: "4"
               memory: "8Gi"
           volumeMounts:
-            - name: nominatim-temp
+            - name: osm-temp
               mountPath: /source
             - name: nominatim
               mountPath: /target
       volumes:
-        - name: nominatim-temp
+        - name: osm-temp
           persistentVolumeClaim:
-            claimName: nominatim-temp
+            claimName: osm-temp
         - name: nominatim
           persistentVolumeClaim:
             claimName: nominatim

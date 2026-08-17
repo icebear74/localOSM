@@ -17,7 +17,7 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - name: PBF_PATH
-              value: /planet/europa.osm.pbf
+              value: /osm-temp/import/planet.osm.pbf
             - name: NOMINATIM_PASSWORD
               valueFrom:
                 configMapKeyRef:
@@ -34,7 +34,7 @@ spec:
                   name: osm-nominatim-import-config
                   key: import_cache_mb
             - name: PGDATA
-              value: /nominatim-data/current
+              value: /osm-temp/nominatim/work/current
             - name: PGDATA_TARGET_ROOT
               value: /nominatim-data-prod
           resources:
@@ -49,6 +49,7 @@ spec:
             - |
               set -euo pipefail
               PGDATA_DIR="${PGDATA:-/nominatim-data/current}"
+              WORK_ROOT="$(dirname "${PGDATA_DIR}")"
               PBF_SOURCE="${PBF_PATH:-/planet/europa.osm.pbf}"
               echo "Resetting Nominatim temp database at ${PGDATA_DIR}"
               rm -rf "${PGDATA_DIR}" 2>/dev/null || true
@@ -179,15 +180,14 @@ spec:
               echo "WAL-Flush abgeschlossen. Setze import-finished Marker..."
               touch "${SOURCE_DATA_DIR}/import-finished"
 
+              echo "Cleaning temporary Nominatim work directory..."
+              find "${WORK_ROOT}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
               echo "Running final filesystem cleanup on the production volume..."
               fstrim -av "${TARGET_ROOT}" >/dev/null 2>&1 || true
           volumeMounts:
-            - name: import-data
-              mountPath: /nominatim/data/import
-            - name: planet
-              mountPath: /planet
-            - name: nominatim-data
-              mountPath: /nominatim-data
+            - name: osm-temp
+              mountPath: /osm-temp
             - name: nominatim-production-data
               mountPath: /nominatim-data-prod
             - name: nominatim-postgres-tuning
@@ -197,16 +197,9 @@ spec:
             - name: container-tmp
               mountPath: /tmp
       volumes:
-        - name: import-data
-          hostPath:
-            path: /mnt/OSM/TempDir/import
-            type: DirectoryOrCreate
-        - name: planet
+        - name: osm-temp
           persistentVolumeClaim:
-            claimName: planet
-        - name: nominatim-data
-          persistentVolumeClaim:
-            claimName: nominatim-temp
+            claimName: osm-temp
         - name: nominatim-production-data
           persistentVolumeClaim:
             claimName: nominatim
@@ -217,6 +210,4 @@ spec:
               - key: import-tuning.conf
                 path: import-tuning.conf
         - name: container-tmp
-          hostPath:
-            path: /mnt/OSM/TempDir/tmp
-            type: DirectoryOrCreate
+          emptyDir: {}
