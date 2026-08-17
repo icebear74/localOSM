@@ -40,8 +40,8 @@ spec:
 
               echo "Starting PostgreSQL to run cleanup on the temporary database..."
               mkdir -p /etc/postgresql/16/main/conf.d
-              cat > /etc/postgresql/16/main/conf.d/zz-promotion.conf <<'EOF'
-              data_directory = '/source/nominatim/work/current'
+              cat > /etc/postgresql/16/main/conf.d/zz-promotion.conf <<EOF
+              data_directory = '${PGDATA}'
               EOF
               service postgresql start
               for _ in $(seq 1 60); do
