@@ -176,9 +176,8 @@ spec:
           persistentVolumeClaim:
             claimName: osm-temp
         - name: valhalla-root
-          hostPath:
-            path: /mnt/OSM/valhalla
-            type: DirectoryOrCreate
+          persistentVolumeClaim:
+            claimName: valhalla
         - name: valhalla-config
           configMap:
             name: osm-valhalla-import-config

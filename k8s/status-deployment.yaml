@@ -88,6 +88,10 @@ spec:
               mountPath: /config
             - name: data
               mountPath: /mnt/OSM
+            - name: valhalla-data
+              mountPath: /mnt/OSM/valhalla
+            - name: photon-data
+              mountPath: /mnt/OSM/photon
             - name: status-data
               mountPath: /mnt/OSM/status
             - name: temp-data
@@ -111,6 +115,12 @@ spec:
         - name: temp-data
           persistentVolumeClaim:
             claimName: osm-temp
+        - name: valhalla-data
+          persistentVolumeClaim:
+            claimName: valhalla
+        - name: photon-data
+          persistentVolumeClaim:
+            claimName: photon
         - name: tileserver-active
           persistentVolumeClaim:
             claimName: tileserver-gl

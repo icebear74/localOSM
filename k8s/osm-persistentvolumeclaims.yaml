@@ -53,6 +53,32 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
+  name: valhalla
+  namespace: osm
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: photon
+  namespace: osm
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
   name: osm-status
   namespace: osm
 spec:

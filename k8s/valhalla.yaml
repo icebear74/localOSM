@@ -16,13 +16,30 @@ spec:
         app: valhalla
     spec:
       initContainers:
+        - name: prepare-data-dirs
+          image: busybox:1.36
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              mkdir -p /service-data/active
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "16Mi"
+            limits:
+              cpu: "50m"
+              memory: "64Mi"
+          volumeMounts:
+            - name: valhalla-data
+              mountPath: /service-data
         - name: wait-for-tiles
           image: busybox:1.36
           command: ["/bin/sh", "-c"]
           args:
             - |
-              until [ -f /custom_files/valhalla_tiles.tar ]; do
-                echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for Valhalla tiles at /custom_files/valhalla_tiles.tar ..."
+              until [ -f /service-data/active/valhalla_tiles.tar ]; do
+                echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for Valhalla tiles at /service-data/active/valhalla_tiles.tar ..."
                 sleep 30
               done
               echo "Tiles found — starting Valhalla service."
@@ -35,7 +52,7 @@ spec:
               memory: "64Mi"
           volumeMounts:
             - name: valhalla-data
-              mountPath: /custom_files
+              mountPath: /service-data
       containers:
         - name: valhalla
           image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
@@ -62,11 +79,11 @@ spec:
           volumeMounts:
             - name: valhalla-data
               mountPath: /custom_files
+              subPath: active
       volumes:
         - name: valhalla-data
-          hostPath:
-            path: /mnt/OSM/valhalla/active
-            type: DirectoryOrCreate
+          persistentVolumeClaim:
+            claimName: valhalla
 ---
 apiVersion: v1
 kind: Service

@@ -26,7 +26,8 @@ spec:
           args:
             - |
               set -e
-              JAR="/photon/bin/photon-${PHOTON_VERSION}.jar"
+              mkdir -p /service-data/bin
+              JAR="/service-data/bin/photon-${PHOTON_VERSION}.jar"
               if [ -s "${JAR}" ]; then
                 echo "Photon ${PHOTON_VERSION} jar already present at ${JAR}."
               else
@@ -43,8 +44,8 @@ spec:
               cpu: "200m"
               memory: "256Mi"
           volumeMounts:
-            - name: photon-bin
-              mountPath: /photon/bin
+            - name: photon-root
+              mountPath: /service-data
         - name: fetch-kubectl
           image: curlimages/curl:8.10.1
           command: ["/bin/sh", "-c"]
@@ -140,7 +141,6 @@ spec:
                 if [ "${SCALED_DOWN}" = "1" ]; then
                   "${KUBECTL}" scale deployment photon --replicas=1 -n osm || true
                 fi
-                trim_mount /photon/bin
                 trim_mount /osm-temp
                 trim_mount /service-data
                 trim_mount /tools
@@ -166,7 +166,7 @@ spec:
               cd "${WORK_DIR}"
               DB_SECRET="${PHOTON_DB_PASSWORD}"
               DB_PASSWORD_FLAG="-pass""word"
-              java -Xms16g -Xmx32g -XX:+UseG1GC -jar "/photon/bin/photon-${PHOTON_VERSION}.jar" import \
+              java -Xms16g -Xmx32g -XX:+UseG1GC -jar "/service-data/bin/photon-${PHOTON_VERSION}.jar" import \
                 -host "${NOMINATIM_DB_HOST}" -port "${NOMINATIM_DB_PORT}" \
                 -database "${NOMINATIM_DB_NAME}" -user "${PHOTON_DB_USER}" \
                 "${DB_PASSWORD_FLAG}" "${DB_SECRET}" \
@@ -201,25 +201,18 @@ spec:
               cleanup_work_dir
               echo '=== Photon import complete. Index promoted and temp work directory cleaned. ==='
           volumeMounts:
-            - name: photon-bin
-              mountPath: /photon/bin
-            - name: osm-temp
-              mountPath: /osm-temp
             - name: photon-root
               mountPath: /service-data
+            - name: osm-temp
+              mountPath: /osm-temp
             - name: tools
               mountPath: /tools
       volumes:
-        - name: photon-bin
-          hostPath:
-            path: /mnt/OSM/photon/bin
-            type: DirectoryOrCreate
         - name: osm-temp
           persistentVolumeClaim:
             claimName: osm-temp
         - name: photon-root
-          hostPath:
-            path: /mnt/OSM/photon
-            type: DirectoryOrCreate
+          persistentVolumeClaim:
+            claimName: photon
         - name: tools
           emptyDir: {}

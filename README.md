@@ -21,7 +21,7 @@ A self-hosted OSM stack on K3s with a read-only status dashboard, a routing web 
 | `k8s/valhalla-import-job.yaml` | Valhalla import job |
 | `k8s/planetiler-import-job.yaml` | TileServer/Planetiler import job on the Longhorn PVCs |
 | `k8s/tileserver-gl-deployment.yaml` | TileServer-GL deployment and service using the `tileserver-gl` PVC |
-| `k8s/osm-persistentvolumeclaims.yaml` | Longhorn PVC definitions for `planet`, shared temp PVC `osm-temp`, `tileserver-gl`, `nominatim`, and `osm-status` |
+| `k8s/osm-persistentvolumeclaims.yaml` | Longhorn PVC definitions for `planet`, shared temp PVC `osm-temp`, `tileserver-gl`, `nominatim`, `valhalla`, `photon`, and `osm-status` |
 | `k8s/planetiler-rbac.yaml` | ServiceAccount/Role/RoleBinding for the Planetiler import job |
 | `k8s/tileserver-init-assets-job.yaml` | One-shot job that copies static TileServer assets from the host bootstrap directory into the PVC |
 | `k8s/status.yaml` | Read-only status dashboard |
@@ -45,6 +45,8 @@ Longhorn PVCs managed by `k8s/osm-persistentvolumeclaims.yaml`:
 - `osm-temp` (700Gi, RWX) – shared import scratch/download volume (`import/` plus per-service work directories)
 - `tileserver-gl` (150Gi, RWO) – live TileServer assets (`planet.mbtiles`, fonts, styles, sprites)
 - `nominatim` (150Gi, RWX) – production Nominatim/Postgres data promoted by the Nominatim import job itself
+- `valhalla` (100Gi, RWX) – active/next/previous Valhalla graph data promoted by the Valhalla import job
+- `photon` (100Gi, RWX) – Photon release jar plus active/next/previous Photon index data
 - `osm-status` (10Mi, RWX) – shared status/log files
 
 Important host subdirectories under `/mnt/OSM`:
@@ -61,8 +63,8 @@ Important scratch paths under the shared Kubernetes temp PVC mounted inside the 
 - `tileserver/work` – Planetiler work directory, cleaned after the new `planet.mbtiles` has been activated
 - `tileserver/downloads` – reusable Planetiler side downloads that may remain between runs
 - `nominatim/work` – temporary Postgres/Nominatim import working data, cleaned after promotion into the `nominatim` PVC
-- `valhalla/work` – temporary Valhalla graph build directory, cleaned after activation into `/mnt/OSM/valhalla/active`
-- `photon/work` – temporary Photon index build directory, cleaned after activation into `/mnt/OSM/photon/active`
+- `valhalla/work` – temporary Valhalla graph build directory, cleaned after activation into the `valhalla` PVC
+- `photon/work` – temporary Photon index build directory, cleaned after activation into the `photon` PVC
 
 ## Deploy
 
