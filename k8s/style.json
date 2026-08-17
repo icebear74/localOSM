@@ -110,8 +110,8 @@
         "park"
       ],
       "paint": {
-        "fill-color": "#b8d5ff",
-        "fill-opacity": 0.85
+        "fill-color": "#c7a97a",
+        "fill-opacity": 0.86
       }
     },
     {
@@ -506,6 +506,56 @@
           2,
           2
         ]
+      }
+    },
+    {
+      "id": "road-direction-arrows",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "minzoom": 13,
+      "filter": [
+        "in",
+        "class",
+        "motorway",
+        "trunk",
+        "primary",
+        "secondary",
+        "tertiary",
+        "minor",
+        "service",
+        "track",
+        "path"
+      ],
+      "layout": {
+        "symbol-placement": "line",
+        "text-field": "\u2192",
+        "text-font": [
+          "NotoSansRegular"
+        ],
+        "text-size": {
+          "stops": [
+            [
+              13,
+              8
+            ],
+            [
+              16,
+              11
+            ]
+          ]
+        },
+        "text-rotation-alignment": "map",
+        "text-keep-upright": false,
+        "symbol-spacing": 180,
+        "text-padding": 3,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false
+      },
+      "paint": {
+        "text-color": "#6f5a3d",
+        "text-halo-color": "#f6efe4",
+        "text-halo-width": 0.8
       }
     },
     {
