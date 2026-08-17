@@ -8,6 +8,7 @@ data:
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     import gzip
     import json
+    import math
     import os
     import re
     import urllib.parse
@@ -16,11 +17,29 @@ data:
 
     HOST = os.environ.get("WEB_HOST", "0.0.0.0")
     PORT = int(os.environ.get("WEB_PORT", "8080"))
-    VALHALLA_URL = os.environ.get("VALHALLA_URL", "http://valhalla.osm.svc.cluster.local:8002")
-    NOMINATIM_URL = os.environ.get("NOMINATIM_URL", "http://nominatim.osm.svc.cluster.local:8080")
-    PHOTON_URL = os.environ.get("PHOTON_URL", "http://photon.osm.svc.cluster.local:2322")
-    TILESERVER_URL = os.environ.get("TILESERVER_URL", "http://tileserver-gl.osm.svc.cluster.local")
-    STATUS_URL = os.environ.get("STATUS_URL", "")
+
+    def _load_service_targets():
+        raw = os.environ.get("SERVICE_TARGETS_JSON", "")
+        if not raw:
+            return {}
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        cleaned = {}
+        for key, value in payload.items():
+            if isinstance(value, str) and value.strip():
+                cleaned[key] = value.strip()
+        return cleaned
+
+    SERVICE_TARGETS = _load_service_targets()
+    VALHALLA_URL = SERVICE_TARGETS.get("valhalla", os.environ.get("VALHALLA_URL", "http://valhalla.osm.svc.cluster.local:8002"))
+    NOMINATIM_URL = SERVICE_TARGETS.get("nominatim", os.environ.get("NOMINATIM_URL", "http://nominatim.osm.svc.cluster.local:8080"))
+    PHOTON_URL = SERVICE_TARGETS.get("photon", os.environ.get("PHOTON_URL", "http://photon.osm.svc.cluster.local:2322"))
+    TILESERVER_URL = SERVICE_TARGETS.get("tileserver", os.environ.get("TILESERVER_URL", "http://tileserver-gl.osm.svc.cluster.local"))
+    STATUS_URL = SERVICE_TARGETS.get("status", os.environ.get("STATUS_URL", ""))
     PLANET_UPDATE_REQUEST_FILE = os.environ.get("PLANET_UPDATE_REQUEST_FILE", "/state/planet-update-request.flag")
     PLANET_UPDATE_STATUS_FILE = os.environ.get("PLANET_UPDATE_STATUS_FILE", "/status/planet-update.json")
 
@@ -136,12 +155,53 @@ data:
             </select>
           </div>
         </div>
-        <div>
-          <label><input type="checkbox" id="avoid_tolls"> Mautstraßen meiden</label>
+        <div class="row2">
+          <div><label><input type="checkbox" id="avoid_tolls"> Mautstraßen meiden</label></div>
+          <div><label><input type="checkbox" id="avoid_ferries"> Fähren meiden</label></div>
+        </div>
+        <div class="row2">
+          <div><label><input type="checkbox" id="avoid_tunnels"> Tunnel meiden</label></div>
+          <div><label><input type="checkbox" id="shortest"> Kürzeste Route bevorzugen</label></div>
+        </div>
+        <div class="row2">
+          <div><label><input type="checkbox" id="use_highways"> Autobahnen bevorzugen</label></div>
+          <div><label><input type="checkbox" id="prefer_unpaved"> Unbefestigte Wege vermeiden</label></div>
+        </div>
+        <div class="row2">
+          <div><label><input type="checkbox" id="use_living_streets"> Wohnstraßen erlauben</label></div>
+          <div><label><input type="checkbox" id="prefer_primary"> Primärstraßen bevorzugen</label></div>
+        </div>
+        <div class="row2">
+          <div><label>Max. Geschwindigkeit (km/h)</label><input id="top_speed" type="number" min="1" step="1" value="80"></div>
+          <div><label>Fahrzeugbreite (m)</label><input id="width" type="number" min="0.1" step="0.1" value="2.0"></div>
+        </div>
+        <div class="row2">
+          <div><label>Fahrzeughöhe (m)</label><input id="height" type="number" min="0.1" step="0.1" value="2.0"></div>
+          <div><label>Fahrzeuglänge (m)</label><input id="length" type="number" min="0.1" step="0.1" value="5.0"></div>
+        </div>
+        <div class="row2">
+          <div><label>Fahrzeuggewicht (kg)</label><input id="weight" type="number" min="100" step="100" value="1800"></div>
+          <div><label>Achslast (kg)</label><input id="axle_load" type="number" min="100" step="100" value="1000"></div>
+        </div>
+        <div class="row2">
+          <div><label>Gefährliche Stoffe</label><select id="hazmat"><option value="">Nein</option><option value="true">Ja</option></select></div>
+          <div><label>Service-Strecken</label><select id="use_service"><option value="true">Erlauben</option><option value="false">Vermeiden</option></select></div>
+        </div>
+        <div class="row2">
+          <div><label>Wegenetz: Pfade</label><select id="use_trails"><option value="true">Erlauben</option><option value="false">Vermeiden</option></select></div>
+          <div><label>Wegenetz: Tracks</label><select id="use_tracks"><option value="true">Erlauben</option><option value="false">Vermeiden</option></select></div>
+        </div>
+        <div class="row2">
+          <div><label>Wegenetz: Wohnstraßen</label><select id="use_residential"><option value="true">Erlauben</option><option value="false">Vermeiden</option></select></div>
+          <div><label>Wegenetz: Primär</label><select id="use_primary"><option value="true">Erlauben</option><option value="false">Vermeiden</option></select></div>
+        </div>
+        <div class="row2">
+          <button class="btn btn-secondary" onclick="saveRouteDefaults()">⭐ Als Standard speichern</button>
+          <button class="btn btn-secondary" onclick="resetRouteDefaults()">↺ Standard zurücksetzen</button>
         </div>
         <button class="btn btn-primary" onclick="doRoute()">&#128205; Route berechnen</button>
         <button class="btn btn-secondary" onclick="doDistance()">&#8596; Nur Distanz</button>
-        <p class="hint">Tipp: Klicke auf die Karte, um Start- (1. Klick) und Zielpunkt (2. Klick) zu setzen.</p>
+        <p class="hint">Tipp: Klicke auf die Karte, um Start- (1. Klick) und Zielpunkt (2. Klick) zu setzen. Die erweiterten Optionen lassen sich als Browser-Standard speichern.</p>
         <div id="result-box">Noch keine Anfrage.</div>
 
         <div class="section-title">Planet-Update</div>
@@ -159,13 +219,16 @@ data:
 
     <script src="/static/maplibre-gl.js"></script>
     <script>
-    // Fix service link hostnames
+    function resolveServiceTarget(key, fallbackBase) {
+      var configured = (SERVICE_TARGETS && SERVICE_TARGETS[key]) || '';
+      if (configured) return configured.replace(/\/+$/, '');
+      return fallbackBase.replace(/\/+$/, '');
+    }
     function updateLinks() {
       var baseUrl = location.protocol + '//' + location.hostname;
-      ['status-link'].forEach(function(id) {
-        var a = document.getElementById(id);
-        if (a && a.dataset.port) a.href = baseUrl + ':' + a.dataset.port + '/';
-      });
+      var statusUrl = resolveServiceTarget('status', baseUrl + ':30083');
+      var statusLink = document.getElementById('status-link');
+      if (statusLink) statusLink.href = statusUrl + '/';
     }
     updateLinks();
 
@@ -392,6 +455,78 @@ data:
       return h + ' h ' + (m > 0 ? m + ' min' : '');
     }
 
+    var ROUTE_DEFAULTS_KEY = 'localosm.routing.defaults';
+
+    function getRouteDefaults() {
+      try {
+        var stored = localStorage.getItem(ROUTE_DEFAULTS_KEY);
+        return stored ? JSON.parse(stored) : {};
+      } catch (e) {
+        return {};
+      }
+    }
+
+    function setFieldValue(id, value) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      if (el.type === 'checkbox') {
+        el.checked = !!value;
+      } else if (el.tagName === 'SELECT') {
+        el.value = value || el.options[0].value;
+      } else {
+        el.value = value == null ? '' : value;
+      }
+    }
+
+    function applyRouteDefaults() {
+      var defaults = getRouteDefaults();
+      var entries = [
+        ['costing', defaults.costing || 'auto'],
+        ['units', defaults.units || 'km'],
+        ['avoid_tolls', defaults.avoid_tolls || false],
+        ['avoid_ferries', defaults.avoid_ferries || false],
+        ['avoid_tunnels', defaults.avoid_tunnels || false],
+        ['shortest', defaults.shortest || false],
+        ['use_highways', defaults.use_highways || false],
+        ['prefer_unpaved', defaults.prefer_unpaved || false],
+        ['use_living_streets', defaults.use_living_streets || false],
+        ['prefer_primary', defaults.prefer_primary || false],
+        ['top_speed', defaults.top_speed == null ? 80 : defaults.top_speed],
+        ['width', defaults.width == null ? 2.0 : defaults.width],
+        ['height', defaults.height == null ? 2.0 : defaults.height],
+        ['length', defaults.length == null ? 5.0 : defaults.length],
+        ['weight', defaults.weight == null ? 1800 : defaults.weight],
+        ['axle_load', defaults.axle_load == null ? 1000 : defaults.axle_load],
+        ['hazmat', defaults.hazmat ? 'true' : ''],
+        ['use_service', defaults.use_service === false ? 'false' : 'true'],
+        ['use_trails', defaults.use_trails === false ? 'false' : 'true'],
+        ['use_tracks', defaults.use_tracks === false ? 'false' : 'true'],
+        ['use_residential', defaults.use_residential === false ? 'false' : 'true'],
+        ['use_primary', defaults.use_primary === false ? 'false' : 'true']
+      ];
+      entries.forEach(function(item) {
+        setFieldValue(item[0], item[1]);
+      });
+    }
+
+    function saveRouteDefaults() {
+      var payload = getPayload();
+      try {
+        localStorage.setItem(ROUTE_DEFAULTS_KEY, JSON.stringify(payload));
+        alert('Routing-Standards gespeichert.');
+      } catch (e) {
+        alert('Standards konnten nicht gespeichert werden.');
+      }
+    }
+
+    function resetRouteDefaults() {
+      try {
+        localStorage.removeItem(ROUTE_DEFAULTS_KEY);
+      } catch (e) {}
+      applyRouteDefaults();
+      alert('Routing-Standards zurückgesetzt.');
+    }
+
     function getPayload() {
       return {
         start: { lat: parseFloat(document.getElementById('startLat').value),
@@ -400,7 +535,26 @@ data:
                  lon: parseFloat(document.getElementById('endLon').value) },
         costing: document.getElementById('costing').value,
         units:   document.getElementById('units').value,
-        avoid_tolls: document.getElementById('avoid_tolls').checked
+        avoid_tolls: document.getElementById('avoid_tolls').checked,
+        avoid_ferries: document.getElementById('avoid_ferries').checked,
+        avoid_tunnels: document.getElementById('avoid_tunnels').checked,
+        shortest: document.getElementById('shortest').checked,
+        use_highways: document.getElementById('use_highways').checked,
+        prefer_unpaved: document.getElementById('prefer_unpaved').checked,
+        use_living_streets: document.getElementById('use_living_streets').checked,
+        prefer_primary: document.getElementById('prefer_primary').checked,
+        top_speed: parseFloat(document.getElementById('top_speed').value),
+        width: parseFloat(document.getElementById('width').value),
+        height: parseFloat(document.getElementById('height').value),
+        length: parseFloat(document.getElementById('length').value),
+        weight: parseFloat(document.getElementById('weight').value),
+        axle_load: parseFloat(document.getElementById('axle_load').value),
+        hazmat: document.getElementById('hazmat').value === 'true',
+        use_service: document.getElementById('use_service').value === 'true',
+        use_trails: document.getElementById('use_trails').value === 'true',
+        use_tracks: document.getElementById('use_tracks').value === 'true',
+        use_residential: document.getElementById('use_residential').value === 'true',
+        use_primary: document.getElementById('use_primary').value === 'true'
       };
     }
 
@@ -408,6 +562,8 @@ data:
       return isFinite(payload.start.lat) && isFinite(payload.start.lon) &&
              isFinite(payload.end.lat) && isFinite(payload.end.lon);
     }
+
+    applyRouteDefaults();
 
     async function doRoute() {
       var box = document.getElementById('result-box');
@@ -1120,9 +1276,7 @@ data:
             start = payload.get("start", {})
             end = payload.get("end", {})
             costing = payload.get("costing", "auto")
-            avoid_tolls = payload.get("avoid_tolls", False)
-            
-            # Build the base request
+
             request = {
                 "locations": [
                     {"lat": start.get("lat"), "lon": start.get("lon")},
@@ -1131,16 +1285,35 @@ data:
                 "costing": costing,
                 "units": payload.get("units", "km"),
             }
-            
-            # Add costing options for toll avoidance (only for auto and truck)
-            # Note: In Valhalla, use_tolls: False means avoid tolls
-            if avoid_tolls and costing in ("auto", "truck"):
-                if "costing_options" not in request:
-                    request["costing_options"] = {}
-                if costing not in request["costing_options"]:
-                    request["costing_options"][costing] = {}
-                request["costing_options"][costing]["use_tolls"] = False
-            
+
+            request["costing_options"] = {}
+            request["costing_options"][costing] = {}
+            options = request["costing_options"][costing]
+
+            if payload.get("avoid_tolls", False):
+                options["use_tolls"] = False
+            else:
+                options["use_tolls"] = True
+            if payload.get("avoid_ferries", False):
+                options["use_ferries"] = False
+            else:
+                options["use_ferries"] = True
+            if payload.get("avoid_tunnels", False):
+                options["use_tunnels"] = False
+            else:
+                options["use_tunnels"] = True
+
+            for key in ["use_highways", "use_living_streets", "prefer_unpaved", "prefer_primary", "shortest", "use_service", "use_trails", "use_tracks", "use_residential", "use_primary"]:
+                if key in payload:
+                    options[key] = bool(payload.get(key, False))
+            if payload.get("hazmat") is not None:
+                options["hazmat"] = bool(payload.get("hazmat", False))
+
+            for key in ["top_speed", "width", "height", "length", "weight", "axle_load"]:
+                value = payload.get(key)
+                if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)):
+                    options[key] = value
+
             return request
 
         def _call_valhalla(self, endpoint, valhalla_payload):
