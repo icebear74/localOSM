@@ -24,4 +24,4 @@ data:
   import_threads: "22"
   import_cache_mb: "32000"
   import_password: nominatim
-  import_flatnode_file: "/var/lib/postgresql/16/main/flatnode.file"
+  import_flatnode_file: "/osm-temp/nominatim/work/flatnode.file"
