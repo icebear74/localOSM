@@ -80,10 +80,25 @@ spec:
                 find "${WORK_DIR}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
               }
 
+              trim_mount() {
+                local mountpoint="$1"
+                if command -v fstrim >/dev/null 2>&1; then
+                  echo "[INFO] fstrim ${mountpoint}"
+                  if ! fstrim "${mountpoint}"; then
+                    echo "[WARN] fstrim failed for ${mountpoint}; continuing"
+                  fi
+                else
+                  echo "[INFO] fstrim not available for ${mountpoint}; continuing."
+                fi
+              }
+
               cleanup() {
                 if [ "${SCALED_DOWN}" = "1" ]; then
                   "${KUBECTL}" scale deployment valhalla --replicas=1 -n osm || true
                 fi
+                trim_mount /osm-temp
+                trim_mount /service-data
+                trim_mount /tools
               }
               trap cleanup EXIT
 

@@ -170,11 +170,12 @@ spec:
                 trim_mount /osm-temp
                 trim_mount /tileserver-gl
                 trim_mount /osm-status
+                trim_mount /tools
               }
               trap cleanup EXIT
 
               rm -f "${OUTPUT_NEW}"
-              mkdir -p "${TEMP_DIR}" "${TEMP_SOURCES}" "${DATA_SOURCES}"
+              mkdir -p "${TEMP_DIR}" "${TEMP_SOURCES}"
 
               if [ -f /config/CustomProfile.java ]; then
                 java -Xmx80g -cp "${PLANETILER_JAR}" /config/CustomProfile.java \
@@ -216,6 +217,7 @@ spec:
 
               trim_mount /tileserver-gl
               trim_mount /osm-temp
+              trim_mount /tools
 
               if scale_deployment 0; then
                 SCALED_DOWN=1
@@ -233,6 +235,7 @@ spec:
               cleanup_temp_dir
 
               trim_mount /osm-temp
+              trim_mount /tools
           volumeMounts:
             - name: planet
               mountPath: /planet

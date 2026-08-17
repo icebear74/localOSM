@@ -51,6 +51,23 @@ spec:
               PGDATA_DIR="${PGDATA:-/nominatim-data/current}"
               WORK_ROOT="$(dirname "${PGDATA_DIR}")"
               PBF_SOURCE="${PBF_PATH:-/planet/europa.osm.pbf}"
+              trim_mount() {
+                local mountpoint="$1"
+                if command -v fstrim >/dev/null 2>&1; then
+                  echo "[INFO] fstrim ${mountpoint}"
+                  if ! fstrim "${mountpoint}"; then
+                    echo "[WARN] fstrim failed for ${mountpoint}; continuing"
+                  fi
+                else
+                  echo "[INFO] fstrim not available for ${mountpoint}; continuing."
+                fi
+              }
+              cleanup() {
+                trim_mount /osm-temp
+                trim_mount /nominatim-data-prod
+                trim_mount /tmp
+              }
+              trap cleanup EXIT
               echo "Resetting Nominatim temp database at ${PGDATA_DIR}"
               rm -rf "${PGDATA_DIR}" 2>/dev/null || true
               mkdir -p "${PGDATA_DIR}"
@@ -183,8 +200,7 @@ spec:
               echo "Cleaning temporary Nominatim work directory..."
               find "${WORK_ROOT}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 
-              echo "Running final filesystem cleanup on the production volume..."
-              fstrim -av "${TARGET_ROOT}" >/dev/null 2>&1 || true
+              echo "Temporary and production volumes will be trimmed before exit."
           volumeMounts:
             - name: osm-temp
               mountPath: /osm-temp
