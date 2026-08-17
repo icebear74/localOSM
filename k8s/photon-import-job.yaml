@@ -119,6 +119,7 @@ spec:
               PREVIOUS_DIR=/service-data/previous
               KUBECTL=/tools/kubectl
               SCALED_DOWN=0
+              ORIGINAL_REPLICAS=0
 
               cleanup_work_dir() {
                 mkdir -p "${WORK_DIR}"
@@ -166,7 +167,10 @@ spec:
               cd "${WORK_DIR}"
               DB_SECRET="${PHOTON_DB_PASSWORD}"
               DB_PASSWORD_FLAG="-pass""word"
-              java -Xms16g -Xmx64g -XX:+UseG1GC -jar "/service-data/bin/photon-${PHOTON_VERSION}.jar" import \
+              java -Xms16g -Xmx64g -XX:+UseG1GC \
+                -Des.index.merge.scheduler.max_thread_count=12 \
+                -Des.index.merge.scheduler.max_merge_count=13 \
+                -jar "/service-data/bin/photon-${PHOTON_VERSION}.jar" import \
                 -host "${NOMINATIM_DB_HOST}" -port "${NOMINATIM_DB_PORT}" \
                 -database "${NOMINATIM_DB_NAME}" -user "${PHOTON_DB_USER}" \
                 "${DB_PASSWORD_FLAG}" "${DB_SECRET}" \
@@ -175,10 +179,16 @@ spec:
               echo '=== Copying Photon data into the next active release directory ...'
               cp -a "${WORK_DIR}/." "${NEXT_DIR}/"
 
-              echo '=== Scaling down Photon before activating the new data ...'
-              "${KUBECTL}" scale deployment photon --replicas=0 -n osm >/dev/null
-              SCALED_DOWN=1
-              wait_for_pods_terminated
+              ORIGINAL_REPLICAS=$("${KUBECTL}" get deployment photon -n osm -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+              ORIGINAL_REPLICAS="${ORIGINAL_REPLICAS:-0}"
+              if [ "${ORIGINAL_REPLICAS}" -gt 0 ]; then
+                echo '=== Scaling down Photon before activating the new data ...'
+                "${KUBECTL}" scale deployment photon --replicas=0 -n osm >/dev/null
+                SCALED_DOWN=1
+                wait_for_pods_terminated
+              else
+                echo '=== Photon deployment is not running; writing data directly to active directory ...'
+              fi
 
               if [ -d "${ACTIVE_DIR}" ]; then
                 mv "${ACTIVE_DIR}" "${PREVIOUS_DIR}"
@@ -193,10 +203,14 @@ spec:
               fi
               rm -rf "${PREVIOUS_DIR}" 2>/dev/null || true
 
-              echo '=== Scaling Photon back up ...'
-              "${KUBECTL}" scale deployment photon --replicas=1 -n osm >/dev/null
-              SCALED_DOWN=0
-              "${KUBECTL}" rollout status deployment/photon -n osm --timeout=600s >/dev/null
+              if [ "${SCALED_DOWN}" = "1" ]; then
+                echo '=== Scaling Photon back up ...'
+                "${KUBECTL}" scale deployment photon --replicas=1 -n osm >/dev/null
+                SCALED_DOWN=0
+                "${KUBECTL}" rollout status deployment/photon -n osm --timeout=600s >/dev/null
+              else
+                echo '=== Photon deployment was not running; active directory is ready for when the service starts. ==='
+              fi
 
               cleanup_work_dir
               echo '=== Photon import complete. Index promoted and temp work directory cleaned. ==='

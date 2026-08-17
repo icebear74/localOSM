@@ -74,6 +74,7 @@ spec:
               CONFIG_PATH=/tmp/valhalla-import.json
               KUBECTL=/tools/kubectl
               SCALED_DOWN=0
+              ORIGINAL_REPLICAS=0
 
               cleanup_work_dir() {
                 mkdir -p "${WORK_DIR}"
@@ -137,10 +138,16 @@ spec:
               echo '=== Copying Valhalla data into the next active release directory ...'
               cp -a "${WORK_DIR}/." "${NEXT_DIR}/"
 
-              echo '=== Scaling down Valhalla before activating the new data ...'
-              "${KUBECTL}" scale deployment valhalla --replicas=0 -n osm >/dev/null
-              SCALED_DOWN=1
-              wait_for_pods_terminated
+              ORIGINAL_REPLICAS=$("${KUBECTL}" get deployment valhalla -n osm -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+              ORIGINAL_REPLICAS="${ORIGINAL_REPLICAS:-0}"
+              if [ "${ORIGINAL_REPLICAS}" -gt 0 ]; then
+                echo '=== Scaling down Valhalla before activating the new data ...'
+                "${KUBECTL}" scale deployment valhalla --replicas=0 -n osm >/dev/null
+                SCALED_DOWN=1
+                wait_for_pods_terminated
+              else
+                echo '=== Valhalla deployment is not running; writing data directly to active directory ...'
+              fi
 
               if [ -d "${ACTIVE_DIR}" ]; then
                 mv "${ACTIVE_DIR}" "${PREVIOUS_DIR}"
@@ -155,10 +162,14 @@ spec:
               fi
               rm -rf "${PREVIOUS_DIR}" 2>/dev/null || true
 
-              echo '=== Scaling Valhalla back up ...'
-              "${KUBECTL}" scale deployment valhalla --replicas=1 -n osm >/dev/null
-              SCALED_DOWN=0
-              "${KUBECTL}" rollout status deployment/valhalla -n osm --timeout=600s >/dev/null
+              if [ "${SCALED_DOWN}" = "1" ]; then
+                echo '=== Scaling Valhalla back up ...'
+                "${KUBECTL}" scale deployment valhalla --replicas=1 -n osm >/dev/null
+                SCALED_DOWN=0
+                "${KUBECTL}" rollout status deployment/valhalla -n osm --timeout=600s >/dev/null
+              else
+                echo '=== Valhalla deployment was not running; active directory is ready for when the service starts. ==='
+              fi
 
               cleanup_work_dir
               echo '=== Import complete. Routing graph promoted and temp work directory cleaned. ==='

@@ -132,6 +132,7 @@ spec:
               OUTPUT_NEW=/tileserver-gl/planet-NEW.mbtiles
               OUTPUT_ACTIVE=/tileserver-gl/planet.mbtiles
               SCALED_DOWN=0
+              ORIGINAL_REPLICAS=0
 
               trim_mount() {
                 mountpoint="$1"
@@ -161,7 +162,7 @@ spec:
               }
 
               cleanup() {
-                if [ "${SCALED_DOWN}" = "1" ]; then
+                if [ "${SCALED_DOWN}" = "1" ] && [ "${ORIGINAL_REPLICAS}" -gt 0 ]; then
                   echo "[INFO] Restoring deployment/tileserver-gl after premature exit"
                   "${KUBECTL}" scale deployment tileserver-gl --replicas=1 -n osm || true
                 fi
@@ -219,6 +220,8 @@ spec:
               trim_mount /osm-temp
               trim_mount /tools
 
+              ORIGINAL_REPLICAS=$("${KUBECTL}" get deployment tileserver-gl -n osm -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+              ORIGINAL_REPLICAS="${ORIGINAL_REPLICAS:-0}"
               if scale_deployment 0; then
                 SCALED_DOWN=1
               fi
@@ -227,7 +230,7 @@ spec:
 
               trim_mount /tileserver-gl
 
-              if [ "${SCALED_DOWN}" = "1" ]; then
+              if [ "${SCALED_DOWN}" = "1" ] && [ "${ORIGINAL_REPLICAS}" -gt 0 ]; then
                 scale_deployment 1 || true
                 SCALED_DOWN=0
               fi
