@@ -183,16 +183,16 @@ data:
             <div class="advanced-param">
               <label class="advanced-param-toggle" for="toll_penalty_enabled">
                 <input id="toll_penalty_enabled" type="checkbox" data-target="toll_penalty">
-                Maut-Penalty
+                Maut-Willigkeit (0–1)
               </label>
-              <input id="toll_penalty" type="number" min="0" step="1" value="0" title="Gültige Werte: 0 oder positive ganze Zahlen; höher = stärker vermeiden" disabled>
+              <input id="toll_penalty" type="number" min="0" max="1" step="0.1" value="0.5" title="Gültige Werte: 0.0 bis 1.0; 0.0 = vermeiden, 1.0 = bevorzugen" disabled>
             </div>
             <div class="advanced-param">
               <label class="advanced-param-toggle" for="ferry_penalty_enabled">
                 <input id="ferry_penalty_enabled" type="checkbox" data-target="ferry_penalty">
-                Fähren-Penalty
+                Fähren-Willigkeit (0–1)
               </label>
-              <input id="ferry_penalty" type="number" min="0" step="1" value="0" title="Gültige Werte: 0 oder positive ganze Zahlen; höher = stärker vermeiden" disabled>
+              <input id="ferry_penalty" type="number" min="0" max="1" step="0.1" value="0.5" title="Gültige Werte: 0.0 bis 1.0; 0.0 = vermeiden, 1.0 = bevorzugen" disabled>
             </div>
           </div>
           <div class="row2">
@@ -206,9 +206,9 @@ data:
             <div class="advanced-param">
               <label class="advanced-param-toggle" for="highway_penalty_enabled">
                 <input id="highway_penalty_enabled" type="checkbox" data-target="highway_penalty">
-                Autobahn-Penalty
+                Autobahn-Willigkeit (0–1)
               </label>
-              <input id="highway_penalty" type="number" min="0" step="1" value="0" title="Gültige Werte: 0 oder positive ganze Zahlen; höher = stärker vermeiden" disabled>
+              <input id="highway_penalty" type="number" min="0" max="1" step="0.1" value="0.5" title="Gültige Werte: 0.0 bis 1.0; 0.0 = vermeiden, 1.0 = bevorzugen" disabled>
             </div>
           </div>
           <div class="row2">
@@ -222,18 +222,18 @@ data:
             <div class="advanced-param">
               <label class="advanced-param-toggle" for="living_street_penalty_enabled">
                 <input id="living_street_penalty_enabled" type="checkbox" data-target="living_street_penalty">
-                Wohnstraßen-Penalty
+                Wohnstraßen-Willigkeit (0–1)
               </label>
-              <input id="living_street_penalty" type="number" min="0" step="1" value="0" title="Gültige Werte: 0 oder positive ganze Zahlen; höher = stärker vermeiden" disabled>
+              <input id="living_street_penalty" type="number" min="0" max="1" step="0.1" value="0.1" title="Gültige Werte: 0.0 bis 1.0; 0.0 = vermeiden, 1.0 = bevorzugen" disabled>
             </div>
           </div>
           <div class="row2">
             <div class="advanced-param">
               <label class="advanced-param-toggle" for="primary_penalty_enabled">
                 <input id="primary_penalty_enabled" type="checkbox" data-target="primary_penalty">
-                Primärstraßen-Penalty
+                Primärstraßen-Willigkeit (0–1)
               </label>
-              <input id="primary_penalty" type="number" min="0" step="1" value="0" title="Gültige Werte: 0 oder positive ganze Zahlen; höher = stärker vermeiden" disabled>
+              <input id="primary_penalty" type="number" min="0" max="1" step="0.1" value="0.5" title="Gültige Werte: 0.0 bis 1.0; 0.0 = vermeiden, 1.0 = bevorzugen" disabled>
             </div>
             <div></div>
           </div>
@@ -758,17 +758,22 @@ data:
         shortestValue = 0.2;
       }
       var advancedOptionsEnabled = defaults.advanced_options_enabled === true;
+      var tollValue = defaults.use_tolls != null ? defaults.use_tolls : (defaults.toll_penalty != null ? defaults.toll_penalty : 0.5);
+      var ferryValue = defaults.use_ferry != null ? defaults.use_ferry : (defaults.ferry_penalty != null ? defaults.ferry_penalty : 0.5);
+      var highwayValue = defaults.use_highways != null ? defaults.use_highways : (defaults.highway_penalty != null ? defaults.highway_penalty : 0.5);
+      var livingStreetValue = defaults.use_living_streets != null ? defaults.use_living_streets : (defaults.living_street_penalty != null ? defaults.living_street_penalty : 0.1);
+      var primaryValue = defaults.use_primary != null ? defaults.use_primary : (defaults.primary_penalty != null ? defaults.primary_penalty : 0.5);
       var entries = [
         ['costing', defaults.costing || 'auto'],
         ['units', defaults.units || 'km'],
         ['instruction-language', defaults.instruction_language || 'de'],
-        ['toll_penalty', defaults.toll_penalty == null ? 0 : defaults.toll_penalty],
-        ['ferry_penalty', defaults.ferry_penalty == null ? 0 : defaults.ferry_penalty],
+        ['toll_penalty', tollValue],
+        ['ferry_penalty', ferryValue],
         ['tunnel_penalty', defaults.tunnel_penalty == null ? 0 : defaults.tunnel_penalty],
-        ['highway_penalty', defaults.highway_penalty == null ? 0 : defaults.highway_penalty],
+        ['highway_penalty', highwayValue],
         ['unpaved_penalty', defaults.unpaved_penalty == null ? 0 : defaults.unpaved_penalty],
-        ['living_street_penalty', defaults.living_street_penalty == null ? 0 : defaults.living_street_penalty],
-        ['primary_penalty', defaults.primary_penalty == null ? 0 : defaults.primary_penalty],
+        ['living_street_penalty', livingStreetValue],
+        ['primary_penalty', primaryValue],
         ['shortest', shortestValue],
         ['top_speed', defaults.top_speed == null ? 120 : defaults.top_speed],
         ['width', defaults.width == null ? 2.0 : defaults.width],
@@ -788,13 +793,13 @@ data:
         setFieldValue(item[0], item[1]);
       });
       var toggleEntries = [
-        ['toll_penalty_enabled', defaults.toll_penalty_enabled === true],
-        ['ferry_penalty_enabled', defaults.ferry_penalty_enabled === true],
+        ['toll_penalty_enabled', defaults.use_tolls_enabled === true || defaults.toll_penalty_enabled === true],
+        ['ferry_penalty_enabled', defaults.use_ferry_enabled === true || defaults.ferry_penalty_enabled === true],
         ['tunnel_penalty_enabled', defaults.tunnel_penalty_enabled === true],
-        ['highway_penalty_enabled', defaults.highway_penalty_enabled === true],
+        ['highway_penalty_enabled', defaults.use_highways_enabled === true || defaults.highway_penalty_enabled === true],
         ['unpaved_penalty_enabled', defaults.unpaved_penalty_enabled === true],
-        ['living_street_penalty_enabled', defaults.living_street_penalty_enabled === true],
-        ['primary_penalty_enabled', defaults.primary_penalty_enabled === true],
+        ['living_street_penalty_enabled', defaults.use_living_streets_enabled === true || defaults.living_street_penalty_enabled === true],
+        ['primary_penalty_enabled', defaults.use_primary_enabled === true || defaults.primary_penalty_enabled === true],
         ['top_speed_enabled', defaults.top_speed_enabled === true],
         ['width_enabled', defaults.width_enabled === true],
         ['height_enabled', defaults.height_enabled === true],
@@ -850,13 +855,13 @@ data:
         advanced_options_enabled: advancedOptionsEnabled
       };
       if (advancedOptionsEnabled) {
-        if (document.getElementById('toll_penalty_enabled').checked) payload.toll_penalty = parseFloat(document.getElementById('toll_penalty').value);
-        if (document.getElementById('ferry_penalty_enabled').checked) payload.ferry_penalty = parseFloat(document.getElementById('ferry_penalty').value);
+        if (document.getElementById('toll_penalty_enabled').checked) payload.use_tolls = parseFloat(document.getElementById('toll_penalty').value);
+        if (document.getElementById('ferry_penalty_enabled').checked) payload.use_ferry = parseFloat(document.getElementById('ferry_penalty').value);
         if (document.getElementById('tunnel_penalty_enabled').checked) payload.tunnel_penalty = parseFloat(document.getElementById('tunnel_penalty').value);
-        if (document.getElementById('highway_penalty_enabled').checked) payload.highway_penalty = parseFloat(document.getElementById('highway_penalty').value);
+        if (document.getElementById('highway_penalty_enabled').checked) payload.use_highways = parseFloat(document.getElementById('highway_penalty').value);
         if (document.getElementById('unpaved_penalty_enabled').checked) payload.unpaved_penalty = parseFloat(document.getElementById('unpaved_penalty').value);
-        if (document.getElementById('living_street_penalty_enabled').checked) payload.living_street_penalty = parseFloat(document.getElementById('living_street_penalty').value);
-        if (document.getElementById('primary_penalty_enabled').checked) payload.primary_penalty = parseFloat(document.getElementById('primary_penalty').value);
+        if (document.getElementById('living_street_penalty_enabled').checked) payload.use_living_streets = parseFloat(document.getElementById('living_street_penalty').value);
+        if (document.getElementById('primary_penalty_enabled').checked) payload.use_primary = parseFloat(document.getElementById('primary_penalty').value);
         if (document.getElementById('top_speed_enabled').checked) payload.top_speed = parseFloat(document.getElementById('top_speed').value);
         if (document.getElementById('width_enabled').checked) payload.width = parseFloat(document.getElementById('width').value);
         if (document.getElementById('height_enabled').checked) payload.height = parseFloat(document.getElementById('height').value);
@@ -868,7 +873,6 @@ data:
         if (document.getElementById('use_trails_enabled').checked) payload.use_trails = document.getElementById('use_trails').value === 'true';
         if (document.getElementById('use_tracks_enabled').checked) payload.use_tracks = document.getElementById('use_tracks').value === 'true';
         if (document.getElementById('use_residential_enabled').checked) payload.use_residential = document.getElementById('use_residential').value === 'true';
-        if (document.getElementById('use_primary_enabled').checked) payload.use_primary = document.getElementById('use_primary').value === 'true';
       }
       return payload;
     }
@@ -1627,19 +1631,26 @@ data:
             advanced_enabled = payload.get("advanced_options_enabled", True)
             if advanced_enabled:
                 for payload_key, option_key in [
-                    ("toll_penalty", "toll_penalty"),
-                    ("ferry_penalty", "ferry_penalty"),
-                    ("tunnel_penalty", "tunnel_penalty"),
-                    ("highway_penalty", "highway_penalty"),
-                    ("unpaved_penalty", "unpaved_penalty"),
-                    ("living_street_penalty", "living_street_penalty"),
-                    ("primary_penalty", "primary_penalty"),
+                    ("use_tolls", "use_tolls"),
+                    ("toll_penalty", "use_tolls"),
+                    ("use_ferry", "use_ferry"),
+                    ("ferry_penalty", "use_ferry"),
+                    ("use_highways", "use_highways"),
+                    ("highway_penalty", "use_highways"),
+                    ("use_living_streets", "use_living_streets"),
+                    ("living_street_penalty", "use_living_streets"),
+                    ("use_primary", "use_primary"),
+                    ("primary_penalty", "use_primary"),
                 ]:
+                    if payload_key not in payload:
+                        continue
                     value = payload.get(payload_key)
                     if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)):
-                        options[option_key] = value
+                        numeric_value = float(value)
+                        if 0.0 <= numeric_value <= 1.0:
+                            options[option_key] = numeric_value
 
-                for key in ["use_service", "use_trails", "use_tracks", "use_residential", "use_primary"]:
+                for key in ["use_service", "use_trails", "use_tracks", "use_residential"]:
                     if key in payload:
                         options[key] = bool(payload.get(key, False))
                 if payload.get("hazmat") is not None:
