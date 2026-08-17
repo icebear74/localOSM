@@ -1273,6 +1273,11 @@ spec:
               value: "http://tileserver-gl.osm.svc.cluster.local"
             - name: STATUS_URL
               value: ""
+            - name: SERVICE_TARGETS_JSON
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-service-targets
+                  key: service-targets.json
             - name: PLANET_UPDATE_REQUEST_FILE
               value: "/state/planet-update-request.flag"
             - name: PLANET_UPDATE_STATUS_FILE

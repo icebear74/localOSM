@@ -25,3 +25,19 @@ data:
         "bicycle": {"hill_factor": 1.0, "unpaved_factor": 1.0}
       }
     }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: osm-service-targets
+  namespace: osm
+data:
+  service-targets.json: |
+    {
+      "tileserver": "http://tileserver-gl.osm.svc.cluster.local",
+      "nominatim": "http://nominatim.osm.svc.cluster.local:8080",
+      "valhalla": "http://valhalla.osm.svc.cluster.local:8002",
+      "photon": "http://photon.osm.svc.cluster.local:2322",
+      "web": "http://web.osm.svc.cluster.local:8080",
+      "status": "http://status.osm.svc.cluster.local:8080"
+    }

@@ -74,6 +74,11 @@ spec:
               value: "__OSM_TEMP_DIR__"
             - name: OSM_NODE_URL
               value: ""
+            - name: SERVICE_TARGETS_JSON
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-service-targets
+                  key: service-targets.json
           resources:
             requests:
               cpu: "100m"
