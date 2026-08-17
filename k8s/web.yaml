@@ -156,20 +156,20 @@ data:
           </div>
         </div>
         <div class="row2">
-          <div><label><input type="checkbox" id="avoid_tolls"> Mautstraßen meiden</label></div>
-          <div><label><input type="checkbox" id="avoid_ferries"> Fähren meiden</label></div>
+          <div><label>Maut-Penalty</label><input id="toll_penalty" type="number" min="0" step="1" value="0"></div>
+          <div><label>Fähren-Penalty</label><input id="ferry_penalty" type="number" min="0" step="1" value="0"></div>
         </div>
         <div class="row2">
-          <div><label><input type="checkbox" id="avoid_tunnels"> Tunnel meiden</label></div>
-          <div><label><input type="checkbox" id="shortest"> Kürzeste Route bevorzugen</label></div>
+          <div><label>Tunnel-Penalty</label><input id="tunnel_penalty" type="number" min="0" step="1" value="0"></div>
+          <div><label>Autobahn-Penalty</label><input id="highway_penalty" type="number" min="0" step="1" value="0"></div>
         </div>
         <div class="row2">
-          <div><label><input type="checkbox" id="use_highways"> Autobahnen bevorzugen</label></div>
-          <div><label><input type="checkbox" id="prefer_unpaved"> Unbefestigte Wege vermeiden</label></div>
+          <div><label>Unbefestigte Wege-Penalty</label><input id="unpaved_penalty" type="number" min="0" step="1" value="0"></div>
+          <div><label>Wohnstraßen-Penalty</label><input id="living_street_penalty" type="number" min="0" step="1" value="0"></div>
         </div>
         <div class="row2">
-          <div><label><input type="checkbox" id="use_living_streets"> Wohnstraßen erlauben</label></div>
-          <div><label><input type="checkbox" id="prefer_primary"> Primärstraßen bevorzugen</label></div>
+          <div><label>Primärstraßen-Penalty</label><input id="primary_penalty" type="number" min="0" step="1" value="0"></div>
+          <div><label>Kürzeste Route</label><select id="shortest"><option value="false">Nein</option><option value="true">Ja</option></select></div>
         </div>
         <div class="row2">
           <div><label>Max. Geschwindigkeit (km/h)</label><input id="top_speed" type="number" min="1" step="1" value="80"></div>
@@ -483,14 +483,14 @@ data:
       var entries = [
         ['costing', defaults.costing || 'auto'],
         ['units', defaults.units || 'km'],
-        ['avoid_tolls', defaults.avoid_tolls || false],
-        ['avoid_ferries', defaults.avoid_ferries || false],
-        ['avoid_tunnels', defaults.avoid_tunnels || false],
-        ['shortest', defaults.shortest || false],
-        ['use_highways', defaults.use_highways || false],
-        ['prefer_unpaved', defaults.prefer_unpaved || false],
-        ['use_living_streets', defaults.use_living_streets || false],
-        ['prefer_primary', defaults.prefer_primary || false],
+        ['toll_penalty', defaults.toll_penalty == null ? 0 : defaults.toll_penalty],
+        ['ferry_penalty', defaults.ferry_penalty == null ? 0 : defaults.ferry_penalty],
+        ['tunnel_penalty', defaults.tunnel_penalty == null ? 0 : defaults.tunnel_penalty],
+        ['highway_penalty', defaults.highway_penalty == null ? 0 : defaults.highway_penalty],
+        ['unpaved_penalty', defaults.unpaved_penalty == null ? 0 : defaults.unpaved_penalty],
+        ['living_street_penalty', defaults.living_street_penalty == null ? 0 : defaults.living_street_penalty],
+        ['primary_penalty', defaults.primary_penalty == null ? 0 : defaults.primary_penalty],
+        ['shortest', defaults.shortest === true ? 'true' : 'false'],
         ['top_speed', defaults.top_speed == null ? 80 : defaults.top_speed],
         ['width', defaults.width == null ? 2.0 : defaults.width],
         ['height', defaults.height == null ? 2.0 : defaults.height],
@@ -535,14 +535,14 @@ data:
                  lon: parseFloat(document.getElementById('endLon').value) },
         costing: document.getElementById('costing').value,
         units:   document.getElementById('units').value,
-        avoid_tolls: document.getElementById('avoid_tolls').checked,
-        avoid_ferries: document.getElementById('avoid_ferries').checked,
-        avoid_tunnels: document.getElementById('avoid_tunnels').checked,
-        shortest: document.getElementById('shortest').checked,
-        use_highways: document.getElementById('use_highways').checked,
-        prefer_unpaved: document.getElementById('prefer_unpaved').checked,
-        use_living_streets: document.getElementById('use_living_streets').checked,
-        prefer_primary: document.getElementById('prefer_primary').checked,
+        toll_penalty: parseFloat(document.getElementById('toll_penalty').value),
+        ferry_penalty: parseFloat(document.getElementById('ferry_penalty').value),
+        tunnel_penalty: parseFloat(document.getElementById('tunnel_penalty').value),
+        highway_penalty: parseFloat(document.getElementById('highway_penalty').value),
+        unpaved_penalty: parseFloat(document.getElementById('unpaved_penalty').value),
+        living_street_penalty: parseFloat(document.getElementById('living_street_penalty').value),
+        primary_penalty: parseFloat(document.getElementById('primary_penalty').value),
+        shortest: document.getElementById('shortest').value === 'true',
         top_speed: parseFloat(document.getElementById('top_speed').value),
         width: parseFloat(document.getElementById('width').value),
         height: parseFloat(document.getElementById('height').value),
@@ -1303,7 +1303,20 @@ data:
             else:
                 options["use_tunnels"] = True
 
-            for key in ["use_highways", "use_living_streets", "prefer_unpaved", "prefer_primary", "shortest", "use_service", "use_trails", "use_tracks", "use_residential", "use_primary"]:
+            for payload_key, option_key in [
+                ("toll_penalty", "toll_penalty"),
+                ("ferry_penalty", "ferry_penalty"),
+                ("tunnel_penalty", "tunnel_penalty"),
+                ("highway_penalty", "highway_penalty"),
+                ("unpaved_penalty", "unpaved_penalty"),
+                ("living_street_penalty", "living_street_penalty"),
+                ("primary_penalty", "primary_penalty"),
+            ]:
+                value = payload.get(payload_key)
+                if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)):
+                    options[option_key] = value
+
+            for key in ["shortest", "use_service", "use_trails", "use_tracks", "use_residential", "use_primary"]:
                 if key in payload:
                     options[key] = bool(payload.get(key, False))
             if payload.get("hazmat") is not None:
