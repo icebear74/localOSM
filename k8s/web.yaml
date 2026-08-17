@@ -239,21 +239,21 @@ data:
         .then(function(d) {
           var sl = document.getElementById('pu-status-line');
           var ml = document.getElementById('pu-mtime-line');
-          if (d.error) { sl.innerHTML = '<span class=\'err\'>Fehler: ' + d.error + '</span>'; return; }
+          if (d.error) { sl.innerHTML = "<span class='err'>Fehler: " + d.error + "</span>"; return; }
           if (d.running) {
             sl.innerHTML = '&#9203; Läuft gerade &hellip; (gestartet: ' + (d.last_run_at || '?') + ')';
           } else if (d.last_success_at) {
-            sl.innerHTML = '<span class=\'ok\'>&#10003; Letzter Erfolg:</span> ' + d.last_success_at;
+            sl.innerHTML = "<span class='ok'>&#10003; Letzter Erfolg:</span> " + d.last_success_at;
           } else {
             sl.innerHTML = 'Noch nie ausgeführt.';
           }
           if (d.last_error) {
-            sl.innerHTML += '<br><span class=\'err\'>Fehler: ' + d.last_error + '</span>';
+            sl.innerHTML += "<br><span class='err'>Fehler: " + d.last_error + "</span>";
           }
           ml.textContent = d.output_file_mtime ? 'Datenstand: ' + d.output_file_mtime : '';
         })
         .catch(function() {
-          document.getElementById('pu-status-line').innerHTML = '<span class=\'err\'>Status nicht verfügbar.</span>';
+          document.getElementById('pu-status-line').innerHTML = "<span class='err'>Status nicht verfügbar.</span>";
         });
     }
     function triggerPlanetUpdate() {
