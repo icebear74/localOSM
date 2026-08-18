@@ -83,25 +83,10 @@ data:
 
       public static void main(String[] args) throws Exception {
         Arguments arguments = Arguments.fromArgs(args);
-        java.nio.file.Path outputPath = java.nio.file.Path.of("/tileserver-gl/planet-NEW.mbtiles");
-        String osmPath = null;
-
-        for (String arg : args) {
-          if (arg.startsWith("--osm-path=")) {
-            osmPath = arg.substring("--osm-path=".length());
-          } else if (arg.startsWith("--output=")) {
-            outputPath = java.nio.file.Path.of(arg.substring("--output=".length()));
-          }
-        }
-
-        Planetiler planetiler = Planetiler.create(arguments)
+        Planetiler.create(arguments)
           .setProfile(CustomProfile::new)
-          .setOutput("mbtiles", outputPath);
-
-        if (osmPath != null) {
-          planetiler.addOsmSource("osm", java.nio.file.Path.of(osmPath));
-        }
-
-        planetiler.run();
+          .addOsmSource("osm", java.nio.file.Path.of("/planet/europa.osm.pbf"))
+          .overwriteOutput(java.nio.file.Path.of("/tileserver-gl/planet-NEW.mbtiles"))
+          .run();
       }
     }
