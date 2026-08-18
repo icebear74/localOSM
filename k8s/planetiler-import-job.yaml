@@ -188,7 +188,8 @@ spec:
 
               if [ "${USE_JAVA}" = "true" ] && [ -f /config/CustomProfile.java ]; then
                 cp /config/CustomProfile.java "${PROFILE_SOURCE}"
-                java -Xmx80g -cp "${PLANETILER_JAR}" "${PROFILE_SOURCE}" \
+                javac -cp "${PLANETILER_JAR}" -d "${PROFILE_SOURCE_ROOT}" "${PROFILE_SOURCE}"
+                java -Xmx80g -cp "${PLANETILER_JAR}:${PROFILE_SOURCE_ROOT}" com.onthegomap.planetiler.custom.CustomProfile \
                   --osm-path="${SOURCE_OSM}" \
                   --tmpdir="${TEMP_DIR}" \
                   --output="${OUTPUT_NEW}" \
