@@ -194,16 +194,27 @@ fi
 # ------------------------------------------------------------------------------
 log "----------------------------------------------------------------------"
 log "[1/7] Aktualisiere planet-latest.osm.pbf via pyosmium-up-to-date..."
-# Exit code 0: already up-to-date. Exit code 1: updates applied but server still ahead (normal).
-# Exit code 2+: real error. We treat 0 and 1 as success.
-pyosmium-up-to-date -vv "${PLANET_FILE}" || {
-  rc=$?
-  if [ "${rc}" -ne 1 ]; then
-    log "❌ pyosmium-up-to-date fehlgeschlagen (Exit-Code: ${rc})." >&2
-    exit "${rc}"
+# Exit code 0: fully up-to-date. Exit code 1: updates applied but server still ahead – loop again.
+# Exit code 2+: real error.
+_update_pass=0
+_update_max=500
+while true; do
+  _update_pass=$(( _update_pass + 1 ))
+  if [ "${_update_pass}" -gt "${_update_max}" ]; then
+    log "❌ pyosmium-up-to-date: Maximale Durchläufe (${_update_max}) erreicht ohne vollständige Aktualisierung." >&2
+    exit 1
   fi
-  log "ℹ️  pyosmium-up-to-date: Datei aktualisiert, Server hat noch neuere Daten (Exit-Code 1 – normal)."
-}
+  log "    Durchlauf ${_update_pass} ..."
+  pyosmium-up-to-date -vv "${PLANET_FILE}" && break || {
+    rc=$?
+    if [ "${rc}" -ne 1 ]; then
+      log "❌ pyosmium-up-to-date fehlgeschlagen (Exit-Code: ${rc})." >&2
+      exit "${rc}"
+    fi
+    log "ℹ️  Noch nicht aktuell – weiterer Durchlauf folgt."
+  }
+done
+log "✅ planet-latest.osm.pbf ist vollständig aktuell (nach ${_update_pass} Durchlauf/Durchläufen)."
 
 log "[2/7] Extrahiere optimierte Weltkarte"
 osmium tags-filter "${PLANET_FILE}" -e "${WELT_FILTER}" -o "${TEMP_HILF_WELT}" --overwrite
