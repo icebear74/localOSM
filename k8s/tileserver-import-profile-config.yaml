@@ -50,11 +50,13 @@ data:
               .setMinZoom(9);
           }
 
-          features.point("poi")
-            .setAttr("class", "attraction")
-            .setAttr("subclass", feature.getString("attraction", "generic"))
-            .setAttr("name", feature.getString("name"))
-            .setMinZoom(12);
+          if (feature.canBePoint()) {
+            features.point("poi")
+              .setAttr("class", "attraction")
+              .setAttr("subclass", feature.getString("attraction", "generic"))
+              .setAttr("name", feature.getString("name"))
+              .setMinZoom(12);
+          }
         }
 
         if (feature.canBeLine() && (feature.hasTag("highway", "construction") || feature.hasTag("construction"))) {

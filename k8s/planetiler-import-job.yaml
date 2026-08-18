@@ -200,7 +200,7 @@ spec:
                   --natural_earth_path="${TEMP_SOURCES}/natural_earth_vector.sqlite.zip" \
                   --minzoom=0 \
                   --maxzoom=16 \
-                  --extra-osm-tags=shop,building,construction,name,wheelchair,amenity,highway,landuse
+                  --extra-osm-tags=shop,building,construction,name,wheelchair,amenity,highway,landuse,tourism,attraction,railway
               else
                 java -Xmx80g -jar "${PLANETILER_JAR}" \
                   --osm-path="${SOURCE_OSM}" \
@@ -218,7 +218,7 @@ spec:
                   --natural_earth_path="${TEMP_SOURCES}/natural_earth_vector.sqlite.zip" \
                   --minzoom=0 \
                   --maxzoom=16 \
-                  --extra-osm-tags=shop,building,construction,name,wheelchair,amenity,highway,landuse
+                  --extra-osm-tags=shop,building,construction,name,wheelchair,amenity,highway,landuse,tourism,attraction,railway
               fi
 
               trim_mount /tileserver-gl
