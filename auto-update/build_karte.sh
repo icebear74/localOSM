@@ -194,7 +194,16 @@ fi
 # ------------------------------------------------------------------------------
 log "----------------------------------------------------------------------"
 log "[1/7] Aktualisiere planet-latest.osm.pbf via pyosmium-up-to-date..."
-pyosmium-up-to-date -vv "${PLANET_FILE}"
+# Exit code 0: already up-to-date. Exit code 1: updates applied but server still ahead (normal).
+# Exit code 2+: real error. We treat 0 and 1 as success.
+pyosmium-up-to-date -vv "${PLANET_FILE}" || {
+  rc=$?
+  if [ "${rc}" -ne 1 ]; then
+    log "❌ pyosmium-up-to-date fehlgeschlagen (Exit-Code: ${rc})." >&2
+    exit "${rc}"
+  fi
+  log "ℹ️  pyosmium-up-to-date: Datei aktualisiert, Server hat noch neuere Daten (Exit-Code 1 – normal)."
+}
 
 log "[2/7] Extrahiere optimierte Weltkarte"
 osmium tags-filter "${PLANET_FILE}" -e "${WELT_FILTER}" -o "${TEMP_HILF_WELT}" --overwrite
