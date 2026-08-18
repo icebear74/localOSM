@@ -31,6 +31,10 @@ RUN npm install -g mapshaper && npm cache clean --force
 WORKDIR /work
 
 COPY build_karte.sh /usr/local/bin/build_karte.sh
-RUN chmod +x /usr/local/bin/build_karte.sh
+RUN chmod +x /usr/local/bin/build_karte.sh && \
+    useradd -u 1000 -m -s /bin/bash appuser && \
+    chown appuser /usr/local/bin/build_karte.sh
+
+USER 1000
 
 ENTRYPOINT ["/usr/local/bin/build_karte.sh"]
