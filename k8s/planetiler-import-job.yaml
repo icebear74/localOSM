@@ -180,9 +180,13 @@ spec:
 
               PROFILE_SOURCE_ROOT="${TEMP_DIR}/profile"
               PROFILE_SOURCE="${PROFILE_SOURCE_ROOT}/com/onthegomap/planetiler/custom/CustomProfile.java"
+              USE_JAVA="true"
               mkdir -p "$(dirname "${PROFILE_SOURCE}")"
+              if [ -f /config/use_java ]; then
+                USE_JAVA="$(tr '[:upper:]' '[:lower:]' < /config/use_java | tr -d '[:space:]')"
+              fi
 
-              if [ -f /config/CustomProfile.java ]; then
+              if [ "${USE_JAVA}" = "true" ] && [ -f /config/CustomProfile.java ]; then
                 cp /config/CustomProfile.java "${PROFILE_SOURCE}"
                 java -Xmx80g -cp "${PLANETILER_JAR}" "${PROFILE_SOURCE}" \
                   --osm-path="${SOURCE_OSM}" \

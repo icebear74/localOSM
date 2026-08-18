@@ -20,6 +20,7 @@ A self-hosted OSM stack on K3s with a read-only status dashboard, a routing web 
 | `k8s/nominatim-import-job.yaml` | Nominatim import job |
 | `k8s/valhalla-import-job.yaml` | Valhalla import job |
 | `k8s/planetiler-import-job.yaml` | TileServer/Planetiler import job on the Longhorn PVCs |
+| `k8s/tileserver-import-profile-config.yaml` | Custom Planetiler profile plus the `use_java` toggle for enabling/disabling it during imports |
 | `k8s/tileserver-gl-deployment.yaml` | TileServer-GL deployment and service using the `tileserver-gl` PVC |
 | `k8s/osm-persistentvolumeclaims.yaml` | Longhorn PVC definitions for `planet`, shared temp PVC `osm-temp`, `tileserver-gl`, `nominatim`, `valhalla`, `photon`, and `osm-status` |
 | `k8s/planetiler-rbac.yaml` | ServiceAccount/Role/RoleBinding for the Planetiler import job |
@@ -135,6 +136,7 @@ style becomes active within seconds — without any manual `scp`/`kubectl` steps
 ## Notes
 
 - The status dashboard mainly reports service health, data files, and orchestrator progress; the Style-Editor card is the one place it accepts a write (activating an edited style.json).
+- Set `use_java: "false"` in `k8s/tileserver-import-profile-config.yaml` to run the Planetiler import without the custom Java profile for comparison tests.
 - The routing web UI remains unchanged.
 - The orchestrator exits with code 0 when watched config maps change so Kubernetes restarts it with fresh state.
 

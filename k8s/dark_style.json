@@ -311,37 +311,8 @@
           ]
         },
         "line-dasharray": [
-          "case",
-          [
-            "in",
-            [
-              "get",
-              "class"
-            ],
-            [
-              "literal",
-              [
-                "path",
-                "footway",
-                "cycleway",
-                "steps"
-              ]
-            ]
-          ],
-          [
-            "literal",
-            [
-              1.6,
-              1.2
-            ]
-          ],
-          [
-            "literal",
-            [
-              0,
-              0
-            ]
-          ]
+          1.6,
+          1.2
         ]
       }
     },
@@ -638,55 +609,9 @@
       "source-layer": "building",
       "minzoom": 14,
       "paint": {
-        "fill-extrusion-color": [
-          "case",
-          [
-            "==",
-            [
-              "get",
-              "class"
-            ],
-            "construction"
-          ],
-          "#7f4e3c",
-          "#7c8988"
-        ],
-        "fill-extrusion-height": [
-          "coalesce",
-          [
-            "to-number",
-            [
-              "get",
-              "height"
-            ]
-          ],
-          [
-            "to-number",
-            [
-              "get",
-              "render_height"
-            ]
-          ],
-          12
-        ],
-        "fill-extrusion-base": [
-          "coalesce",
-          [
-            "to-number",
-            [
-              "get",
-              "min_height"
-            ]
-          ],
-          [
-            "to-number",
-            [
-              "get",
-              "render_min_height"
-            ]
-          ],
-          0
-        ],
+        "fill-extrusion-color": "#7c8988",
+        "fill-extrusion-height": 12,
+        "fill-extrusion-base": 0,
         "fill-extrusion-opacity": 0.9
       }
     },
@@ -708,10 +633,7 @@
       "source-layer": "housenumber",
       "minzoom": 14,
       "layout": {
-        "text-field": [
-          "get",
-          "housenumber"
-        ],
+        "text-field": "{housenumber}",
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -735,51 +657,7 @@
         "housenumber"
       ],
       "layout": {
-        "text-field": [
-          "case",
-          [
-            "has",
-            "housenumber"
-          ],
-          [
-            "concat",
-            [
-              "coalesce",
-              [
-                "get",
-                "name_de"
-              ],
-              [
-                "get",
-                "name_en"
-              ],
-              [
-                "get",
-                "name"
-              ]
-            ],
-            "\n",
-            [
-              "get",
-              "housenumber"
-            ]
-          ],
-          [
-            "coalesce",
-            [
-              "get",
-              "name_de"
-            ],
-            [
-              "get",
-              "name_en"
-            ],
-            [
-              "get",
-              "name"
-            ]
-          ]
-        ],
+        "text-field": "{name}",
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -811,21 +689,7 @@
         "attraction"
       ],
       "layout": {
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name_de"
-          ],
-          [
-            "get",
-            "name_en"
-          ],
-          [
-            "get",
-            "name"
-          ]
-        ],
+        "text-field": "{name}",
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -855,25 +719,7 @@
         "motorway_junction"
       ],
       "layout": {
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name_de"
-          ],
-          [
-            "get",
-            "name_en"
-          ],
-          [
-            "get",
-            "name"
-          ],
-          [
-            "get",
-            "ref"
-          ]
-        ],
+        "text-field": "{name}",
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -907,21 +753,7 @@
       "source": "openmaptiles",
       "source-layer": "water_name",
       "layout": {
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name_de"
-          ],
-          [
-            "get",
-            "name_en"
-          ],
-          [
-            "get",
-            "name"
-          ]
-        ],
+        "text-field": "{name}",
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -956,21 +788,7 @@
       ],
       "minzoom": 9,
       "layout": {
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name_de"
-          ],
-          [
-            "get",
-            "name_en"
-          ],
-          [
-            "get",
-            "name"
-          ]
-        ],
+        "text-field": "{name}",
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1009,21 +827,7 @@
       ],
       "minzoom": 15,
       "layout": {
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name_de"
-          ],
-          [
-            "get",
-            "name_en"
-          ],
-          [
-            "get",
-            "name"
-          ]
-        ],
+        "text-field": "{name}",
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1051,21 +855,7 @@
       ],
       "minzoom": 13,
       "layout": {
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name_de"
-          ],
-          [
-            "get",
-            "name_en"
-          ],
-          [
-            "get",
-            "name"
-          ]
-        ],
+        "text-field": "{name}",
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1093,21 +883,7 @@
       ],
       "minzoom": 10,
       "layout": {
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name_de"
-          ],
-          [
-            "get",
-            "name_en"
-          ],
-          [
-            "get",
-            "name"
-          ]
-        ],
+        "text-field": "{name}",
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1151,7 +927,7 @@
       ],
       "layout": {
         "symbol-placement": "line",
-        "text-field": "\u2192",
+        "text-field": "→",
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1207,10 +983,7 @@
       ],
       "minzoom": 6,
       "layout": {
-        "text-field": [
-          "get",
-          "ref"
-        ],
+        "text-field": "{ref}",
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1245,10 +1018,7 @@
       ],
       "minzoom": 8,
       "layout": {
-        "text-field": [
-          "get",
-          "ref"
-        ],
+        "text-field": "{ref}",
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1274,21 +1044,7 @@
         "country"
       ],
       "layout": {
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name_de"
-          ],
-          [
-            "get",
-            "name_en"
-          ],
-          [
-            "get",
-            "name"
-          ]
-        ],
+        "text-field": "{name}",
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1328,21 +1084,7 @@
       "minzoom": 5,
       "maxzoom": 12,
       "layout": {
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name_de"
-          ],
-          [
-            "get",
-            "name_en"
-          ],
-          [
-            "get",
-            "name"
-          ]
-        ],
+        "text-field": "{name}",
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1376,21 +1118,7 @@
         "city"
       ],
       "layout": {
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name_de"
-          ],
-          [
-            "get",
-            "name_en"
-          ],
-          [
-            "get",
-            "name"
-          ]
-        ],
+        "text-field": "{name}",
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1429,21 +1157,7 @@
       ],
       "minzoom": 8,
       "layout": {
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name_de"
-          ],
-          [
-            "get",
-            "name_en"
-          ],
-          [
-            "get",
-            "name"
-          ]
-        ],
+        "text-field": "{name}",
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1482,21 +1196,7 @@
       ],
       "minzoom": 10,
       "layout": {
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name_de"
-          ],
-          [
-            "get",
-            "name_en"
-          ],
-          [
-            "get",
-            "name"
-          ]
-        ],
+        "text-field": "{name}",
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1533,21 +1233,7 @@
       ],
       "minzoom": 12,
       "layout": {
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name_de"
-          ],
-          [
-            "get",
-            "name_en"
-          ],
-          [
-            "get",
-            "name"
-          ]
-        ],
+        "text-field": "{name}",
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
