@@ -80,9 +80,17 @@ data:
 
       public static void main(String[] args) throws Exception {
         Arguments arguments = Arguments.fromArgs(args);
-        Planetiler.create(arguments)
+        Planetiler planetiler = Planetiler.create(arguments)
           .setProfile(CustomProfile::new)
-          .setOutput("mbtiles", java.nio.file.Path.of("/tileserver-gl/planet-NEW.mbtiles"))
-          .run();
+          .setOutput("mbtiles", java.nio.file.Path.of("/tileserver-gl/planet-NEW.mbtiles"));
+
+        for (String arg : args) {
+          if (arg.startsWith("--osm-path=")) {
+            planetiler.addOsmSource("osm", java.nio.file.Path.of(arg.substring("--osm-path=".length())));
+            break;
+          }
+        }
+
+        planetiler.run();
       }
     }
