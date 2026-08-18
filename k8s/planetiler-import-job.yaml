@@ -178,8 +178,13 @@ spec:
               rm -f "${OUTPUT_NEW}"
               mkdir -p "${TEMP_DIR}" "${TEMP_SOURCES}" data/sources
 
+              PROFILE_SOURCE_ROOT="${TEMP_DIR}/profile"
+              PROFILE_SOURCE="${PROFILE_SOURCE_ROOT}/com/onthegomap/planetiler/custom/CustomProfile.java"
+              mkdir -p "$(dirname "${PROFILE_SOURCE}")"
+
               if [ -f /config/CustomProfile.java ]; then
-                java -Xmx80g -cp "${PLANETILER_JAR}" /config/CustomProfile.java \
+                cp /config/CustomProfile.java "${PROFILE_SOURCE}"
+                java -Xmx80g -cp "${PLANETILER_JAR}" "${PROFILE_SOURCE}" \
                   --osm-path="${SOURCE_OSM}" \
                   --tmpdir="${TEMP_DIR}" \
                   --output="${OUTPUT_NEW}" \
