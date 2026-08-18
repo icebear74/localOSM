@@ -8,6 +8,7 @@ data:
     package com.onthegomap.planetiler.custom;
 
     import com.onthegomap.planetiler.FeatureCollector;
+    import com.onthegomap.planetiler.config.Arguments;
     import com.onthegomap.planetiler.Planetiler;
     import com.onthegomap.planetiler.reader.SourceFeature;
     import org.openmaptiles.OpenMapTilesProfile;
@@ -78,7 +79,8 @@ data:
       }
 
       public static void main(String[] args) throws Exception {
-        Planetiler.create(args)
+        Arguments arguments = Arguments.fromArgs(args);
+        Planetiler.create(arguments)
           .setProfile(CustomProfile::new)
           .run();
       }
