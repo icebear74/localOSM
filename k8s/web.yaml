@@ -1761,6 +1761,8 @@ spec:
       labels:
         app: web
     spec:
+      nodeSelector:
+        osm: "true"
       initContainers:
         - name: fetch-static
           image: alpine:3.20

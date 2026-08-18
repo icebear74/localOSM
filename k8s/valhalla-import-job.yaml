@@ -9,6 +9,8 @@ spec:
   template:
     spec:
       serviceAccountName: planetiler-import
+      nodeSelector:
+        osm: "true"
       restartPolicy: Never
       initContainers:
         - name: fetch-kubectl

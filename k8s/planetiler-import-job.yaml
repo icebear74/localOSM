@@ -16,6 +16,8 @@ spec:
         osm-job-type: tileserver-import
     spec:
       serviceAccountName: planetiler-import
+      nodeSelector:
+        osm: "true"
       restartPolicy: Never
       securityContext:
         fsGroup: 1000

@@ -53,6 +53,8 @@ spec:
         app: import-orchestrator
     spec:
       serviceAccountName: import-orchestrator
+      nodeSelector:
+        osm: "true"
       securityContext:
         fsGroup: 1000
         runAsUser: 1000

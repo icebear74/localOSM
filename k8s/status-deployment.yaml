@@ -16,6 +16,8 @@ spec:
         app: status
     spec:
       serviceAccountName: status-manager
+      nodeSelector:
+        osm: "true"
       securityContext:
         fsGroup: 1000
       initContainers:

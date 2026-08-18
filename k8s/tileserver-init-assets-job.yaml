@@ -8,6 +8,8 @@ spec:
   ttlSecondsAfterFinished: 3600
   template:
     spec:
+      nodeSelector:
+        osm-assets: "true"
       restartPolicy: Never
       securityContext:
         fsGroup: 1000

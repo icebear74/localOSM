@@ -15,6 +15,8 @@ spec:
       labels:
         app: style-editor
     spec:
+      nodeSelector:
+        osm: "true"
       containers:
         - name: maputnik
           image: maputnik/editor:latest

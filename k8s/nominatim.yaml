@@ -27,6 +27,8 @@ spec:
       labels:
         app: nominatim
     spec:
+      nodeSelector:
+        osm: "true"
       securityContext:
         fsGroup: 100
       # Postgres' embedded shutdown checkpoint on this planet-scale database
