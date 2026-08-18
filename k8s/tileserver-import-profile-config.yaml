@@ -82,6 +82,7 @@ data:
         Arguments arguments = Arguments.fromArgs(args);
         Planetiler.create(arguments)
           .setProfile(CustomProfile::new)
+          .setOutput("mbtiles", java.nio.file.Path.of("/tileserver-gl/planet-NEW.mbtiles"))
           .run();
       }
     }
