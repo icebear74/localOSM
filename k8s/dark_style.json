@@ -346,6 +346,52 @@
       }
     },
     {
+      "id": "road-residential",
+      "type": "line",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "in",
+          "class",
+          "residential",
+          "unclassified",
+          "living_street",
+          "road"
+        ],
+        [
+          "!=",
+          "brunnel",
+          "tunnel"
+        ]
+      ],
+      "minzoom": 10,
+      "paint": {
+        "line-color": "#d6b889",
+        "line-width": {
+          "stops": [
+            [
+              10,
+              0.72
+            ],
+            [
+              12,
+              1.44
+            ],
+            [
+              14,
+              2.7
+            ],
+            [
+              16,
+              4.5
+            ]
+          ]
+        }
+      }
+    },
+    {
       "id": "road-secondary",
       "type": "line",
       "source": "openmaptiles",
