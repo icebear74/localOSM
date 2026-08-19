@@ -76,7 +76,7 @@ spec:
             - name: pelias-data
               mountPath: /usr/share/elasticsearch/data
         - name: api
-          image: pelias/api:master
+          image: pelias/api:v7.9.0
           imagePullPolicy: IfNotPresent
           env:
             - name: PORT

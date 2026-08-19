@@ -58,7 +58,7 @@ data:
           "leveldbpath": "/osm-temp/pelias/work/leveldb",
           "import": [
             {
-              "filename": "europa.osm.pbf"
+              "filename": "__PELIAS_PBF_FILE__"
             }
           ]
         }

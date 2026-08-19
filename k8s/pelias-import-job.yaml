@@ -15,7 +15,7 @@ spec:
       restartPolicy: Never
       initContainers:
         - name: pelias-schema
-          image: pelias/schema:master
+          image: pelias/schema:master-2026-08-04-d27db460d88284eabe40adfaf50a2ffac2365ddc
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
           args:
@@ -48,9 +48,16 @@ spec:
               check();
               NODE
               INDEX_NAME="pelias-$(date +%Y%m%d%H%M%S)"
+              PBF_FILE="${PELIAS_PBF_FILE:-$(ls -1 /planet/*.osm.pbf 2>/dev/null | head -n1 | xargs -r basename)}"
+              if [ -z "${PBF_FILE:-}" ]; then
+                echo "ERROR: no *.osm.pbf file found in /planet and PELIAS_PBF_FILE not set." >&2
+                exit 1
+              fi
               cp /config/import-pelias-template.json /work/pelias.json
               sed -i "s/__PELIAS_INDEX__/${INDEX_NAME}/g" /work/pelias.json
+              sed -i "s/__PELIAS_PBF_FILE__/${PBF_FILE}/g" /work/pelias.json
               echo "${INDEX_NAME}" > /work/index-name
+              echo "${PBF_FILE}" > /work/pbf-file
               export PELIAS_CONFIG=/work/pelias.json
               ./bin/create_index
           resources:
@@ -61,21 +68,25 @@ spec:
               memory: "1Gi"
               cpu: "1"
           volumeMounts:
+            - name: planet
+              mountPath: /planet
+              readOnly: true
             - name: pelias-config
               mountPath: /config
             - name: work
               mountPath: /work
       containers:
         - name: pelias-import
-          image: pelias/openstreetmap:master
+          image: pelias/openstreetmap:v8.5.2
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
           args:
             - |
               set -euo pipefail
               INDEX_NAME="$(cat /work/index-name)"
+              PBF_FILE="$(cat /work/pbf-file)"
               mkdir -p /osm-temp/pelias/work/openstreetmap /osm-temp/pelias/work/leveldb
-              ln -sfn /planet/europa.osm.pbf /osm-temp/pelias/work/openstreetmap/europa.osm.pbf
+              ln -sfn "/planet/${PBF_FILE}" "/osm-temp/pelias/work/openstreetmap/${PBF_FILE}"
               export PELIAS_CONFIG=/work/pelias.json
               npm start
 
