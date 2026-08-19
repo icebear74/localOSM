@@ -9,7 +9,7 @@ data:
   # the main Postgres' import-time tuning at that scale.
   import-tuning.conf: |
     # SPEICHER
-    shared_buffers = 64GB
+    shared_buffers = 50GB
     maintenance_work_mem = 32GB          # Sehr wichtig für die Index-Erstellung
     work_mem = 256MB
     wal_buffers = 64MB
@@ -22,15 +22,18 @@ data:
     jit = off                            # Schaltet unnötiges Query-Kompilieren ab
 
     # WAL & CHECKPOINTS
-    max_wal_size = 50GB
+    max_wal_size = 2GB
+    min_wal_size = 512MB
+    wal_level = minimal
+    max_wal_senders = 0
     checkpoint_timeout = 60min
     checkpoint_completion_target = 0.9
 
     # PARALLELISIERUNG & I/O
     random_page_cost = 1.1
     effective_io_concurrency = 200       # Perfekt für NVMe/SSD
-    max_worker_processes = 16
-    max_parallel_workers = 16
+    max_worker_processes = 10
+    max_parallel_workers = 10
     max_parallel_workers_per_gather = 5
     max_parallel_maintenance_workers = 5 # Beschleunigt INDEX-Erstellung massiv
 

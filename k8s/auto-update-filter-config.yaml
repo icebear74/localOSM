@@ -5,17 +5,17 @@ metadata:
   namespace: osm
 data:
   welt_filter.txt: |
-    n/place=country,state,region,city,town,ocean,sea,island,archipelago
+    n/place=country,state,region,city,ocean,sea
     r/boundary=administrative+admin_level=1,2,3,4
-    n/natural=ocean,sea,bay,strait,water
-    w/natural=ocean,sea,bay,strait,water
-    r/natural=ocean,sea,bay,strait,water
+    n/natural=ocean,sea,bay,strait
+    w/natural=ocean,sea,bay,strait
+    r/natural=ocean,sea,bay,strait
     w/water=lake,reservoir
     r/water=lake,reservoir
     n/water=lake,reservoir
-    w/waterway=river,riverbank
-    r/waterway=river,riverbank
-    n/waterway=river,riverbank
+    w/waterway=river
+    r/waterway=river
+    n/waterway=river
     n/tourism=theme_park
     w/tourism=theme_park
     r/tourism=theme_park

@@ -19,7 +19,7 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - name: PBF_PATH
-              value: /osm-temp/import/planet.osm.pbf
+              value: /planet/europa.osm.pbf
             - name: NOMINATIM_PASSWORD
               valueFrom:
                 configMapKeyRef:
@@ -214,10 +214,16 @@ spec:
               readOnly: true
             - name: container-tmp
               mountPath: /tmp
+            - name: planet
+              mountPath: /planet  
       volumes:
-        - name: osm-temp
+        - name: planet
           persistentVolumeClaim:
-            claimName: osm-temp
+            claimName: planet 
+        - name: osm-temp
+          hostPath:
+            path: /mnt/osm-temp
+            type: DirectoryOrCreate
         - name: nominatim-production-data
           persistentVolumeClaim:
             claimName: nominatim
