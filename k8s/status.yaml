@@ -985,6 +985,8 @@ data:
               </label>
               <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.82rem">
                 <input type="checkbox" id="auto-update-step-photon" style="width:auto" checked> Photon bauen
+              </label>
+              <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.82rem">
                 <input type="checkbox" id="auto-update-step-pelias" style="width:auto" checked> Pelias bauen
               </label>
             </div>
@@ -3380,4 +3382,3 @@ data:
             pass
         finally:
             server.server_close()
-

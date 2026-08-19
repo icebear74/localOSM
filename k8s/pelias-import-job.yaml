@@ -23,11 +23,12 @@ spec:
               set -eu
               node <<'NODE'
               const http = require('http');
+              const ES_HOST = 'pelias-elasticsearch.osm.svc.cluster.local';
               let tries = 0;
               const maxTries = 120;
               function check() {
                 tries += 1;
-                const req = http.get('http://pelias.osm.svc.cluster.local:9200/_cluster/health?wait_for_status=yellow&timeout=1s', (res) => {
+                const req = http.get(`http://${ES_HOST}:9200/_cluster/health?wait_for_status=yellow&timeout=1s`, (res) => {
                   if (res.statusCode >= 200 && res.statusCode < 300) {
                     process.exit(0);
                   }
@@ -93,6 +94,7 @@ spec:
               node <<'NODE'
               const fs = require('fs');
               const http = require('http');
+              const ES_HOST = 'pelias-elasticsearch.osm.svc.cluster.local';
 
               const indexName = fs.readFileSync('/work/index-name', 'utf8').trim();
               const aliasName = 'pelias';
@@ -101,7 +103,7 @@ spec:
                 return new Promise((resolve, reject) => {
                   const payload = body ? Buffer.from(JSON.stringify(body)) : null;
                   const req = http.request({
-                    hostname: 'pelias.osm.svc.cluster.local',
+                    hostname: ES_HOST,
                     port: 9200,
                     path,
                     method,

@@ -37,7 +37,7 @@ data:
         "apiVersion": "7.5",
         "hosts": [
           {
-            "host": "pelias.osm.svc.cluster.local",
+            "host": "pelias-elasticsearch.osm.svc.cluster.local",
             "port": 9200,
             "protocol": "http"
           }
