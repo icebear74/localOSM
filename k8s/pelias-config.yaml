@@ -12,7 +12,9 @@ data:
   # Comma-separated list of OSM tag keys Pelias should additionally import as
   # venue tags. Each entry is expanded to `<tag>+name` when the import job
   # writes the importer config.
-  pelias_extra_tags: ""
+  # Default to POI-relevant OSM tags so parks, attractions and medical sites
+  # are searchable by their names in Pelias.
+  pelias_extra_tags: "amenity,leisure,tourism,healthcare"
   runtime-pelias.json: |
     {
       "logger": {

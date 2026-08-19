@@ -42,33 +42,22 @@ data:
         }
 
         if (feature.hasTag("tourism", "theme_park", "water_park")
-            || feature.hasTag("leisure", "amusement_park")
             || feature.hasTag("landuse", "attraction")
             || feature.hasTag("attraction")) {
           if (feature.canBePolygon()) {
-            String landuseClass = feature.hasTag("leisure", "amusement_park") ? "amusement_park" : "theme_park";
             features.polygon("landuse")
-              .setAttr("class", landuseClass)
-              .setAttr("subclass", feature.getString("attraction", feature.getString("tourism", feature.getString("leisure", "attraction"))))
+              .setAttr("class", "theme_park")
+              .setAttr("subclass", feature.getString("attraction", feature.getString("tourism", "attraction")))
               .setMinZoom(9);
           }
  
           if (feature.isPoint()) {
             features.point("poi")
               .setAttr("class", "attraction")
-              .setAttr("subclass", feature.getString("attraction", feature.getString("tourism", feature.getString("leisure", "generic"))))
+              .setAttr("subclass", feature.getString("attraction", "generic"))
               .setAttr("name", feature.getString("name"))
               .setMinZoom(12);
           }
-        }
- 
-        if (feature.isPoint() && (feature.hasTag("amenity", "hospital", "clinic", "doctors", "pharmacy")
-            || feature.hasTag("healthcare", "hospital", "clinic", "doctor", "dentist", "pharmacy"))) {
-          features.point("poi")
-            .setAttr("class", "medical")
-            .setAttr("subclass", feature.getString("amenity", feature.getString("healthcare", "medical")))
-            .setAttr("name", feature.getString("name"))
-            .setMinZoom(13);
         }
  
         if (feature.canBeLine() && (feature.hasTag("highway", "construction") || feature.hasTag("construction"))) {
