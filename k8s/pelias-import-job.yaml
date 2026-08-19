@@ -13,6 +13,8 @@ spec:
       nodeSelector:
         osm: "true"
       restartPolicy: Never
+      securityContext:
+        fsGroup: 1000
       initContainers:
         - name: pelias-schema
           image: pelias/schema:master-2026-08-04-d27db460d88284eabe40adfaf50a2ffac2365ddc
@@ -142,6 +144,9 @@ spec:
           args:
             - |
               set -eu
+              TEMP_ROOT="${PELIAS_TEMP_ROOT:-/osm-temp/pelias}"
+              mkdir -p "${TEMP_ROOT}" "${TEMP_ROOT}/work/openstreetmap" "${TEMP_ROOT}/work/leveldb"
+              chown -R 1000:1000 "${TEMP_ROOT}" 2>/dev/null || true
               INDEX_NAME="$(cat /work/index-name)"
               PBF_FILE="$(cat /work/pbf-file)"
               PBF_ROOT="${PELIAS_PBF_ROOT:-/planet}"
@@ -182,7 +187,8 @@ spec:
               NODE
               }
               trap cleanup_failed_import EXIT
-              mkdir -p "${TEMP_ROOT}/work/openstreetmap" "${TEMP_ROOT}/work/leveldb"
+              mkdir -p "${TEMP_ROOT}" "${TEMP_ROOT}/work/openstreetmap" "${TEMP_ROOT}/work/leveldb"
+              chown -R 1000:1000 "${TEMP_ROOT}" 2>/dev/null || true
               ln -sfn "${PBF_ROOT}/${PBF_FILE}" "${TEMP_ROOT}/work/openstreetmap/${PBF_FILE}"
               export PELIAS_CONFIG=/work/pelias.json
               npm start
