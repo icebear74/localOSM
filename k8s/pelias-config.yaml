@@ -16,7 +16,7 @@ data:
         "timestamp": false
       },
       "esclient": {
-        "apiVersion": "7.17",
+        "apiVersion": "7.x",
         "hosts": [
           {
             "host": "127.0.0.1",
@@ -39,7 +39,7 @@ data:
         "timestamp": false
       },
       "esclient": {
-        "apiVersion": "7.17",
+        "apiVersion": "7.x",
         "hosts": [
           {
             "host": "__PELIAS_ELASTICSEARCH_HOST__",
