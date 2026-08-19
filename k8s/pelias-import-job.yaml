@@ -140,6 +140,11 @@ spec:
                 configMapKeyRef:
                   name: osm-pelias-config
                   key: elasticsearch-host
+            - name: PELIAS_EXTRA_TAGS
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-pelias-config
+                  key: pelias_extra_tags
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -191,6 +196,24 @@ spec:
               chown -R 1000:1000 "${TEMP_ROOT}" 2>/dev/null || true
               ln -sfn "${PBF_ROOT}/${PBF_FILE}" "${TEMP_ROOT}/work/openstreetmap/${PBF_FILE}"
               export PELIAS_CONFIG=/work/pelias.json
+              node <<'NODE'
+              const fs = require('fs');
+              const path = '/work/pelias.json';
+              const raw = fs.readFileSync(path, 'utf8');
+              const config = JSON.parse(raw);
+              const extraTags = (process.env.PELIAS_EXTRA_TAGS || '')
+                .split(',')
+                .map((tag) => tag.trim())
+                .filter(Boolean);
+              const featureTags = extraTags.map((tag) => /[+~]/.test(tag) ? tag : `${tag}+name`);
+              const venueTags = Array.from(new Set([...(config.imports?.openstreetmap?.layers?.venue?.tags || []), ...featureTags]));
+              config.imports = config.imports || {};
+              config.imports.openstreetmap = config.imports.openstreetmap || {};
+              config.imports.openstreetmap.layers = config.imports.openstreetmap.layers || {};
+              config.imports.openstreetmap.layers.venue = config.imports.openstreetmap.layers.venue || {};
+              config.imports.openstreetmap.layers.venue.tags = venueTags;
+              fs.writeFileSync(path, JSON.stringify(config, null, 2));
+              NODE
               npm start
 
               FAILED=0

@@ -128,6 +128,16 @@ The value is passed to Photon's `-extra-tags` import flag during
 `k8s/photon-import-job.yaml`, so a re-run of the Photon import job will rebuild
 the index with the configured tags.
  
+### Tuning the Pelias index
+ 
+Pelias can also be configured with additional OSM venue tags via
+`k8s/pelias-config.yaml` (`ConfigMap osm-pelias-config`). Set
+`pelias_extra_tags` to a comma-separated list of tag keys such as
+`brand,network,operator`.
+ 
+Each tag is expanded to `<tag>+name` for the importer, so a re-run of the
+Pelias import job will rebuild the index with the configured tags.
+ 
 ## URLs
 
 - Status dashboard: `http://<node-ip>:30083/`

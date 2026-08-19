@@ -9,6 +9,10 @@ data:
   temp-root: /osm-temp/pelias
   # Used by the Pelias import job, which runs in a separate pod.
   elasticsearch-host: pelias-elasticsearch.osm.svc.cluster.local
+  # Comma-separated list of OSM tag keys Pelias should additionally import as
+  # venue tags. Each entry is expanded to `<tag>+name` when the import job
+  # writes the importer config.
+  pelias_extra_tags: ""
   runtime-pelias.json: |
     {
       "logger": {
