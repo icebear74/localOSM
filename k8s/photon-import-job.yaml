@@ -102,6 +102,11 @@ spec:
                 configMapKeyRef:
                   name: osm-photon-config
                   key: photon_languages
+            - name: PHOTON_EXTRA_TAGS
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-photon-config
+                  key: photon_extra_tags
           resources:
             requests:
               memory: "4Gi"
@@ -169,6 +174,10 @@ spec:
               cd "${WORK_DIR}"
               DB_SECRET="${PHOTON_DB_PASSWORD}"
               DB_PASSWORD_FLAG="-pass""word"
+              IMPORT_ARGS=()
+              if [ -n "${PHOTON_EXTRA_TAGS:-}" ]; then
+                IMPORT_ARGS+=( -extra-tags "${PHOTON_EXTRA_TAGS}" )
+              fi
               java -Xms16g -Xmx64g -XX:+UseG1GC \
                 -Des.index.merge.scheduler.max_thread_count=12 \
                 -Des.index.merge.scheduler.max_merge_count=13 \
@@ -176,7 +185,7 @@ spec:
                 -host "${NOMINATIM_DB_HOST}" -port "${NOMINATIM_DB_PORT}" \
                 -database "${NOMINATIM_DB_NAME}" -user "${PHOTON_DB_USER}" \
                 "${DB_PASSWORD_FLAG}" "${DB_SECRET}" \
-                -languages "${PHOTON_LANGUAGES}" -data-dir "${WORK_DIR}"
+                -languages "${PHOTON_LANGUAGES}" -data-dir "${WORK_DIR}" "${IMPORT_ARGS[@]}"
 
               echo '=== Copying Photon data into the next active release directory ...'
               cp -a "${WORK_DIR}/." "${NEXT_DIR}/"

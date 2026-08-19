@@ -114,7 +114,20 @@ kubectl apply -f k8s/nominatim-import-config.yaml
 
 before starting the next import. The same ConfigMap also supplies `import_password`, used by both
 the import Job and the running `nominatim` deployment, so the two always stay in sync.
-
+ 
+### Tuning the Photon search index
+ 
+Photon imports can now be configured with additional, indexable OSM tags via
+`k8s/photon-config.yaml` (`ConfigMap osm-photon-config`). Set
+`photon_extra_tags` to either:
+ 
+- `ALL` to import all available extra tags, or
+- a comma-separated list of specific tag keys such as `brand,network,operator`
+ 
+The value is passed to Photon's `-extra-tags` import flag during
+`k8s/photon-import-job.yaml`, so a re-run of the Photon import job will rebuild
+the index with the configured tags.
+ 
 ## URLs
 
 - Status dashboard: `http://<node-ip>:30083/`
