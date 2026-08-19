@@ -44,7 +44,7 @@ spec:
             - name: cluster.name
               value: pelias
             - name: ES_JAVA_OPTS
-              value: "-Xms4g -Xmx4g"
+              value: "-Xms6g -Xmx6g"
             - name: xpack.security.enabled
               value: "false"
           ports:
@@ -52,11 +52,11 @@ spec:
             - containerPort: 9300
           resources:
             requests:
-              memory: "6Gi"
-              cpu: "2"
+              memory: "8Gi"
+              cpu: "3"
             limits:
-              memory: "12Gi"
-              cpu: "6"
+              memory: "16Gi"
+              cpu: "8"
           readinessProbe:
             httpGet:
               path: /_cluster/health?wait_for_status=yellow&timeout=5s
