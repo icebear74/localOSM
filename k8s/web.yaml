@@ -1519,6 +1519,9 @@ data:
                 query = self.path.split("?", 1)[1] if "?" in self.path else ""
                 params = urllib.parse.parse_qs(query)
                 provider = params.get("provider", ["photon_nominatim"])[0].strip().lower()
+                if provider not in {"pelias", "photon_nominatim"}:
+                    self._send_json({"error": "invalid provider (allowed: pelias, photon_nominatim)"}, 400)
+                    return
                 q = params.get("q", [""])[0]
                 if not q:
                     self._send_json({"error": "missing query parameter q"}, 400)
@@ -1560,6 +1563,9 @@ data:
                 query = self.path.split("?", 1)[1] if "?" in self.path else ""
                 params = urllib.parse.parse_qs(query)
                 provider = params.get("provider", ["photon_nominatim"])[0].strip().lower()
+                if provider not in {"pelias", "photon_nominatim"}:
+                    self._send_json({"error": "invalid provider (allowed: pelias, photon_nominatim)"}, 400)
+                    return
                 lat = params.get("lat", [""])[0]
                 lon = params.get("lon", [""])[0]
                 if not lat or not lon:
