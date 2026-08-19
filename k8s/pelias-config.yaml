@@ -4,6 +4,11 @@ metadata:
   name: osm-pelias-config
   namespace: osm
 data:
+  pbf-root: /planet
+  pbf-file: europa.osm.pbf
+  temp-root: /osm-temp/pelias
+  # Used by the Pelias import job, which runs in a separate pod.
+  elasticsearch-host: pelias-elasticsearch.osm.svc.cluster.local
   runtime-pelias.json: |
     {
       "logger": {
@@ -37,7 +42,7 @@ data:
         "apiVersion": "7.17",
         "hosts": [
           {
-            "host": "pelias-elasticsearch.osm.svc.cluster.local",
+            "host": "__PELIAS_ELASTICSEARCH_HOST__",
             "port": 9200,
             "protocol": "http"
           }
@@ -54,8 +59,8 @@ data:
           "enabled": false
         },
         "openstreetmap": {
-          "datapath": "/osm-temp/pelias/work/openstreetmap",
-          "leveldbpath": "/osm-temp/pelias/work/leveldb",
+          "datapath": "__PELIAS_TEMP_ROOT__/work/openstreetmap",
+          "leveldbpath": "__PELIAS_TEMP_ROOT__/work/leveldb",
           "import": [
             {
               "filename": "__PELIAS_PBF_FILE__"

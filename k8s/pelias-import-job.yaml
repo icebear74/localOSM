@@ -17,13 +17,34 @@ spec:
         - name: pelias-schema
           image: pelias/schema:master-2026-08-04-d27db460d88284eabe40adfaf50a2ffac2365ddc
           imagePullPolicy: IfNotPresent
+          env:
+            - name: PELIAS_PBF_ROOT
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-pelias-config
+                  key: pbf-root
+            - name: PELIAS_PBF_FILE
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-pelias-config
+                  key: pbf-file
+            - name: PELIAS_TEMP_ROOT
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-pelias-config
+                  key: temp-root
+            - name: PELIAS_ELASTICSEARCH_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-pelias-config
+                  key: elasticsearch-host
           command: ["/bin/sh", "-c"]
           args:
             - |
               set -eu
               node <<'NODE'
               const http = require('http');
-              const ES_HOST = 'pelias-elasticsearch.osm.svc.cluster.local';
+              const ES_HOST = process.env.PELIAS_ELASTICSEARCH_HOST || 'pelias-elasticsearch.osm.svc.cluster.local';
               let tries = 0;
               const maxTries = 120;
               function check() {
@@ -49,20 +70,31 @@ spec:
               check();
               NODE
               INDEX_NAME="pelias-$(date +%Y%m%d%H%M%S)"
-              PBF_CANDIDATE="$(ls -1 /planet/*.osm.pbf 2>/dev/null | head -n1 || true)"
-              PBF_FILE="${PELIAS_PBF_FILE:-}"
-              if [ -z "${PBF_FILE}" ] && [ -n "${PBF_CANDIDATE}" ]; then
-                PBF_FILE="$(basename "${PBF_CANDIDATE}")"
-              fi
-              if [ -z "${PBF_FILE:-}" ]; then
-                echo "ERROR: no *.osm.pbf file found in /planet and PELIAS_PBF_FILE not set." >&2
+              PBF_ROOT="${PELIAS_PBF_ROOT:-/planet}"
+              PBF_FILE="${PELIAS_PBF_FILE:-europa.osm.pbf}"
+              PBF_PATH="${PBF_ROOT}/${PBF_FILE}"
+              TEMP_ROOT="${PELIAS_TEMP_ROOT:-/osm-temp/pelias}"
+              ES_HOST="${PELIAS_ELASTICSEARCH_HOST:-pelias-elasticsearch.osm.svc.cluster.local}"
+              case "${TEMP_ROOT}" in
+                /osm-temp|/osm-temp/*) ;;
+                *)
+                  echo "ERROR: TEMP_ROOT must be inside /osm-temp (got ${TEMP_ROOT})" >&2
+                  exit 1
+                  ;;
+              esac
+              if [ ! -f "${PBF_PATH}" ]; then
+                echo "ERROR: PBF file not found at ${PBF_PATH}" >&2
                 exit 1
               fi
               cp /config/import-pelias-template.json /work/pelias.json
               sed -i "s/__PELIAS_INDEX__/${INDEX_NAME}/g" /work/pelias.json
               sed -i "s|__PELIAS_PBF_FILE__|${PBF_FILE}|g" /work/pelias.json
+              sed -i "s|__PELIAS_TEMP_ROOT__|${TEMP_ROOT}|g" /work/pelias.json
+              sed -i "s|__PELIAS_ELASTICSEARCH_HOST__|${ES_HOST}|g" /work/pelias.json
               echo "${INDEX_NAME}" > /work/index-name
               echo "${PBF_FILE}" > /work/pbf-file
+              echo "${PBF_ROOT}" > /work/pbf-root
+              echo "${TEMP_ROOT}" > /work/temp-root
               export PELIAS_CONFIG=/work/pelias.json
               ./bin/create_index
           resources:
@@ -84,12 +116,42 @@ spec:
         - name: pelias-import
           image: pelias/openstreetmap:v8.5.2
           imagePullPolicy: IfNotPresent
+          env:
+            - name: PELIAS_PBF_ROOT
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-pelias-config
+                  key: pbf-root
+            - name: PELIAS_PBF_FILE
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-pelias-config
+                  key: pbf-file
+            - name: PELIAS_TEMP_ROOT
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-pelias-config
+                  key: temp-root
+            - name: PELIAS_ELASTICSEARCH_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-pelias-config
+                  key: elasticsearch-host
           command: ["/bin/sh", "-c"]
           args:
             - |
               set -euo pipefail
               INDEX_NAME="$(cat /work/index-name)"
               PBF_FILE="$(cat /work/pbf-file)"
+              PBF_ROOT="${PELIAS_PBF_ROOT:-/planet}"
+              TEMP_ROOT="${PELIAS_TEMP_ROOT:-/osm-temp/pelias}"
+              case "${TEMP_ROOT}" in
+                /osm-temp|/osm-temp/*) ;;
+                *)
+                  echo "ERROR: TEMP_ROOT must be inside /osm-temp (got ${TEMP_ROOT})" >&2
+                  exit 1
+                  ;;
+              esac
               FAILED=1
               cleanup_failed_import() {
                 if [ "${FAILED}" != "1" ]; then
@@ -98,7 +160,7 @@ spec:
                 node <<'NODE'
                 const fs = require('fs');
                 const http = require('http');
-                const ES_HOST = 'pelias-elasticsearch.osm.svc.cluster.local';
+                const ES_HOST = process.env.PELIAS_ELASTICSEARCH_HOST || 'pelias-elasticsearch.osm.svc.cluster.local';
                 const indexName = fs.readFileSync('/work/index-name', 'utf8').trim();
                 const req = http.request({
                   hostname: ES_HOST,
@@ -119,15 +181,15 @@ spec:
                 NODE
               }
               trap cleanup_failed_import EXIT
-              mkdir -p /osm-temp/pelias/work/openstreetmap /osm-temp/pelias/work/leveldb
-              ln -sfn "/planet/${PBF_FILE}" "/osm-temp/pelias/work/openstreetmap/${PBF_FILE}"
+              mkdir -p "${TEMP_ROOT}/work/openstreetmap" "${TEMP_ROOT}/work/leveldb"
+              ln -sfn "${PBF_ROOT}/${PBF_FILE}" "${TEMP_ROOT}/work/openstreetmap/${PBF_FILE}"
               export PELIAS_CONFIG=/work/pelias.json
               npm start
 
               node <<'NODE'
               const fs = require('fs');
               const http = require('http');
-              const ES_HOST = 'pelias-elasticsearch.osm.svc.cluster.local';
+              const ES_HOST = process.env.PELIAS_ELASTICSEARCH_HOST || 'pelias-elasticsearch.osm.svc.cluster.local';
 
               const indexName = fs.readFileSync('/work/index-name', 'utf8').trim();
               const aliasName = 'pelias';
@@ -183,7 +245,7 @@ spec:
 
               FAILED=0
               trap - EXIT
-              find /osm-temp/pelias/work -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+              find "${TEMP_ROOT}/work" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
           resources:
             requests:
               memory: "6Gi"
