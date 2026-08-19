@@ -141,7 +141,7 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              set -euo pipefail
+              set -eu
               INDEX_NAME="$(cat /work/index-name)"
               PBF_FILE="$(cat /work/pbf-file)"
               PBF_ROOT="${PELIAS_PBF_ROOT:-/planet}"
