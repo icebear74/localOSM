@@ -56,7 +56,7 @@ spec:
               fi
               cp /config/import-pelias-template.json /work/pelias.json
               sed -i "s/__PELIAS_INDEX__/${INDEX_NAME}/g" /work/pelias.json
-              sed -i "s/__PELIAS_PBF_FILE__/${PBF_FILE}/g" /work/pelias.json
+              sed -i "s|__PELIAS_PBF_FILE__|${PBF_FILE}|g" /work/pelias.json
               echo "${INDEX_NAME}" > /work/index-name
               echo "${PBF_FILE}" > /work/pbf-file
               export PELIAS_CONFIG=/work/pelias.json
@@ -162,8 +162,6 @@ spec:
               readOnly: true
             - name: osm-temp
               mountPath: /osm-temp
-            - name: pelias-config
-              mountPath: /config
             - name: work
               mountPath: /work
       volumes:
