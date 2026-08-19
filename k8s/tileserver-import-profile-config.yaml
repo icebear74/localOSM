@@ -4,21 +4,89 @@ metadata:
   name: osm-tileserver-import-profile-config
   namespace: osm
 data:
-  rollercoaster.yml: |
-    # Erbt vollständig vom Standard-OpenMapTiles-Profil
-    schema: openmaptiles
+  use_java: "false"
+  CustomProfile.java: |
+    package com.onthegomap.planetiler.custom;
 
-    # Ergänzungen/Add-ons zum bestehenden Profil
-    layers:
-      - name: transportation
-        features:
-          - source: osm
-            geometry: line
-            filter:
-              - roller_coaster: track
-            attributes:
-              - key: class
-                value: track
-              - key: subclass
-                value: roller_coaster
-            min_zoom: 12
+    import com.onthegomap.planetiler.FeatureCollector;
+    import com.onthegomap.planetiler.config.Arguments;
+    import com.onthegomap.planetiler.Planetiler;
+    import com.onthegomap.planetiler.reader.SourceFeature;
+    import org.openmaptiles.OpenMapTilesProfile;
+
+    /**
+     * Erweiterung des Standard-OpenMapTiles-Profils.
+     *
+     * Behält alle Standard-Features bei und ergänzt zusätzliche Layer/Attribute für
+     * Freizeitpark-Attraktionen, Schienen-/Parkbahnen und Baustellen.
+     */
+    public class CustomProfile extends OpenMapTilesProfile {
+      public CustomProfile(Planetiler planetiler) {
+        super(planetiler);
+      }
+
+      @Override
+      public void processFeature(SourceFeature feature, FeatureCollector features) {
+        super.processFeature(feature, features);
+
+        if (feature.canBeLine()) {
+          boolean isCoasterLine = feature.hasTag("attraction", "roller_coaster", "water_slide")
+            || feature.hasTag("railway", "coaster", "narrow_gauge", "monorail", "miniature");
+          if (isCoasterLine) {
+            features.line("transportation")
+              .setBufferPixels(4)
+              .setAttr("class", "transit")
+              .setAttr("subclass", feature.getString("attraction", feature.getString("railway", "transit")))
+              .setMinZoom(11);
+          }
+        }
+
+        if (feature.hasTag("tourism", "theme_park", "water_park")
+            || feature.hasTag("landuse", "attraction")
+            || feature.hasTag("attraction")) {
+          if (feature.canBePolygon()) {
+            features.polygon("landuse")
+              .setAttr("class", "theme_park")
+              .setAttr("subclass", feature.getString("attraction", feature.getString("tourism", "attraction")))
+              .setMinZoom(9);
+          }
+
+          if (feature.isPoint()) {
+            features.point("poi")
+              .setAttr("class", "attraction")
+              .setAttr("subclass", feature.getString("attraction", "generic"))
+              .setAttr("name", feature.getString("name"))
+              .setMinZoom(12);
+          }
+        }
+
+        if (feature.canBeLine() && (feature.hasTag("highway", "construction") || feature.hasTag("construction"))) {
+          features.line("transportation")
+            .setBufferPixels(4)
+            .setAttr("class", "construction")
+            .setAttr("construction", feature.getString("construction", "road"))
+            .setMinZoom(11);
+        }
+
+        if (feature.canBePolygon() && feature.hasTag("building", "construction")) {
+          features.polygon("building")
+            .setAttr("class", "construction")
+            .setMinZoom(13);
+        }
+
+        if (feature.canBePolygon() && feature.hasTag("landuse", "construction")) {
+          features.polygon("landuse")
+            .setAttr("class", "construction")
+            .setMinZoom(10);
+        }
+      }
+
+      public static void main(String[] args) throws Exception {
+        Arguments arguments = Arguments.fromArgs(args);
+        Planetiler.create(arguments)
+          .setProfile(CustomProfile::new)
+          .addOsmSource("osm", java.nio.file.Path.of("/planet/europa.osm.pbf"))
+          .overwriteOutput(java.nio.file.Path.of("/tileserver-gl/planet-NEW.mbtiles"))
+          .run();
+      }
+    }

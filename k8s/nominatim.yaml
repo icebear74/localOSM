@@ -27,6 +27,8 @@ spec:
       labels:
         app: nominatim
     spec:
+      nodeSelector:
+        osm: "true"
       securityContext:
         fsGroup: 100
       # Postgres' embedded shutdown checkpoint on this planet-scale database
@@ -40,17 +42,45 @@ spec:
       initContainers:
         - name: wait-for-data
           image: busybox:1.36
+          env:
+            - name: PGDATA
+              value: /nominatim-data/current
           command: ["/bin/sh", "-c"]
           args:
             - |
               trap 'echo "Terminating wait script..."; exit 0' TERM INT
-              DB=/nominatim-db/PG_VERSION
-              IMPORT_FINISHED=/nominatim-db/import-finished
+              PGDATA_ROOT="$(dirname "${PGDATA}")"
+              DB="${PGDATA}/PG_VERSION"
+              IMPORT_FINISHED="${PGDATA}/import-finished"
+              STAGING_DB="${PGDATA_ROOT}/staging/PG_VERSION"
+              STAGING_IMPORT_FINISHED="${PGDATA_ROOT}/staging/import-finished"
               LAST_MISSING=""
-              until [ -f "$DB" ] && [ -f "$IMPORT_FINISHED" ]; do
+              until { [ -f "$DB" ] && [ -f "$IMPORT_FINISHED" ]; } || { [ -f "$STAGING_DB" ] && [ -f "$STAGING_IMPORT_FINISHED" ]; }; do
+                CURRENT_READY=false
+                STAGING_READY=false
+                CURRENT_DIR_PRESENT=false
+                STAGING_DIR_PRESENT=false
+                if [ -d "${PGDATA}" ] && [ -n "$(ls -A "${PGDATA}" 2>/dev/null)" ]; then
+                  CURRENT_DIR_PRESENT=true
+                fi
+                if [ -d "${PGDATA_ROOT}/staging" ] && [ -n "$(ls -A "${PGDATA_ROOT}/staging" 2>/dev/null)" ]; then
+                  STAGING_DIR_PRESENT=true
+                fi
+                [ -f "$DB" ] && [ -f "$IMPORT_FINISHED" ] && CURRENT_READY=true
+                [ -f "$STAGING_DB" ] && [ -f "$STAGING_IMPORT_FINISHED" ] && STAGING_READY=true
+                if [ "$CURRENT_DIR_PRESENT" != true ] && [ "$STAGING_DIR_PRESENT" != true ]; then
+                  echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') No active or staged Nominatim database found under ${PGDATA_ROOT}; refusing to start an import from the deployment pod."
+                  exit 1
+                fi
                 MISSING=""
-                [ -f "$DB" ] || MISSING="$DB"
-                [ -f "$IMPORT_FINISHED" ] || MISSING="${MISSING:+$MISSING, }$IMPORT_FINISHED"
+                if [ "$CURRENT_READY" != true ]; then
+                  [ -f "$DB" ] || MISSING="$DB"
+                  [ -f "$IMPORT_FINISHED" ] || MISSING="${MISSING:+$MISSING, }$IMPORT_FINISHED"
+                fi
+                if [ "$STAGING_READY" != true ]; then
+                  [ -f "$STAGING_DB" ] || MISSING="${MISSING:+$MISSING, }$STAGING_DB"
+                  [ -f "$STAGING_IMPORT_FINISHED" ] || MISSING="${MISSING:+$MISSING, }$STAGING_IMPORT_FINISHED"
+                fi
                 if [ "$MISSING" != "$LAST_MISSING" ]; then
                   echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for imported Nominatim database markers at $MISSING ..."
                   LAST_MISSING="$MISSING"
@@ -67,7 +97,7 @@ spec:
               memory: "64Mi"
           volumeMounts:
             - name: nominatim-data
-              mountPath: /nominatim-db
+              mountPath: /nominatim-data
               readOnly: true
       containers:
         - name: nominatim
@@ -89,7 +119,7 @@ spec:
             # nominatim-import-job.yaml and start.sh only uses this file when the
             # import-finished marker is missing. Without it the container crash-loops.
             - name: PBF_PATH
-              value: /nominatim/data/import/planet.osm.pbf
+              value: /planet/europa.osm.pbf
             - name: PHOTON_DB_USER
               valueFrom:
                 configMapKeyRef:
@@ -100,6 +130,8 @@ spec:
                 configMapKeyRef:
                   name: osm-photon-config
                   key: photon_db_password
+            - name: PGDATA
+              value: /nominatim-data/current
             # pg_ctl (invoked internally by `service postgresql start`/`stop`
             # via pg_ctlcluster) defaults to only waiting 60 seconds for
             # Postgres to become ready/stop. On this planet-scale database a
@@ -128,8 +160,42 @@ spec:
               # whose "pg_ctl_options" value is appended verbatim to the
               # pg_ctl command line, so set the timeout there instead.
               PG_CTL_CONF=/etc/postgresql/16/main/pg_ctl.conf
+              LEGACY_PGDATA_DIR=/var/lib/postgresql/16/main
+              LEGACY_IMPORT_FINISHED="${LEGACY_PGDATA_DIR}/import-finished"
               mkdir -p "$(dirname "${PG_CTL_CONF}")"
               echo "pg_ctl_options = '-t ${PGCTLTIMEOUT}'" > "${PG_CTL_CONF}"
+              PG_DATA_DIR="${PGDATA:-/var/lib/postgresql/16/main}"
+              PG_DATA_ROOT="$(dirname "${PG_DATA_DIR}")"
+              STAGING_DATA_DIR="${PG_DATA_ROOT}/staging"
+              CURRENT_DATA_DIR="${PG_DATA_DIR}"
+              PREVIOUS_DATA_DIR="${PG_DATA_ROOT}/previous"
+              mkdir -p "${PG_DATA_DIR}"
+              mkdir -p /etc/postgresql/16/main/conf.d
+              cat > /etc/postgresql/16/main/conf.d/zz-nominatim-data.conf <<EOF
+              data_directory = '${PG_DATA_DIR}'
+              EOF
+              chown -R 100:100 "${PG_DATA_DIR}" 2>/dev/null || true
+              if [ -d "${STAGING_DATA_DIR}" ] && [ -f "${STAGING_DATA_DIR}/PG_VERSION" ] && [ -f "${STAGING_DATA_DIR}/import-finished" ]; then
+                echo "Promoting staged Nominatim data from ${STAGING_DATA_DIR} to ${CURRENT_DATA_DIR}"
+                if [ -d "${CURRENT_DATA_DIR}" ]; then
+                  rm -rf "${PREVIOUS_DATA_DIR}" 2>/dev/null || true
+                  mv "${CURRENT_DATA_DIR}" "${PREVIOUS_DATA_DIR}"
+                fi
+                if ! mv "${STAGING_DATA_DIR}" "${CURRENT_DATA_DIR}"; then
+                  echo "ERROR: failed to promote staged Nominatim data" >&2
+                  exit 1
+                fi
+                chown -R 100:100 "${CURRENT_DATA_DIR}" 2>/dev/null || true
+                chmod 0700 "${CURRENT_DATA_DIR}" 2>/dev/null || true
+                touch "${CURRENT_DATA_DIR}/import-finished"
+                fstrim -av "${PG_DATA_ROOT}" >/dev/null 2>&1 || true
+              fi
+              if [ ! -f "${CURRENT_DATA_DIR}/PG_VERSION" ] || [ ! -f "${CURRENT_DATA_DIR}/import-finished" ]; then
+                echo "ERROR: no imported Nominatim database is available at ${CURRENT_DATA_DIR}, and no staged database could be promoted." >&2
+                exit 1
+              fi
+              mkdir -p "${LEGACY_PGDATA_DIR}"
+              ln -sfn "${CURRENT_DATA_DIR}/import-finished" "${LEGACY_IMPORT_FINISHED}"
               # Photon (k8s/photon-import-job.yaml) builds its search index directly
               # from this running Nominatim's embedded Postgres over the network (via
               # the nominatim-postgres Service below) instead of downloading OSM data
@@ -225,7 +291,10 @@ spec:
             timeoutSeconds: 5
           volumeMounts:
             - name: nominatim-data
-              mountPath: /var/lib/postgresql/16/main
+              mountPath: /nominatim-data
+            - name: planet
+              mountPath: /planet
+              readOnly: true
             # Tunable Postgres settings for the running service (see
             # k8s/nominatim-postgres-tuning-config.yaml); loaded from conf.d
             # last, so these values win over any defaults.
@@ -235,9 +304,11 @@ spec:
               readOnly: true
       volumes:
         - name: nominatim-data
-          hostPath:
-            path: /mnt/OSM/nominatim/active
-            type: DirectoryOrCreate
+          persistentVolumeClaim:
+            claimName: nominatim
+        - name: planet
+          persistentVolumeClaim:
+            claimName: planet
         - name: nominatim-postgres-tuning
           configMap:
             name: nominatim-postgres-tuning

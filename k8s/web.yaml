@@ -8,6 +8,7 @@ data:
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     import gzip
     import json
+    import math
     import os
     import re
     import urllib.parse
@@ -16,11 +17,29 @@ data:
 
     HOST = os.environ.get("WEB_HOST", "0.0.0.0")
     PORT = int(os.environ.get("WEB_PORT", "8080"))
-    VALHALLA_URL = os.environ.get("VALHALLA_URL", "http://valhalla.osm.svc.cluster.local:8002")
-    NOMINATIM_URL = os.environ.get("NOMINATIM_URL", "http://nominatim.osm.svc.cluster.local:8080")
-    PHOTON_URL = os.environ.get("PHOTON_URL", "http://photon.osm.svc.cluster.local:2322")
-    TILESERVER_URL = os.environ.get("TILESERVER_URL", "http://tileserver-gl.osm.svc.cluster.local")
-    STATUS_URL = os.environ.get("STATUS_URL", "")
+
+    def _load_service_targets():
+        raw = os.environ.get("SERVICE_TARGETS_JSON", "")
+        if not raw:
+            return {}
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        cleaned = {}
+        for key, value in payload.items():
+            if isinstance(value, str) and value.strip():
+                cleaned[key] = value.strip()
+        return cleaned
+
+    SERVICE_TARGETS = _load_service_targets()
+    VALHALLA_URL = SERVICE_TARGETS.get("valhalla", os.environ.get("VALHALLA_URL", "http://valhalla.osm.svc.cluster.local:8002"))
+    NOMINATIM_URL = SERVICE_TARGETS.get("nominatim", os.environ.get("NOMINATIM_URL", "http://nominatim.osm.svc.cluster.local:8080"))
+    PHOTON_URL = SERVICE_TARGETS.get("photon", os.environ.get("PHOTON_URL", "http://photon.osm.svc.cluster.local:2322"))
+    TILESERVER_URL = SERVICE_TARGETS.get("tileserver", os.environ.get("TILESERVER_URL", "http://tileserver-gl.osm.svc.cluster.local"))
+    STATUS_URL = SERVICE_TARGETS.get("status", os.environ.get("STATUS_URL", ""))
     PLANET_UPDATE_REQUEST_FILE = os.environ.get("PLANET_UPDATE_REQUEST_FILE", "/state/planet-update-request.flag")
     PLANET_UPDATE_STATUS_FILE = os.environ.get("PLANET_UPDATE_STATUS_FILE", "/status/planet-update.json")
 
@@ -69,6 +88,11 @@ data:
         .photon-results div { padding: 0.4rem 0.5rem; font-size: 0.8rem; cursor: pointer; border-bottom: 1px solid #eee; }
         .photon-results div:last-child { border-bottom: none; }
         .photon-results div:hover, .photon-results div.active { background: #eaf2f8; }
+        .advanced-options { display: none; }
+        .advanced-options.visible { display: block; }
+        .advanced-param { display: flex; flex-direction: column; gap: 0.25rem; }
+        .advanced-param .advanced-param-toggle { display: flex; align-items: center; gap: 0.35rem; font-size: 0.78rem; color: #4a4a4a; }
+        .advanced-param input:disabled, .advanced-param select:disabled { opacity: 0.6; background: #f1f3f5; }
         #zoom-display { position: absolute; bottom: 10px; right: 10px; background: rgba(0,0,0,0.6); color: #fff; padding: 6px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 600; z-index: 10; pointer-events: none; }
       </style>
     </head>
@@ -136,14 +160,201 @@ data:
             </select>
           </div>
         </div>
-        <div>
-          <label><input type="checkbox" id="avoid_tolls"> Mautstraßen meiden</label>
+        <div class="row2">
+          <div>
+            <label style="display:flex;align-items:center;gap:0.35rem">
+              <input id="advanced-options-enabled" type="checkbox">
+              Erweiterte Angaben
+            </label>
+            <div class="hint" style="margin-top:0.25rem">Wenn deaktiviert, wirkt nur noch der Route-Tradeoff.</div>
+          </div>
+          <div></div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>Route-Tradeoff</label>
+            <input id="shortest" type="range" min="0" max="1" step="0.1" value="0.2">
+            <div class="hint" id="shortest-value" style="margin-top:0.25rem">0.2 (eher schnell; 0.0–0.4 = schnell, 0.5–1.0 = kurz)</div>
+          </div>
+          <div></div>
+        </div>
+        <div id="advanced-options" class="advanced-options">
+          <div class="row2">
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="toll_penalty_enabled">
+                <input id="toll_penalty_enabled" type="checkbox" data-target="toll_penalty">
+                Maut-Willigkeit (0–1)
+              </label>
+              <input id="toll_penalty" type="number" min="0" max="1" step="0.1" value="0.5" title="Gültige Werte: 0.0 bis 1.0; 0.0 = vermeiden, 1.0 = bevorzugen" disabled>
+            </div>
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="ferry_penalty_enabled">
+                <input id="ferry_penalty_enabled" type="checkbox" data-target="ferry_penalty">
+                Fähren-Willigkeit (0–1)
+              </label>
+              <input id="ferry_penalty" type="number" min="0" max="1" step="0.1" value="0.5" title="Gültige Werte: 0.0 bis 1.0; 0.0 = vermeiden, 1.0 = bevorzugen" disabled>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="tunnel_penalty_enabled">
+                <input id="tunnel_penalty_enabled" type="checkbox" data-target="tunnel_penalty">
+                Tunnel-Penalty
+              </label>
+              <input id="tunnel_penalty" type="number" min="0" step="1" value="0" title="Gültige Werte: 0 oder positive ganze Zahlen; höher = stärker vermeiden" disabled>
+            </div>
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="highway_penalty_enabled">
+                <input id="highway_penalty_enabled" type="checkbox" data-target="highway_penalty">
+                Autobahn-Willigkeit (0–1)
+              </label>
+              <input id="highway_penalty" type="number" min="0" max="1" step="0.1" value="0.5" title="Gültige Werte: 0.0 bis 1.0; 0.0 = vermeiden, 1.0 = bevorzugen" disabled>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="unpaved_penalty_enabled">
+                <input id="unpaved_penalty_enabled" type="checkbox" data-target="unpaved_penalty">
+                Unbefestigte Wege-Penalty
+              </label>
+              <input id="unpaved_penalty" type="number" min="0" step="1" value="0" title="Gültige Werte: 0 oder positive ganze Zahlen; höher = stärker vermeiden" disabled>
+            </div>
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="living_street_penalty_enabled">
+                <input id="living_street_penalty_enabled" type="checkbox" data-target="living_street_penalty">
+                Wohnstraßen-Willigkeit (0–1)
+              </label>
+              <input id="living_street_penalty" type="number" min="0" max="1" step="0.1" value="0.1" title="Gültige Werte: 0.0 bis 1.0; 0.0 = vermeiden, 1.0 = bevorzugen" disabled>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="primary_penalty_enabled">
+                <input id="primary_penalty_enabled" type="checkbox" data-target="primary_penalty">
+                Primärstraßen-Willigkeit (0–1)
+              </label>
+              <input id="primary_penalty" type="number" min="0" max="1" step="0.1" value="0.5" title="Gültige Werte: 0.0 bis 1.0; 0.0 = vermeiden, 1.0 = bevorzugen" disabled>
+            </div>
+            <div></div>
+          </div>
+          <div class="row2">
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="top_speed_enabled">
+                <input id="top_speed_enabled" type="checkbox" data-target="top_speed">
+                Max. Geschwindigkeit (km/h)
+              </label>
+              <input id="top_speed" type="number" min="1" step="1" value="120" disabled>
+            </div>
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="width_enabled">
+                <input id="width_enabled" type="checkbox" data-target="width">
+                Fahrzeugbreite (m)
+              </label>
+              <input id="width" type="number" min="0.1" step="0.1" value="2.0" disabled>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="height_enabled">
+                <input id="height_enabled" type="checkbox" data-target="height">
+                Fahrzeughöhe (m)
+              </label>
+              <input id="height" type="number" min="0.1" step="0.1" value="2.0" disabled>
+            </div>
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="length_enabled">
+                <input id="length_enabled" type="checkbox" data-target="length">
+                Fahrzeuglänge (m)
+              </label>
+              <input id="length" type="number" min="0.1" step="0.1" value="5.0" disabled>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="weight_enabled">
+                <input id="weight_enabled" type="checkbox" data-target="weight">
+                Fahrzeuggewicht (kg)
+              </label>
+              <input id="weight" type="number" min="100" step="100" value="1800" disabled>
+            </div>
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="axle_load_enabled">
+                <input id="axle_load_enabled" type="checkbox" data-target="axle_load">
+                Achslast (kg)
+              </label>
+              <input id="axle_load" type="number" min="100" step="100" value="1000" disabled>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="hazmat_enabled">
+                <input id="hazmat_enabled" type="checkbox" data-target="hazmat">
+                Gefährliche Stoffe
+              </label>
+              <select id="hazmat" disabled><option value="">Nein</option><option value="true">Ja</option></select>
+            </div>
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="use_service_enabled">
+                <input id="use_service_enabled" type="checkbox" data-target="use_service">
+                Service-Strecken
+              </label>
+              <select id="use_service" disabled><option value="true">Erlauben</option><option value="false">Vermeiden</option></select>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="use_trails_enabled">
+                <input id="use_trails_enabled" type="checkbox" data-target="use_trails">
+                Wegenetz: Pfade
+              </label>
+              <select id="use_trails" disabled><option value="true">Erlauben</option><option value="false" selected>Vermeiden</option></select>
+            </div>
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="use_tracks_enabled">
+                <input id="use_tracks_enabled" type="checkbox" data-target="use_tracks">
+                Wegenetz: Tracks
+              </label>
+              <select id="use_tracks" disabled><option value="true">Erlauben</option><option value="false" selected>Vermeiden</option></select>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="use_residential_enabled">
+                <input id="use_residential_enabled" type="checkbox" data-target="use_residential">
+                Wegenetz: Wohnstraßen
+              </label>
+              <select id="use_residential" disabled><option value="true">Erlauben</option><option value="false">Vermeiden</option></select>
+            </div>
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="use_primary_enabled">
+                <input id="use_primary_enabled" type="checkbox" data-target="use_primary">
+                Wegenetz: Primär
+              </label>
+              <select id="use_primary" disabled><option value="true">Erlauben</option><option value="false">Vermeiden</option></select>
+            </div>
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>Route-Anweisungen</label>
+            <select id="instruction-language">
+              <option value="de">Deutsch</option>
+              <option value="en">English</option>
+            </select>
+            <div class="hint">Sprache der Route-Anweisungen.</div>
+          </div>
+          <div></div>
+        </div>
+        <div class="row2">
+          <button class="btn btn-secondary" onclick="saveRouteDefaults()">⭐ Als Standard speichern</button>
+          <button class="btn btn-secondary" onclick="resetRouteDefaults()">↺ Standard zurücksetzen</button>
         </div>
         <button class="btn btn-primary" onclick="doRoute()">&#128205; Route berechnen</button>
         <button class="btn btn-secondary" onclick="doDistance()">&#8596; Nur Distanz</button>
-        <p class="hint">Tipp: Klicke auf die Karte, um Start- (1. Klick) und Zielpunkt (2. Klick) zu setzen.</p>
+        <p class="hint">Tipp: Klicke auf die Karte, um Start- (1. Klick) und Zielpunkt (2. Klick) zu setzen. Die erweiterten Optionen lassen sich als Browser-Standard speichern.</p>
         <div id="result-box">Noch keine Anfrage.</div>
-
+        <div id="route-instructions" class="hint" style="margin-top:0.75rem"></div>
+        
         <div class="section-title">Planet-Update</div>
         <div id="planet-update-box">
           <div id="pu-status-line" class="pu-status">Lade Status...</div>
@@ -158,14 +369,22 @@ data:
     </div>
 
     <script src="/static/maplibre-gl.js"></script>
+    <script id="service-targets-json" type="application/json">{{SERVICE_TARGETS_JSON}}</script>
     <script>
-    // Fix service link hostnames
+    var SERVICE_TARGETS = {};
+    try {
+      SERVICE_TARGETS = JSON.parse(document.getElementById('service-targets-json').textContent || '{}');
+    } catch (e) {}
+    function resolveServiceTarget(key, fallbackBase) {
+      var configured = (SERVICE_TARGETS && SERVICE_TARGETS[key]) || '';
+      if (configured) return configured.replace(/\/+$/, '');
+      return fallbackBase.replace(/\/+$/, '');
+    }
     function updateLinks() {
       var baseUrl = location.protocol + '//' + location.hostname;
-      ['status-link'].forEach(function(id) {
-        var a = document.getElementById(id);
-        if (a && a.dataset.port) a.href = baseUrl + ':' + a.dataset.port + '/';
-      });
+      var statusUrl = resolveServiceTarget('status', baseUrl + ':30083');
+      var statusLink = document.getElementById('status-link');
+      if (statusLink) statusLink.href = statusUrl + '/';
     }
     updateLinks();
 
@@ -176,21 +395,21 @@ data:
         .then(function(d) {
           var sl = document.getElementById('pu-status-line');
           var ml = document.getElementById('pu-mtime-line');
-          if (d.error) { sl.innerHTML = '<span class=\'err\'>Fehler: ' + d.error + '</span>'; return; }
+          if (d.error) { sl.innerHTML = "<span class='err'>Fehler: " + d.error + "</span>"; return; }
           if (d.running) {
             sl.innerHTML = '&#9203; Läuft gerade &hellip; (gestartet: ' + (d.last_run_at || '?') + ')';
           } else if (d.last_success_at) {
-            sl.innerHTML = '<span class=\'ok\'>&#10003; Letzter Erfolg:</span> ' + d.last_success_at;
+            sl.innerHTML = "<span class='ok'>&#10003; Letzter Erfolg:</span> " + d.last_success_at;
           } else {
             sl.innerHTML = 'Noch nie ausgeführt.';
           }
           if (d.last_error) {
-            sl.innerHTML += '<br><span class=\'err\'>Fehler: ' + d.last_error + '</span>';
+            sl.innerHTML += "<br><span class='err'>Fehler: " + d.last_error + "</span>";
           }
           ml.textContent = d.output_file_mtime ? 'Datenstand: ' + d.output_file_mtime : '';
         })
         .catch(function() {
-          document.getElementById('pu-status-line').innerHTML = '<span class=\'err\'>Status nicht verfügbar.</span>';
+          document.getElementById('pu-status-line').innerHTML = "<span class='err'>Status nicht verfügbar.</span>";
         });
     }
     function triggerPlanetUpdate() {
@@ -234,17 +453,17 @@ data:
           {id:'road-primary',type:'line',source:'openmaptiles','source-layer':'transportation',filter:['==','class','primary'],minzoom:7,paint:{'line-color':'#fcd354','line-width':['interpolate',['linear'],['zoom'],7,0.5,10,2,14,5,16,8]}},
           {id:'road-major',type:'line',source:'openmaptiles','source-layer':'transportation',filter:['in','class','motorway','trunk'],paint:{'line-color':'#f9a825','line-width':['interpolate',['linear'],['zoom'],6,1,10,3,14,7,16,12]}},
           {id:'building',type:'fill',source:'openmaptiles','source-layer':'building',minzoom:14,paint:{'fill-color':'#d9d0c9','fill-opacity':0.9}},
-          {id:'water-name',type:'symbol',source:'openmaptiles','source-layer':'water_name',layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'text-size':['interpolate',['linear'],['zoom'],4,10,10,14],'symbol-placement':'point'},paint:{'text-color':'#5b8db8','text-halo-color':'#fff','text-halo-width':1}},
-          {id:'road-label-minor',type:'symbol',source:'openmaptiles','source-layer':'transportation_name',filter:['in','class','minor','service','track'],minzoom:15,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'symbol-placement':'line','text-size':10,'text-max-angle':30,'text-padding':5},paint:{'text-color':'#555','text-halo-color':'#fff','text-halo-width':1.5}},
-          {id:'road-label-secondary',type:'symbol',source:'openmaptiles','source-layer':'transportation_name',filter:['in','class','secondary','tertiary'],minzoom:13,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'symbol-placement':'line','text-size':11,'text-max-angle':30},paint:{'text-color':'#555','text-halo-color':'#fff','text-halo-width':1.5}},
-          {id:'road-label-primary',type:'symbol',source:'openmaptiles','source-layer':'transportation_name',filter:['in','class','primary','trunk','motorway'],minzoom:10,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'symbol-placement':'line','text-size':12,'text-max-angle':30},paint:{'text-color':'#333','text-halo-color':'#fff','text-halo-width':1.5}},
-          {id:'place-country',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['==','class','country'],layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'text-size':['interpolate',['linear'],['zoom'],2,10,6,16,8,18]},paint:{'text-color':'#333','text-halo-color':'rgba(255,255,255,0.8)','text-halo-width':2}},
-          {id:'place-state',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['==','class','state'],minzoom:5,maxzoom:12,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'text-size':['interpolate',['linear'],['zoom'],5,10,10,14]},paint:{'text-color':'#555','text-halo-color':'rgba(255,255,255,0.8)','text-halo-width':1.5}},
-          {id:'place-city',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['in','class','city'],layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'text-size':['interpolate',['linear'],['zoom'],6,11,10,15,14,18]},paint:{'text-color':'#222','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':2}},
-          {id:'place-town',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['==','class','town'],minzoom:8,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'text-size':['interpolate',['linear'],['zoom'],8,10,12,14,16,17]},paint:{'text-color':'#333','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}},
-          {id:'place-village',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['==','class','village'],minzoom:10,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'text-size':['interpolate',['linear'],['zoom'],10,10,14,13]},paint:{'text-color':'#444','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}},
-          {id:'place-suburb',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['in','class','suburb','quarter','neighbourhood'],minzoom:12,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'text-size':11},paint:{'text-color':'#555','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}},
-          {id:'place-hamlet',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['in','class','hamlet','isolated_dwelling'],minzoom:13,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['NotoSansRegular'],'text-size':10},paint:{'text-color':'#666','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}}
+          {id:'water-name',type:'symbol',source:'openmaptiles','source-layer':'water_name',layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'text-size':['interpolate',['linear'],['zoom'],4,10,10,14],'symbol-placement':'point'},paint:{'text-color':'#5b8db8','text-halo-color':'#fff','text-halo-width':1}},
+          {id:'road-label-minor',type:'symbol',source:'openmaptiles','source-layer':'transportation_name',filter:['in','class','minor','service','track'],minzoom:15,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'symbol-placement':'line','text-size':10,'text-max-angle':30,'text-padding':5},paint:{'text-color':'#555','text-halo-color':'#fff','text-halo-width':1.5}},
+          {id:'road-label-secondary',type:'symbol',source:'openmaptiles','source-layer':'transportation_name',filter:['in','class','secondary','tertiary'],minzoom:13,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'symbol-placement':'line','text-size':11,'text-max-angle':30},paint:{'text-color':'#555','text-halo-color':'#fff','text-halo-width':1.5}},
+          {id:'road-label-primary',type:'symbol',source:'openmaptiles','source-layer':'transportation_name',filter:['in','class','primary','trunk','motorway'],minzoom:10,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'symbol-placement':'line','text-size':12,'text-max-angle':30},paint:{'text-color':'#333','text-halo-color':'#fff','text-halo-width':1.5}},
+          {id:'place-country',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['==','class','country'],layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'text-size':['interpolate',['linear'],['zoom'],2,10,6,16,8,18]},paint:{'text-color':'#333','text-halo-color':'rgba(255,255,255,0.8)','text-halo-width':2}},
+          {id:'place-state',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['==','class','state'],minzoom:5,maxzoom:12,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'text-size':['interpolate',['linear'],['zoom'],5,10,10,14]},paint:{'text-color':'#555','text-halo-color':'rgba(255,255,255,0.8)','text-halo-width':1.5}},
+          {id:'place-city',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['in','class','city'],layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'text-size':['interpolate',['linear'],['zoom'],6,11,10,15,14,18]},paint:{'text-color':'#222','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':2}},
+          {id:'place-town',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['==','class','town'],minzoom:8,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'text-size':['interpolate',['linear'],['zoom'],8,10,12,14,16,17]},paint:{'text-color':'#333','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}},
+          {id:'place-village',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['==','class','village'],minzoom:10,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'text-size':['interpolate',['linear'],['zoom'],10,10,14,13]},paint:{'text-color':'#444','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}},
+          {id:'place-suburb',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['in','class','suburb','quarter','neighbourhood'],minzoom:12,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'text-size':11},paint:{'text-color':'#555','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}},
+          {id:'place-hamlet',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['in','class','hamlet','isolated_dwelling'],minzoom:13,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'text-size':10},paint:{'text-color':'#666','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}}
         ]
       },
       center: [10, 50],
@@ -392,16 +611,293 @@ data:
       return h + ' h ' + (m > 0 ? m + ' min' : '');
     }
 
+    function updateShortestLabel() {
+      var el = document.getElementById('shortest');
+      var valueEl = document.getElementById('shortest-value');
+      if (!el || !valueEl) return;
+      var value = parseFloat(el.value);
+      if (!isFinite(value)) value = 0.2;
+      var mode = value < 0.5 ? 'eher schnell' : 'eher kurz';
+      valueEl.textContent = value.toFixed(1) + ' (' + mode + '; 0.0–0.4 = schnell, 0.5–1.0 = kurz)';
+    }
+
+    function normalizeInstructionValue(value) {
+      if (typeof value === 'string') return value;
+      if (Array.isArray(value)) return value.join(', ');
+      if (value == null) return '';
+      return String(value);
+    }
+
+    function formatInstruction(maneuver, language) {
+      var lang = language === 'en' ? 'en' : 'de';
+      var type = normalizeInstructionValue(maneuver && maneuver.type).toLowerCase();
+      var modifier = normalizeInstructionValue(maneuver && maneuver.modifier).toLowerCase();
+      var streetNames = [];
+      if (Array.isArray(maneuver && maneuver.street_names)) streetNames = maneuver.street_names;
+      else if (Array.isArray(maneuver && maneuver.streets)) streetNames = maneuver.streets;
+      var streetText = streetNames.length ? (lang === 'en' ? ' onto ' + streetNames.join(', ') : ' auf ' + streetNames.join(', ')) : '';
+      switch (type) {
+        case 'depart':
+          return lang === 'en' ? 'Start' + streetText + '.' : 'Starten Sie' + streetText + '.';
+        case 'arrive':
+          return lang === 'en' ? 'Arrive at destination.' : 'Ziel erreicht.';
+        case 'turn':
+          if (modifier === 'right') return lang === 'en' ? 'Turn right' + streetText + '.' : 'Biegen Sie rechts ab' + streetText + '.';
+          if (modifier === 'left') return lang === 'en' ? 'Turn left' + streetText + '.' : 'Biegen Sie links ab' + streetText + '.';
+          if (modifier === 'slight right') return lang === 'en' ? 'Bear right' + streetText + '.' : 'Leicht rechts weiter' + streetText + '.';
+          if (modifier === 'slight left') return lang === 'en' ? 'Bear left' + streetText + '.' : 'Leicht links weiter' + streetText + '.';
+          if (modifier === 'u_turn') return lang === 'en' ? 'Make a U-turn' + streetText + '.' : 'Wenden Sie' + streetText + '.';
+          return lang === 'en' ? 'Turn' + streetText + '.' : 'Biegen Sie ab' + streetText + '.';
+        case 'continue':
+          return lang === 'en' ? 'Continue' + streetText + '.' : 'Weiterfahren' + streetText + '.';
+        case 'merge':
+          return lang === 'en' ? 'Merge onto' + streetText + '.' : 'Fahren Sie auf die Hauptstraße' + streetText + '.';
+        case 'roundabout':
+          return lang === 'en' ? 'Enter the roundabout and take the desired exit.' : 'Fahren Sie in den Kreisverkehr und verlassen Sie ihn an der gewünschten Ausfahrt.';
+        case 'exit roundabout':
+          return lang === 'en' ? 'Exit the roundabout' + streetText + '.' : 'Verlassen Sie den Kreisverkehr' + streetText + '.';
+        case 'fork':
+          return lang === 'en' ? 'At the fork, follow the direction' + streetText + '.' : 'An der Abzweigung halten Sie sich an die Richtung' + streetText + '.';
+        case 'ramp':
+          return lang === 'en' ? 'Take the ramp' + streetText + '.' : 'Fahren Sie auf die Auffahrt' + streetText + '.';
+        case 'use lane':
+          return lang === 'en' ? 'Use the appropriate lane' + streetText + '.' : 'Nutzen Sie die passende Spur' + streetText + '.';
+        case 'destination':
+          return lang === 'en' ? 'Arrive at destination' + streetText + '.' : 'Ziel erreichen' + streetText + '.';
+        default:
+          return maneuver && maneuver.instruction ? maneuver.instruction : (lang === 'en' ? 'Continue.' : 'Weiterfahren.');
+      }
+    }
+
+    function buildRouteInstructions(trip, language) {
+      var instructions = [];
+      var instructionCounter = 0;
+      (trip && trip.legs || []).forEach(function(leg) {
+        (leg.maneuvers || []).forEach(function(maneuver) {
+          var text = formatInstruction(maneuver, language);
+          if (text) {
+            instructionCounter += 1;
+            instructions.push(instructionCounter + '. ' + text);
+          }
+        });
+      });
+      return instructions;
+    }
+
+    function getInstructionLanguage() {
+      var el = document.getElementById('instruction-language');
+      return el && el.value === 'en' ? 'en' : 'de';
+    }
+
+    function renderRouteInstructions(trip) {
+      var container = document.getElementById('route-instructions');
+      if (!container) return;
+      var instructions = buildRouteInstructions(trip, getInstructionLanguage());
+      if (!instructions.length) {
+        container.innerHTML = '';
+        return;
+      }
+      container.innerHTML = '<div class="section-title">Route-Anweisungen</div><ol style="margin:0.25rem 0 0 1rem;padding:0;display:grid;gap:0.35rem">' + instructions.map(function(text) { return '<li>' + esc(text) + '</li>'; }).join('') + '</ol>';
+    }
+  
+    var ROUTE_DEFAULTS_KEY = 'localosm.routing.defaults';
+
+    function getRouteDefaults() {
+      try {
+        var stored = localStorage.getItem(ROUTE_DEFAULTS_KEY);
+        return stored ? JSON.parse(stored) : {};
+      } catch (e) {
+        return {};
+      }
+    }
+
+    function setFieldValue(id, value) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      if (el.type === 'checkbox') {
+        el.checked = !!value;
+      } else if (el.tagName === 'SELECT') {
+        el.value = value || el.options[0].value;
+      } else {
+        el.value = value == null ? '' : value;
+      }
+    }
+
+    function isAdvancedOptionsEnabled() {
+      var el = document.getElementById('advanced-options-enabled');
+      return !!(el && el.checked);
+    }
+
+    function setAdvancedOptionsVisibility() {
+      var container = document.getElementById('advanced-options');
+      var toggle = document.getElementById('advanced-options-enabled');
+      if (!container || !toggle) return;
+      container.classList.toggle('visible', toggle.checked);
+      syncAdvancedInputStates();
+    }
+
+    function syncAdvancedInputStates() {
+      var advancedEnabled = isAdvancedOptionsEnabled();
+      var toggles = document.querySelectorAll('#advanced-options input[type="checkbox"][data-target]');
+      Array.prototype.forEach.call(toggles, function(toggle) {
+        var targetId = toggle.getAttribute('data-target');
+        var target = document.getElementById(targetId);
+        toggle.disabled = !advancedEnabled;
+        if (target) {
+          target.disabled = !advancedEnabled || !toggle.checked;
+        }
+      });
+    }
+
+    function applyRouteDefaults() {
+      var defaults = getRouteDefaults();
+      var shortestValue = defaults.shortest;
+      if (typeof shortestValue === 'boolean') {
+        shortestValue = shortestValue ? 1 : 0;
+      } else if (typeof shortestValue !== 'number' || !isFinite(shortestValue)) {
+        shortestValue = 0.2;
+      }
+      var advancedOptionsEnabled = defaults.advanced_options_enabled === true;
+      var tollValue = defaults.use_tolls != null ? defaults.use_tolls : (defaults.toll_penalty != null ? defaults.toll_penalty : 0.5);
+      var ferryValue = defaults.use_ferry != null ? defaults.use_ferry : (defaults.ferry_penalty != null ? defaults.ferry_penalty : 0.5);
+      var highwayValue = defaults.use_highways != null ? defaults.use_highways : (defaults.highway_penalty != null ? defaults.highway_penalty : 0.5);
+      var livingStreetValue = defaults.use_living_streets != null ? defaults.use_living_streets : (defaults.living_street_penalty != null ? defaults.living_street_penalty : 0.1);
+      var primaryValue = defaults.use_primary != null ? defaults.use_primary : (defaults.primary_penalty != null ? defaults.primary_penalty : 0.5);
+      var entries = [
+        ['costing', defaults.costing || 'auto'],
+        ['units', defaults.units || 'km'],
+        ['instruction-language', defaults.instruction_language || 'de'],
+        ['toll_penalty', tollValue],
+        ['ferry_penalty', ferryValue],
+        ['tunnel_penalty', defaults.tunnel_penalty == null ? 0 : defaults.tunnel_penalty],
+        ['highway_penalty', highwayValue],
+        ['unpaved_penalty', defaults.unpaved_penalty == null ? 0 : defaults.unpaved_penalty],
+        ['living_street_penalty', livingStreetValue],
+        ['primary_penalty', primaryValue],
+        ['shortest', shortestValue],
+        ['top_speed', defaults.top_speed == null ? 120 : defaults.top_speed],
+        ['width', defaults.width == null ? 2.0 : defaults.width],
+        ['height', defaults.height == null ? 2.0 : defaults.height],
+        ['length', defaults.length == null ? 5.0 : defaults.length],
+        ['weight', defaults.weight == null ? 1800 : defaults.weight],
+        ['axle_load', defaults.axle_load == null ? 1000 : defaults.axle_load],
+        ['hazmat', defaults.hazmat ? 'true' : ''],
+        ['use_service', defaults.use_service === false ? 'false' : 'true'],
+        ['use_trails', defaults.use_trails === true ? 'true' : 'false'],
+        ['use_tracks', defaults.use_tracks === true ? 'true' : 'false'],
+        ['use_residential', defaults.use_residential === false ? 'false' : 'true'],
+        ['use_primary', defaults.use_primary === false ? 'false' : 'true'],
+        ['advanced-options-enabled', advancedOptionsEnabled]
+      ];
+      entries.forEach(function(item) {
+        setFieldValue(item[0], item[1]);
+      });
+      var toggleEntries = [
+        ['toll_penalty_enabled', defaults.use_tolls_enabled === true || defaults.toll_penalty_enabled === true],
+        ['ferry_penalty_enabled', defaults.use_ferry_enabled === true || defaults.ferry_penalty_enabled === true],
+        ['tunnel_penalty_enabled', defaults.tunnel_penalty_enabled === true],
+        ['highway_penalty_enabled', defaults.use_highways_enabled === true || defaults.highway_penalty_enabled === true],
+        ['unpaved_penalty_enabled', defaults.unpaved_penalty_enabled === true],
+        ['living_street_penalty_enabled', defaults.use_living_streets_enabled === true || defaults.living_street_penalty_enabled === true],
+        ['primary_penalty_enabled', defaults.use_primary_enabled === true || defaults.primary_penalty_enabled === true],
+        ['use_primary_enabled', defaults.use_primary_select_enabled != null ? defaults.use_primary_select_enabled : (defaults.use_primary_enabled === true || defaults.primary_penalty_enabled === true)],
+        ['top_speed_enabled', defaults.top_speed_enabled === true],
+        ['width_enabled', defaults.width_enabled === true],
+        ['height_enabled', defaults.height_enabled === true],
+        ['length_enabled', defaults.length_enabled === true],
+        ['weight_enabled', defaults.weight_enabled === true],
+        ['axle_load_enabled', defaults.axle_load_enabled === true],
+        ['hazmat_enabled', defaults.hazmat_enabled === true],
+        ['use_service_enabled', defaults.use_service_enabled === true],
+        ['use_trails_enabled', defaults.use_trails_enabled === true],
+        ['use_tracks_enabled', defaults.use_tracks_enabled === true],
+        ['use_residential_enabled', defaults.use_residential_enabled === true]
+      ];
+      toggleEntries.forEach(function(item) {
+        setFieldValue(item[0], item[1]);
+      });
+      setAdvancedOptionsVisibility();
+      updateShortestLabel();
+    }
+
+    function saveRouteDefaults() {
+      var payload = getPayload();
+      try {
+        localStorage.setItem(ROUTE_DEFAULTS_KEY, JSON.stringify(payload));
+        alert('Routing-Standards gespeichert.');
+      } catch (e) {
+        alert('Standards konnten nicht gespeichert werden.');
+      }
+    }
+
+    function resetRouteDefaults() {
+      try {
+        localStorage.removeItem(ROUTE_DEFAULTS_KEY);
+      } catch (e) {}
+      applyRouteDefaults();
+      alert('Routing-Standards zurückgesetzt.');
+    }
+
     function getPayload() {
-      return {
+      var shortestRaw = document.getElementById('shortest').value;
+      var shortestValue = parseFloat(shortestRaw);
+      if (!isFinite(shortestValue)) shortestValue = 0.2;
+      var advancedOptionsEnabled = isAdvancedOptionsEnabled();
+      var payload = {
         start: { lat: parseFloat(document.getElementById('startLat').value),
                  lon: parseFloat(document.getElementById('startLon').value) },
         end:   { lat: parseFloat(document.getElementById('endLat').value),
                  lon: parseFloat(document.getElementById('endLon').value) },
         costing: document.getElementById('costing').value,
         units:   document.getElementById('units').value,
-        avoid_tolls: document.getElementById('avoid_tolls').checked
+        instruction_language: document.getElementById('instruction-language').value,
+        shortest: shortestValue,
+        advanced_options_enabled: advancedOptionsEnabled
       };
+      if (advancedOptionsEnabled) {
+        payload.use_tolls_enabled = document.getElementById('toll_penalty_enabled').checked;
+        payload.use_ferry_enabled = document.getElementById('ferry_penalty_enabled').checked;
+        payload.tunnel_penalty_enabled = document.getElementById('tunnel_penalty_enabled').checked;
+        payload.use_highways_enabled = document.getElementById('highway_penalty_enabled').checked;
+        payload.unpaved_penalty_enabled = document.getElementById('unpaved_penalty_enabled').checked;
+        payload.use_living_streets_enabled = document.getElementById('living_street_penalty_enabled').checked;
+        payload.use_primary_enabled = document.getElementById('primary_penalty_enabled').checked;
+        payload.use_primary_select_enabled = document.getElementById('use_primary_enabled').checked;
+        payload.top_speed_enabled = document.getElementById('top_speed_enabled').checked;
+        payload.width_enabled = document.getElementById('width_enabled').checked;
+        payload.height_enabled = document.getElementById('height_enabled').checked;
+        payload.length_enabled = document.getElementById('length_enabled').checked;
+        payload.weight_enabled = document.getElementById('weight_enabled').checked;
+        payload.axle_load_enabled = document.getElementById('axle_load_enabled').checked;
+        payload.hazmat_enabled = document.getElementById('hazmat_enabled').checked;
+        payload.use_service_enabled = document.getElementById('use_service_enabled').checked;
+        payload.use_trails_enabled = document.getElementById('use_trails_enabled').checked;
+        payload.use_tracks_enabled = document.getElementById('use_tracks_enabled').checked;
+        payload.use_residential_enabled = document.getElementById('use_residential_enabled').checked;
+        if (payload.use_tolls_enabled) payload.use_tolls = parseFloat(document.getElementById('toll_penalty').value);
+        if (payload.use_ferry_enabled) payload.use_ferry = parseFloat(document.getElementById('ferry_penalty').value);
+        if (payload.tunnel_penalty_enabled) payload.tunnel_penalty = parseFloat(document.getElementById('tunnel_penalty').value);
+        if (payload.use_highways_enabled) payload.use_highways = parseFloat(document.getElementById('highway_penalty').value);
+        if (payload.unpaved_penalty_enabled) payload.unpaved_penalty = parseFloat(document.getElementById('unpaved_penalty').value);
+        if (payload.use_living_streets_enabled) payload.use_living_streets = parseFloat(document.getElementById('living_street_penalty').value);
+        if (payload.use_primary_enabled) {
+          payload.use_primary = parseFloat(document.getElementById('primary_penalty').value);
+        } else if (document.getElementById('use_primary_enabled').checked) {
+          payload.use_primary = document.getElementById('use_primary').value === 'true' ? 1.0 : 0.0;
+        }
+        if (payload.top_speed_enabled) payload.top_speed = parseFloat(document.getElementById('top_speed').value);
+        if (payload.width_enabled) payload.width = parseFloat(document.getElementById('width').value);
+        if (payload.height_enabled) payload.height = parseFloat(document.getElementById('height').value);
+        if (payload.length_enabled) payload.length = parseFloat(document.getElementById('length').value);
+        if (payload.weight_enabled) payload.weight = parseFloat(document.getElementById('weight').value);
+        if (payload.axle_load_enabled) payload.axle_load = parseFloat(document.getElementById('axle_load').value);
+        if (payload.hazmat_enabled) payload.hazmat = document.getElementById('hazmat').value === 'true';
+        if (payload.use_service_enabled) payload.use_service = document.getElementById('use_service').value === 'true';
+        if (payload.use_trails_enabled) payload.use_trails = document.getElementById('use_trails').value === 'true';
+        if (payload.use_tracks_enabled) payload.use_tracks = document.getElementById('use_tracks').value === 'true';
+        if (payload.use_residential_enabled) payload.use_residential = document.getElementById('use_residential').value === 'true';
+      }
+      return payload;
     }
 
     function hasValidPoints(payload) {
@@ -409,6 +905,21 @@ data:
              isFinite(payload.end.lat) && isFinite(payload.end.lon);
     }
 
+    var shortestInput = document.getElementById('shortest');
+    if (shortestInput) {
+      shortestInput.addEventListener('input', updateShortestLabel);
+      shortestInput.addEventListener('change', updateShortestLabel);
+    }
+    var advancedToggle = document.getElementById('advanced-options-enabled');
+    if (advancedToggle) {
+      advancedToggle.addEventListener('change', setAdvancedOptionsVisibility);
+    }
+    var advancedOptionToggles = document.querySelectorAll('#advanced-options input[type="checkbox"][data-target]');
+    Array.prototype.forEach.call(advancedOptionToggles, function(toggle) {
+      toggle.addEventListener('change', syncAdvancedInputStates);
+    });
+    applyRouteDefaults();
+  
     async function doRoute() {
       var box = document.getElementById('result-box');
       var payload = getPayload();
@@ -432,7 +943,12 @@ data:
         var time = data.time_seconds != null ? fmtDuration(Math.round(data.time_seconds)) : '?';
         box.innerHTML = '<span class="ok">&#10003; Route gefunden</span><br>' +
           'Distanz: <b>' + dist + '</b><br>Fahrzeit: <b>' + time + '</b>';
-        if (data.trip) drawRoute(data.trip);
+        if (data.trip) {
+          drawRoute(data.trip);
+          renderRouteInstructions(data.trip);
+        } else {
+          renderRouteInstructions(null);
+        }
         setMarker('start', payload.start.lat, payload.start.lon);
         setMarker('end', payload.end.lat, payload.end.lon);
       } catch(err) {
@@ -1120,9 +1636,7 @@ data:
             start = payload.get("start", {})
             end = payload.get("end", {})
             costing = payload.get("costing", "auto")
-            avoid_tolls = payload.get("avoid_tolls", False)
-            
-            # Build the base request
+
             request = {
                 "locations": [
                     {"lat": start.get("lat"), "lon": start.get("lon")},
@@ -1130,17 +1644,53 @@ data:
                 ],
                 "costing": costing,
                 "units": payload.get("units", "km"),
+                "language": payload.get("instruction_language", "de"),
             }
-            
-            # Add costing options for toll avoidance (only for auto and truck)
-            # Note: In Valhalla, use_tolls: False means avoid tolls
-            if avoid_tolls and costing in ("auto", "truck"):
-                if "costing_options" not in request:
-                    request["costing_options"] = {}
-                if costing not in request["costing_options"]:
-                    request["costing_options"][costing] = {}
-                request["costing_options"][costing]["use_tolls"] = False
-            
+
+            request["costing_options"] = {}
+            request["costing_options"][costing] = {}
+            options = request["costing_options"][costing]
+
+            advanced_enabled = payload.get("advanced_options_enabled", True)
+            if advanced_enabled:
+                for payload_key, option_key in [
+                    ("use_tolls", "use_tolls"),
+                    ("toll_penalty", "use_tolls"),
+                    ("use_ferry", "use_ferry"),
+                    ("ferry_penalty", "use_ferry"),
+                    ("use_highways", "use_highways"),
+                    ("highway_penalty", "use_highways"),
+                    ("use_living_streets", "use_living_streets"),
+                    ("living_street_penalty", "use_living_streets"),
+                    ("use_primary", "use_primary"),
+                    ("primary_penalty", "use_primary"),
+                ]:
+                    if payload_key not in payload:
+                        continue
+                    value = payload.get(payload_key)
+                    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)):
+                        numeric_value = float(value)
+                        if 0.0 <= numeric_value <= 1.0:
+                            options[option_key] = numeric_value
+
+                for key in ["use_service", "use_trails", "use_tracks", "use_residential"]:
+                    if key in payload:
+                        options[key] = bool(payload.get(key, False))
+                if payload.get("hazmat") is not None:
+                    options["hazmat"] = bool(payload.get("hazmat", False))
+
+                for key in ["top_speed", "width", "height", "length", "weight", "axle_load", "tunnel_penalty", "unpaved_penalty"]:
+                    value = payload.get(key)
+                    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)):
+                        options[key] = value
+
+            if "shortest" in payload:
+                shortest_value = payload.get("shortest")
+                if isinstance(shortest_value, (int, float)) and not isinstance(shortest_value, bool) and math.isfinite(float(shortest_value)):
+                    options["shortest"] = float(shortest_value) >= 0.5
+                else:
+                    options["shortest"] = bool(shortest_value)
+
             return request
 
         def _call_valhalla(self, endpoint, valhalla_payload):
@@ -1211,6 +1761,8 @@ spec:
       labels:
         app: web
     spec:
+      nodeSelector:
+        osm: "true"
       initContainers:
         - name: fetch-static
           image: alpine:3.20
@@ -1273,6 +1825,11 @@ spec:
               value: "http://tileserver-gl.osm.svc.cluster.local"
             - name: STATUS_URL
               value: ""
+            - name: SERVICE_TARGETS_JSON
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-service-targets
+                  key: service-targets.json
             - name: PLANET_UPDATE_REQUEST_FILE
               value: "/state/planet-update-request.flag"
             - name: PLANET_UPDATE_STATUS_FILE

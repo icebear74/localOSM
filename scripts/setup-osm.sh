@@ -26,7 +26,7 @@ set -o pipefail
 DATA_DIR="${DATA_DIR:-/mnt/OSM}"
 TILESERVER_DIR="${DATA_DIR}/tileserver"
 FONTS_DIR="${TILESERVER_DIR}/fonts"
-FONTS_NAME="NotoSansRegular"
+FONTS_NAME="KlokanTech Noto Sans Regular"
 FONTS_PATH="${FONTS_DIR}/${FONTS_NAME}"
 VERBOSE="${VERBOSE:-0}"
 
@@ -250,7 +250,7 @@ download_fonts() {
 generate_glyph_pbf_files() {
     log_info "Generating glyph PBF files from TTF fonts..."
     
-    local pbf_dir="${FONTS_DIR}/NotoSansRegular"
+    local pbf_dir="${FONTS_DIR}/KlokanTech Noto Sans Regular"
     
     # Check if we already have valid PBF files
     if [ -d "$pbf_dir" ]; then

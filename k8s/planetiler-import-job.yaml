@@ -1,0 +1,288 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tileserver-import
+  namespace: osm
+  labels:
+    app: tileserver-import
+    osm-job-type: tileserver-import
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: tileserver-import
+        osm-job-type: tileserver-import
+    spec:
+      serviceAccountName: planetiler-import
+      nodeSelector:
+        osm: "true"
+      restartPolicy: Never
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+      initContainers:
+        - name: preflight
+          image: busybox:1.36
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              echo '=== Planetiler Tile Generation ==='
+              test -f /planet/europa.osm.pbf
+              mkdir -p /tileserver-gl /osm-temp/tileserver/work /osm-temp/tileserver/downloads /tools /osm-status
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+          volumeMounts:
+            - name: planet
+              mountPath: /planet
+            - name: tileserver-gl
+              mountPath: /tileserver-gl
+            - name: osm-temp
+              mountPath: /osm-temp
+            - name: tools
+              mountPath: /tools
+            - name: osm-status
+              mountPath: /osm-status
+        - name: fetch-tools
+          image: curlimages/curl:8.10.1
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              if [ ! -s /tools/planetiler.jar ]; then
+                curl -fsSL -o /tools/planetiler.jar https://github.com/onthegomap/planetiler/releases/latest/download/planetiler.jar
+              fi
+              if [ ! -x /tools/kubectl ]; then
+                KUBECTL_VERSION=$(curl -fsSL https://dl.k8s.io/release/stable.txt 2>/dev/null || true)
+                if [ -z "${KUBECTL_VERSION}" ]; then
+                  KUBECTL_VERSION="v1.30.0"
+                fi
+                curl -fsSL -o /tools/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+                chmod 0755 /tools/kubectl
+              fi
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: tools
+              mountPath: /tools
+        - name: fetch-sources
+          image: alpine:3.20
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              mkdir -p /osm-temp/tileserver/downloads /osm-temp/tileserver/work
+              if [ ! -s /osm-temp/tileserver/downloads/lake_centerline.shp.zip ]; then
+                wget -q -O /osm-temp/tileserver/downloads/lake_centerline.shp.zip https://github.com/acalcutt/osm-lakelines/releases/latest/download/lake_centerline.shp.zip
+              fi
+              if [ ! -s /osm-temp/tileserver/downloads/water-polygons-split-3857.zip ]; then
+                wget -q -O /osm-temp/tileserver/downloads/water-polygons-split-3857.zip https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip
+              fi
+              if [ ! -s /osm-temp/tileserver/downloads/natural_earth_vector.sqlite.zip ]; then
+                wget -q -O /osm-temp/tileserver/downloads/natural_earth_vector.sqlite.zip https://naciscdn.org/naturalearth/packages/natural_earth_vector.sqlite.zip
+              fi
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: osm-temp
+              mountPath: /osm-temp
+      containers:
+        - name: tileserver-import
+          image: eclipse-temurin:22-jdk
+          imagePullPolicy: Always
+          workingDir: /osm-temp/tileserver
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            capabilities:
+              add:
+                - SYS_ADMIN
+          resources:
+            requests:
+              memory: "16Gi"
+              cpu: "5"
+            limits:
+              memory: "96Gi"
+              cpu: "20"
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+
+              KUBECTL=/tools/kubectl
+              PLANETILER_JAR=/tools/planetiler.jar
+              SOURCE_OSM=/planet/europa.osm.pbf
+              TEMP_DIR=/osm-temp/tileserver/work
+              TEMP_SOURCES=/osm-temp/tileserver/downloads
+              OUTPUT_NEW=/tileserver-gl/planet-NEW.mbtiles
+              OUTPUT_ACTIVE=/tileserver-gl/planet.mbtiles
+              SCALED_DOWN=0
+              ORIGINAL_REPLICAS=0
+
+              trim_mount() {
+                mountpoint="$1"
+                if command -v fstrim >/dev/null 2>&1; then
+                  echo "[INFO] fstrim ${mountpoint}"
+                  if ! fstrim "${mountpoint}"; then
+                    echo "[WARN] fstrim failed for ${mountpoint}; continuing"
+                  fi
+                else
+                  echo "[INFO] fstrim not available for ${mountpoint}; continuing."
+                fi
+              }
+
+              cleanup_temp_dir() {
+                if [ -d "${TEMP_DIR}" ]; then
+                  find "${TEMP_DIR}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+                fi
+              }
+
+              scale_deployment() {
+                local replicas="$1"
+                if "${KUBECTL}" scale deployment tileserver-gl --replicas="${replicas}" -n osm >/dev/null 2>&1; then
+                  return 0
+                fi
+                echo "[WARN] Could not scale deployment/tileserver-gl to ${replicas}; continuing without a deployment restart"
+                return 1
+              }
+
+              cleanup() {
+                if [ "${SCALED_DOWN}" = "1" ] && [ "${ORIGINAL_REPLICAS}" -gt 0 ]; then
+                  echo "[INFO] Restoring deployment/tileserver-gl after premature exit"
+                  "${KUBECTL}" scale deployment tileserver-gl --replicas="${ORIGINAL_REPLICAS}" -n osm || true
+                fi
+                cleanup_temp_dir
+                trim_mount /planet
+                trim_mount /osm-temp
+                trim_mount /tileserver-gl
+                trim_mount /osm-status
+                trim_mount /tools
+              }
+              trap cleanup EXIT
+
+              rm -f "${OUTPUT_NEW}"
+              mkdir -p "${TEMP_DIR}" "${TEMP_SOURCES}" data/sources
+
+              PROFILE_SOURCE_ROOT="${TEMP_DIR}/profile"
+              PROFILE_SOURCE="${PROFILE_SOURCE_ROOT}/com/onthegomap/planetiler/custom/CustomProfile.java"
+              USE_JAVA="true"
+              mkdir -p "$(dirname "${PROFILE_SOURCE}")"
+              if [ -f /config/use_java ]; then
+                USE_JAVA="$(tr '[:upper:]' '[:lower:]' < /config/use_java | tr -d '[:space:]')"
+              fi
+
+              if [ "${USE_JAVA}" = "true" ] && [ -f /config/CustomProfile.java ]; then
+                cp /config/CustomProfile.java "${PROFILE_SOURCE}"
+                javac -cp "${PLANETILER_JAR}" -d "${PROFILE_SOURCE_ROOT}" "${PROFILE_SOURCE}"
+                java -Xmx80g -cp "${PLANETILER_JAR}:${PROFILE_SOURCE_ROOT}" com.onthegomap.planetiler.custom.CustomProfile \
+                  --osm-path="${SOURCE_OSM}" \
+                  --tmpdir="${TEMP_DIR}" \
+                  --output="${OUTPUT_NEW}" \
+                  --force \
+                  --download=true \
+                  --fetch-wikidata \
+                  --nodemap-type=sparsearray \
+                  --nodemap-storage=ram \
+                  --threads=18 \
+                  --arguments=journal_mode=WAL,synchronous=OFF,mmap_size=268435456 \
+                  --lake_centerlines_path="${TEMP_SOURCES}/lake_centerline.shp.zip" \
+                  --water_polygons_path="${TEMP_SOURCES}/water-polygons-split-3857.zip" \
+                  --natural_earth_path="${TEMP_SOURCES}/natural_earth_vector.sqlite.zip" \
+                  --minzoom=0 \
+                  --maxzoom=16 \
+                  --extra-osm-tags=shop,building,construction,name,wheelchair,amenity,highway,landuse,tourism,attraction,railway
+              else
+                java -Xmx80g -jar "${PLANETILER_JAR}" \
+                  --osm-path="${SOURCE_OSM}" \
+                  --tmpdir="${TEMP_DIR}" \
+                  --output="${OUTPUT_NEW}" \
+                  --force \
+                  --download=true \
+                  --fetch-wikidata \
+                  --nodemap-type=sparsearray \
+                  --nodemap-storage=ram \
+                  --threads=18 \
+                  --arguments=journal_mode=WAL,synchronous=OFF,mmap_size=268435456 \
+                  --lake_centerlines_path="${TEMP_SOURCES}/lake_centerline.shp.zip" \
+                  --water_polygons_path="${TEMP_SOURCES}/water-polygons-split-3857.zip" \
+                  --natural_earth_path="${TEMP_SOURCES}/natural_earth_vector.sqlite.zip" \
+                  --minzoom=0 \
+                  --maxzoom=16 \
+                  --extra-osm-tags=shop,building,construction,name,wheelchair,amenity,highway,landuse,tourism,attraction,railway
+              fi
+
+              trim_mount /tileserver-gl
+              trim_mount /osm-temp
+              trim_mount /tools
+
+              ORIGINAL_REPLICAS=$("${KUBECTL}" get deployment tileserver-gl -n osm -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+              ORIGINAL_REPLICAS="${ORIGINAL_REPLICAS:-0}"
+              if [ "${ORIGINAL_REPLICAS}" -gt 0 ]; then
+                if scale_deployment 0; then
+                  SCALED_DOWN=1
+                fi
+              fi
+
+              mv -f "${OUTPUT_NEW}" "${OUTPUT_ACTIVE}"
+
+              trim_mount /tileserver-gl
+
+              if [ "${SCALED_DOWN}" = "1" ] && [ "${ORIGINAL_REPLICAS}" -gt 0 ]; then
+                scale_deployment "${ORIGINAL_REPLICAS}" || true
+                SCALED_DOWN=0
+              fi
+
+              cleanup_temp_dir
+
+              trim_mount /osm-temp
+              trim_mount /tools
+          volumeMounts:
+            - name: planet
+              mountPath: /planet
+            - name: tileserver-gl
+              mountPath: /tileserver-gl
+            - name: osm-temp
+              mountPath: /osm-temp
+            - name: osm-status
+              mountPath: /osm-status
+            - name: tools
+              mountPath: /tools
+            - name: planetiler-profile-config
+              mountPath: /config
+              readOnly: true
+      volumes:
+        - name: planet
+          persistentVolumeClaim:
+            claimName: planet
+        - name: osm-temp
+          persistentVolumeClaim:
+            claimName: osm-temp
+        - name: tileserver-gl
+          persistentVolumeClaim:
+            claimName: tileserver-gl
+        - name: osm-status
+          persistentVolumeClaim:
+            claimName: osm-status
+        - name: tools
+          emptyDir: {}
+        - name: planetiler-profile-config
+          configMap:
+            name: osm-tileserver-import-profile-config
+            optional: true

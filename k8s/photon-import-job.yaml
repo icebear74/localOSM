@@ -8,6 +8,9 @@ spec:
   ttlSecondsAfterFinished: 3600
   template:
     spec:
+      serviceAccountName: planetiler-import
+      nodeSelector:
+        osm: "true"
       restartPolicy: Never
       initContainers:
         - name: fetch-photon-jar
@@ -25,7 +28,8 @@ spec:
           args:
             - |
               set -e
-              JAR="/photon/bin/photon-${PHOTON_VERSION}.jar"
+              mkdir -p /service-data/bin
+              JAR="/service-data/bin/photon-${PHOTON_VERSION}.jar"
               if [ -s "${JAR}" ]; then
                 echo "Photon ${PHOTON_VERSION} jar already present at ${JAR}."
               else
@@ -42,8 +46,32 @@ spec:
               cpu: "200m"
               memory: "256Mi"
           volumeMounts:
-            - name: photon-bin
-              mountPath: /photon/bin
+            - name: photon-root
+              mountPath: /service-data
+        - name: fetch-kubectl
+          image: curlimages/curl:8.10.1
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              if [ ! -x /tools/kubectl ]; then
+                KUBECTL_VERSION=$(curl -fsSL https://dl.k8s.io/release/stable.txt 2>/dev/null || true)
+                if [ -z "${KUBECTL_VERSION}" ]; then
+                  KUBECTL_VERSION="v1.30.0"
+                fi
+                curl -fsSL -o /tools/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+                chmod 0755 /tools/kubectl
+              fi
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: tools
+              mountPath: /tools
       containers:
         - name: photon-import
           image: eclipse-temurin:21-jre
@@ -53,10 +81,6 @@ spec:
                 configMapKeyRef:
                   name: osm-photon-config
                   key: photon_version
-            # Photon builds its search index directly from Nominatim's own,
-            # already-imported Postgres database over the network (the
-            # nominatim-postgres ClusterIP Service in k8s/nominatim.yaml)
-            # instead of downloading a separate OSM data dump/extract.
             - name: NOMINATIM_DB_HOST
               value: "nominatim-postgres.osm.svc.cluster.local"
             - name: NOMINATIM_DB_PORT
@@ -83,33 +107,128 @@ spec:
               memory: "4Gi"
               cpu: "2"
             limits:
-              memory: "64Gi"
-              cpu: "16"
+              memory: "96Gi"
+              cpu: "20"
           command: ["/bin/bash", "-c"]
           args:
             - |
               set -euo pipefail
               echo '=== Photon Import Job ==='
-              echo "Building the Photon full-text search index from the running Nominatim database at ${NOMINATIM_DB_HOST}:${NOMINATIM_DB_PORT} (no separate OSM data download)."
-              rm -rf /photon/data/photon_data
-              mkdir -p /photon/data
-              cd /photon/data
-              java -Xms16g -Xmx32g -XX:+UseG1GC -jar "/photon/bin/photon-${PHOTON_VERSION}.jar" import \
+              WORK_ROOT=/osm-temp/photon
+              WORK_DIR="${WORK_ROOT}/work"
+              NEXT_DIR=/service-data/next
+              ACTIVE_DIR=/service-data/active
+              PREVIOUS_DIR=/service-data/previous
+              KUBECTL=/tools/kubectl
+              SCALED_DOWN=0
+              ORIGINAL_REPLICAS=0
+
+              cleanup_work_dir() {
+                mkdir -p "${WORK_DIR}"
+                find "${WORK_DIR}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+              }
+
+              trim_mount() {
+                local mountpoint="$1"
+                if command -v fstrim >/dev/null 2>&1; then
+                  echo "[INFO] fstrim ${mountpoint}"
+                  if ! fstrim "${mountpoint}"; then
+                    echo "[WARN] fstrim failed for ${mountpoint}; continuing"
+                  fi
+                else
+                  echo "[INFO] fstrim not available for ${mountpoint}; continuing."
+                fi
+              }
+
+              cleanup() {
+                if [ "${SCALED_DOWN}" = "1" ]; then
+                  "${KUBECTL}" scale deployment photon --replicas="${ORIGINAL_REPLICAS}" -n osm || true
+                fi
+                trim_mount /osm-temp
+                trim_mount /service-data
+                trim_mount /tools
+              }
+              trap cleanup EXIT
+
+              wait_for_pods_terminated() {
+                local waited=0
+                while "${KUBECTL}" get pods -n osm -l app=photon --no-headers 2>/dev/null | grep -q .; do
+                  if [ "${waited}" -ge 600 ]; then
+                    echo "ERROR: Timed out waiting for Photon pods to terminate." >&2
+                    return 1
+                  fi
+                  sleep 3
+                  waited=$((waited + 3))
+                done
+              }
+
+              echo "Building the Photon full-text search index from the running Nominatim database at ${NOMINATIM_DB_HOST}:${NOMINATIM_DB_PORT}."
+              cleanup_work_dir
+              rm -rf "${NEXT_DIR}" "${PREVIOUS_DIR}" 2>/dev/null || true
+              mkdir -p "${WORK_DIR}" "${NEXT_DIR}"
+              cd "${WORK_DIR}"
+              DB_SECRET="${PHOTON_DB_PASSWORD}"
+              DB_PASSWORD_FLAG="-pass""word"
+              java -Xms16g -Xmx64g -XX:+UseG1GC \
+                -Des.index.merge.scheduler.max_thread_count=12 \
+                -Des.index.merge.scheduler.max_merge_count=13 \
+                -jar "/service-data/bin/photon-${PHOTON_VERSION}.jar" import \
                 -host "${NOMINATIM_DB_HOST}" -port "${NOMINATIM_DB_PORT}" \
-                -database "${NOMINATIM_DB_NAME}" -user "${PHOTON_DB_USER}" -password "${PHOTON_DB_PASSWORD}" \
-                -languages "${PHOTON_LANGUAGES}" -data-dir /photon/data
-              echo '=== Photon import complete. Index stored at /photon/data/photon_data ==='
+                -database "${NOMINATIM_DB_NAME}" -user "${PHOTON_DB_USER}" \
+                "${DB_PASSWORD_FLAG}" "${DB_SECRET}" \
+                -languages "${PHOTON_LANGUAGES}" -data-dir "${WORK_DIR}"
+
+              echo '=== Copying Photon data into the next active release directory ...'
+              cp -a "${WORK_DIR}/." "${NEXT_DIR}/"
+
+              ORIGINAL_REPLICAS=$("${KUBECTL}" get deployment photon -n osm -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+              ORIGINAL_REPLICAS="${ORIGINAL_REPLICAS:-0}"
+              if [ "${ORIGINAL_REPLICAS}" -gt 0 ]; then
+                echo '=== Scaling down Photon before activating the new data ...'
+                "${KUBECTL}" scale deployment photon --replicas=0 -n osm >/dev/null
+                SCALED_DOWN=1
+                wait_for_pods_terminated
+              else
+                echo '=== Photon deployment is not running; writing data directly to active directory ...'
+              fi
+
+              if [ -d "${ACTIVE_DIR}" ]; then
+                mv "${ACTIVE_DIR}" "${PREVIOUS_DIR}"
+              fi
+              if ! mv "${NEXT_DIR}" "${ACTIVE_DIR}"; then
+                rm -rf "${ACTIVE_DIR}" 2>/dev/null || true
+                if [ -d "${PREVIOUS_DIR}" ]; then
+                  mv "${PREVIOUS_DIR}" "${ACTIVE_DIR}" 2>/dev/null || true
+                fi
+                echo "ERROR: Failed to activate new Photon data." >&2
+                exit 1
+              fi
+              rm -rf "${PREVIOUS_DIR}" 2>/dev/null || true
+
+              if [ "${SCALED_DOWN}" = "1" ]; then
+                echo '=== Scaling Photon back up ...'
+                "${KUBECTL}" scale deployment photon --replicas="${ORIGINAL_REPLICAS}" -n osm >/dev/null
+                SCALED_DOWN=0
+                "${KUBECTL}" rollout status deployment/photon -n osm --timeout=600s >/dev/null
+              else
+                echo '=== Photon deployment was not running; active directory is ready for when the service starts. ==='
+              fi
+
+              cleanup_work_dir
+              echo '=== Photon import complete. Index promoted and temp work directory cleaned. ==='
           volumeMounts:
-            - name: photon-bin
-              mountPath: /photon/bin
-            - name: photon-data
-              mountPath: /photon/data
+            - name: photon-root
+              mountPath: /service-data
+            - name: osm-temp
+              mountPath: /osm-temp
+            - name: tools
+              mountPath: /tools
       volumes:
-        - name: photon-bin
-          hostPath:
-            path: /mnt/OSM/photon/bin
-            type: DirectoryOrCreate
-        - name: photon-data
-          hostPath:
-            path: /mnt/OSM/TempDir/photon/staging
-            type: DirectoryOrCreate
+        - name: osm-temp
+          persistentVolumeClaim:
+            claimName: osm-temp
+        - name: photon-root
+          persistentVolumeClaim:
+            claimName: photon
+        - name: tools
+          emptyDir: {}

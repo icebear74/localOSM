@@ -1,0 +1,125 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tileserver-gl
+  namespace: osm
+  labels:
+    app: tileserver-gl
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tileserver-gl
+  template:
+    metadata:
+      labels:
+        app: tileserver-gl
+    spec:
+      nodeSelector:
+        osm: "true"
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+      initContainers:
+        - name: init-config
+          image: alpine:3.20
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              mkdir -p /data/fonts /data/sprites
+
+              if [ -f /style-source/style.json ] && [ ! -f /data/style.json ]; then
+                cp /style-source/style.json /data/style.json
+                echo "[INFO] TileServer: installed initial style.json from ConfigMap tileserver-style"
+              fi
+              if [ -f /style-source/dark_style.json ] && [ ! -f /data/dark_style.json ]; then
+                cp /style-source/dark_style.json /data/dark_style.json
+                echo "[INFO] TileServer: installed initial dark_style.json from ConfigMap tileserver-style"
+              fi
+
+              if [ ! -f /data/style.json ]; then
+                printf '%s\n' '{"version":8,"name":"LocalOSM","sources":{"openmaptiles":{"type":"vector","url":"mbtiles://{v3}"}},"glyphs":"{fontstack}/{range}.pbf","layers":[{"id":"background","type":"background","paint":{"background-color":"#f2efe9"}}]}' > /data/style.json
+              fi
+
+              if [ ! -f /data/config.json ]; then
+                if [ -f /data/dark_style.json ]; then
+                  printf '%s\n' '{"options":{"paths":{"root":"/","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true,"cors":true},"styles":{"osm":{"style":"/data/style.json"},"osm-dark":{"style":"/data/dark_style.json"}},"data":{"v3":{"mbtiles":"/data/planet.mbtiles"}}}' > /data/config.json
+                else
+                  printf '%s\n' '{"options":{"paths":{"root":"/","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true,"cors":true},"styles":{"osm":{"style":"/data/style.json"}},"data":{"v3":{"mbtiles":"/data/planet.mbtiles"}}}' > /data/config.json
+                fi
+              fi
+
+              if [ -n "$(find /data/fonts -type f -name '*.pbf' -print -quit 2>/dev/null)" ]; then
+                echo "[✓] Fonts verified and available"
+              else
+                echo "[!] WARNING: No glyph files found below /data/fonts."
+              fi
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+          volumeMounts:
+            - name: tileserver-data
+              mountPath: /data
+            - name: tileserver-style
+              mountPath: /style-source
+              readOnly: true
+      containers:
+        - name: tileserver-gl
+          image: maptiler/tileserver-gl:latest
+          imagePullPolicy: Always
+          args: ["/data/config.json"]
+          resources:
+            requests:
+              cpu: "1"
+              memory: "2Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+          env:
+            - name: PORT
+              value: "80"
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: tileserver-data
+              mountPath: /data
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: tileserver-data
+          persistentVolumeClaim:
+            claimName: tileserver-gl
+        - name: tileserver-style
+          configMap:
+            name: tileserver-style
+            optional: true
+        # TileServer-GL renders raster tiles server-side via MapLibre GL Native's
+        # headless GL backend, which needs shared memory to allocate its GL
+        # context/framebuffers. Kubernetes containers default to a tiny 64Mi
+        # /dev/shm, which is enough for vector (.pbf) tile serving (no rendering
+        # involved) but too small for raster rendering, causing raster tiles to
+        # fail/return blank while vector tiles keep working fine.
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tileserver-gl
+  namespace: osm
+spec:
+  type: NodePort
+  selector:
+    app: tileserver-gl
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      nodePort: 30085

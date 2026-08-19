@@ -21,7 +21,7 @@ metadata:
   namespace: osm
 data:
   import_mode: import
-  import_threads: "15"
-  import_cache_mb: "40000"
+  import_threads: "22"
+  import_cache_mb: "32000"
   import_password: nominatim
-  import_flatnode_file: "/var/lib/postgresql/16/main/flatnode.file"
+  import_flatnode_file: "/osm-temp/nominatim/work/flatnode.file"

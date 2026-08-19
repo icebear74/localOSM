@@ -1,0 +1,7 @@
+- [ ] /config.json
+- [ ] /style.json
+- [ ] /fonts/{fontstack}/{range}.pbf
+- [ ] /sprites/sprite.json
+- [ ] /sprites/sprite.png
+- [ ] /sprites/sprite@2x.json
+- [ ] /sprites/sprite@2x.png

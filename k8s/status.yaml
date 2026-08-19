@@ -108,6 +108,24 @@ data:
     NAMESPACE = os.environ.get("OSM_NAMESPACE", "osm")
     OSM_NODE_URL = os.environ.get("OSM_NODE_URL", "").strip()
 
+    def _load_service_targets():
+        raw = os.environ.get("SERVICE_TARGETS_JSON", "")
+        if not raw:
+            return {}
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        cleaned = {}
+        for key, value in payload.items():
+            if isinstance(value, str) and value.strip():
+                cleaned[key] = value.strip()
+        return cleaned
+
+    SERVICE_TARGETS = _load_service_targets()
+
     STATUS_DIR = os.path.join(DATA_DIR, "status")
     LIBRARY_DIR = os.path.join(DATA_DIR, "library")
     IMPORT_DIR = os.path.join(TEMP_DIR, "import")
@@ -116,12 +134,12 @@ data:
     COUNTRIES_FILE = os.path.join(STATUS_DIR, "countries.json")
     STATE_FILE = os.path.join(STATUS_DIR, "library-state.json")
     CONFIG_FILE = os.path.join(STATUS_DIR, "config.json")
-    # Live style used by TileServer-GL (k8s/tileserver.yaml mounts the same hostPath).
+    # Live style used by TileServer-GL (k8s/tileserver-gl-deployment.yaml mounts the same tileserver-gl PVC path).
     TILESERVER_STYLE_PATH = os.path.join(DATA_DIR, "tileserver", "active", "style.json")
     IMPORT_REQUEST_FILE = os.path.join(STATUS_DIR, "import-request.json")
     IMPORT_REQUEST_QUEUE_FILE = os.path.join(STATUS_DIR, "import-request-queue.json")
     IMPORT_REQUEST_LOCK_FILE = os.path.join(STATUS_DIR, "import-request.lock")
-    # import-orchestrator.sh writes its own live progress here (same hostPath as
+    # import-orchestrator.sh writes its own live progress here (same shared state path as
     # STATUS_DIR, see k8s/import-orchestrator.yaml "state" volume) and watches for
     # ABORT_FLAG_FILE to cancel whatever it is currently doing.
     ORCHESTRATOR_STATE_FILE = os.path.join(STATUS_DIR, "import-orchestrator.json")
@@ -598,7 +616,7 @@ data:
         "venezuela": (-73.35, 0.64, -59.76, 12.20),
     }
 
-    # MapLibre GL base style – kept in sync with k8s/tileserver.yaml init container.
+    # MapLibre GL base style – kept in sync with k8s/tileserver-gl-deployment.yaml init container.
     _STYLE_JSON = (
         '{"version":8,"name":"LocalOSM","sources":{"openmaptiles":{"type":"vector","url":"mbtiles://{v3}"}},'
         '"glyphs":"{fontstack}/{range}.pbf","layers":['
@@ -616,17 +634,17 @@ data:
         '{"id":"road-primary","type":"line","source":"openmaptiles","source-layer":"transportation","filter":["==","class","primary"],"minzoom":7,"paint":{"line-color":"#fcd354","line-width":{"stops":[[7,0.5],[10,2],[14,5],[16,8]]}}},'
         '{"id":"road-major","type":"line","source":"openmaptiles","source-layer":"transportation","filter":["in","class","motorway","trunk"],"paint":{"line-color":"#f9a825","line-width":{"stops":[[6,1],[10,3],[14,7],[16,12]]}}},'
         '{"id":"building","type":"fill","source":"openmaptiles","source-layer":"building","minzoom":14,"paint":{"fill-color":"#d9d0c9","fill-opacity":0.9}},'
-        '{"id":"water-name","type":"symbol","source":"openmaptiles","source-layer":"water_name","layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["NotoSansRegular"],"text-size":{"stops":[[4,10],[10,14]]},"symbol-placement":"point"},"paint":{"text-color":"#5b8db8","text-halo-color":"#fff","text-halo-width":1}},'
-        '{"id":"road-label-minor","type":"symbol","source":"openmaptiles","source-layer":"transportation_name","filter":["in","class","minor","service","track"],"minzoom":15,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["NotoSansRegular"],"symbol-placement":"line","text-size":10,"text-max-angle":30,"text-padding":5},"paint":{"text-color":"#555","text-halo-color":"#fff","text-halo-width":1.5}},'
-        '{"id":"road-label-secondary","type":"symbol","source":"openmaptiles","source-layer":"transportation_name","filter":["in","class","secondary","tertiary"],"minzoom":13,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["NotoSansRegular"],"symbol-placement":"line","text-size":11,"text-max-angle":30},"paint":{"text-color":"#555","text-halo-color":"#fff","text-halo-width":1.5}},'
-        '{"id":"road-label-primary","type":"symbol","source":"openmaptiles","source-layer":"transportation_name","filter":["in","class","primary","trunk","motorway"],"minzoom":10,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["NotoSansRegular"],"symbol-placement":"line","text-size":12,"text-max-angle":30},"paint":{"text-color":"#333","text-halo-color":"#fff","text-halo-width":1.5}},'
-        '{"id":"place-country","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["==","class","country"],"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["NotoSansRegular"],"text-size":{"stops":[[2,10],[6,16],[8,18]]}},"paint":{"text-color":"#333","text-halo-color":"rgba(255,255,255,0.8)","text-halo-width":2}},'
-        '{"id":"place-state","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["==","class","state"],"minzoom":5,"maxzoom":12,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["NotoSansRegular"],"text-size":{"stops":[[5,10],[10,14]]}},"paint":{"text-color":"#555","text-halo-color":"rgba(255,255,255,0.8)","text-halo-width":1.5}},'
-        '{"id":"place-city","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["in","class","city"],"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["NotoSansRegular"],"text-size":{"stops":[[6,11],[10,15],[14,18]]}},"paint":{"text-color":"#222","text-halo-color":"rgba(255,255,255,0.9)","text-halo-width":2}},'
-        '{"id":"place-town","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["==","class","town"],"minzoom":8,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["NotoSansRegular"],"text-size":{"stops":[[8,10],[12,14],[16,17]]}},"paint":{"text-color":"#333","text-halo-color":"rgba(255,255,255,0.9)","text-halo-width":1.5}},'
-        '{"id":"place-village","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["==","class","village"],"minzoom":10,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["NotoSansRegular"],"text-size":{"stops":[[10,10],[14,13]]}},"paint":{"text-color":"#444","text-halo-color":"rgba(255,255,255,0.9)","text-halo-width":1.5}},'
-        '{"id":"place-suburb","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["in","class","suburb","quarter","neighbourhood"],"minzoom":12,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["NotoSansRegular"],"text-size":11},"paint":{"text-color":"#555","text-halo-color":"rgba(255,255,255,0.9)","text-halo-width":1.5}},'
-        '{"id":"place-hamlet","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["in","class","hamlet","isolated_dwelling"],"minzoom":13,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["NotoSansRegular"],"text-size":10},"paint":{"text-color":"#666","text-halo-color":"rgba(255,255,255,0.9)","text-halo-width":1.5}}'
+        '{"id":"water-name","type":"symbol","source":"openmaptiles","source-layer":"water_name","layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["KlokanTech Noto Sans Regular"],"text-size":{"stops":[[4,10],[10,14]]},"symbol-placement":"point"},"paint":{"text-color":"#5b8db8","text-halo-color":"#fff","text-halo-width":1}},'
+        '{"id":"road-label-minor","type":"symbol","source":"openmaptiles","source-layer":"transportation_name","filter":["in","class","minor","service","track"],"minzoom":15,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["KlokanTech Noto Sans Regular"],"symbol-placement":"line","text-size":10,"text-max-angle":30,"text-padding":5},"paint":{"text-color":"#555","text-halo-color":"#fff","text-halo-width":1.5}},'
+        '{"id":"road-label-secondary","type":"symbol","source":"openmaptiles","source-layer":"transportation_name","filter":["in","class","secondary","tertiary"],"minzoom":13,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["KlokanTech Noto Sans Regular"],"symbol-placement":"line","text-size":11,"text-max-angle":30},"paint":{"text-color":"#555","text-halo-color":"#fff","text-halo-width":1.5}},'
+        '{"id":"road-label-primary","type":"symbol","source":"openmaptiles","source-layer":"transportation_name","filter":["in","class","primary","trunk","motorway"],"minzoom":10,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["KlokanTech Noto Sans Regular"],"symbol-placement":"line","text-size":12,"text-max-angle":30},"paint":{"text-color":"#333","text-halo-color":"#fff","text-halo-width":1.5}},'
+        '{"id":"place-country","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["==","class","country"],"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["KlokanTech Noto Sans Regular"],"text-size":{"stops":[[2,10],[6,16],[8,18]]}},"paint":{"text-color":"#333","text-halo-color":"rgba(255,255,255,0.8)","text-halo-width":2}},'
+        '{"id":"place-state","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["==","class","state"],"minzoom":5,"maxzoom":12,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["KlokanTech Noto Sans Regular"],"text-size":{"stops":[[5,10],[10,14]]}},"paint":{"text-color":"#555","text-halo-color":"rgba(255,255,255,0.8)","text-halo-width":1.5}},'
+        '{"id":"place-city","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["in","class","city"],"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["KlokanTech Noto Sans Regular"],"text-size":{"stops":[[6,11],[10,15],[14,18]]}},"paint":{"text-color":"#222","text-halo-color":"rgba(255,255,255,0.9)","text-halo-width":2}},'
+        '{"id":"place-town","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["==","class","town"],"minzoom":8,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["KlokanTech Noto Sans Regular"],"text-size":{"stops":[[8,10],[12,14],[16,17]]}},"paint":{"text-color":"#333","text-halo-color":"rgba(255,255,255,0.9)","text-halo-width":1.5}},'
+        '{"id":"place-village","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["==","class","village"],"minzoom":10,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["KlokanTech Noto Sans Regular"],"text-size":{"stops":[[10,10],[14,13]]}},"paint":{"text-color":"#444","text-halo-color":"rgba(255,255,255,0.9)","text-halo-width":1.5}},'
+        '{"id":"place-suburb","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["in","class","suburb","quarter","neighbourhood"],"minzoom":12,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["KlokanTech Noto Sans Regular"],"text-size":11},"paint":{"text-color":"#555","text-halo-color":"rgba(255,255,255,0.9)","text-halo-width":1.5}},'
+        '{"id":"place-hamlet","type":"symbol","source":"openmaptiles","source-layer":"place","filter":["in","class","hamlet","isolated_dwelling"],"minzoom":13,"layout":{"text-field":["coalesce",["get","name:de"],["get","name:en"],["get","name"]],"text-font":["KlokanTech Noto Sans Regular"],"text-size":10},"paint":{"text-color":"#666","text-halo-color":"rgba(255,255,255,0.9)","text-halo-width":1.5}}'
         "]}"
     )
 
@@ -985,11 +1003,7 @@ data:
               <button id="check-updates-btn" class="subtle" onclick="checkForUpdates()">Auf Updates prüfen</button>
             </div>
             <div class="row2">
-              <button id="download-merge-btn" class="subtle" onclick="startDownloadMerge(false)">Download &amp; Merge</button>
-              <button id="download-only-btn" class="subtle" onclick="startDownloadMerge(true)">Nur Download</button>
-            </div>
-            <div class="row2">
-              <button id="build-btn" class="subtle" onclick="startBuild()">Build starten</button>
+              <button id="build-btn" class="subtle" onclick="startBuild()">Import Prep starten</button>
               <span></span>
             </div>
             <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
@@ -997,13 +1011,13 @@ data:
               Nach dem Build automatisch promoten (aktiv schalten)
             </label>
             <div id="queue-count" class="hint">Keine Länder in der Queue.</div>
-            <div class="hint">Wählt ein Land aus. Der Hinzufügen-Button prüft nur die Verfügbarkeit. "Download &amp; Merge" lädt neuere Extracts herunter und führt sie zusammen; "Build" verwendet dafür bereits vorhandene, zusammengeführte Kartendaten und lädt/merged nur automatisch, falls noch keine vorhanden sind. Danach führt Build (wahlweise mit Promotion) TileServer, Nominatim, Valhalla und Photon nacheinander aus.</div>
-            <div class="hint" style="margin-top:0.4rem">Einzelne Build-Schritte auslösen (ohne automatische Promotion):</div>
+            <div class="hint">Wählt ein Land aus. Der Hinzufügen-Button prüft nur die Verfügbarkeit. Die Import-Jobs übernehmen Download/Merge und Build-Schritte, sodass die alte Download-Section entfällt.</div>
+            <div class="hint" style="margin-top:0.4rem">Einzelne Import-Jobs auslösen (ohne automatische Promotion):</div>
             <div class="row2" style="grid-template-columns:repeat(2, 1fr)">
-              <button id="build-step-tileserver-btn" class="subtle" onclick="startStepBuild('tileserver')">TileServer bauen</button>
-              <button id="build-step-nominatim-btn" class="subtle" onclick="startStepBuild('nominatim')">Nominatim bauen</button>
-              <button id="build-step-valhalla-btn" class="subtle" onclick="startStepBuild('valhalla')">Valhalla bauen</button>
-              <button id="build-step-photon-btn" class="subtle" onclick="startStepBuild('photon')">Photon bauen</button>
+              <button id="build-step-tileserver-btn" class="subtle" onclick="startStepBuild('tileserver')">TileServer-Import starten</button>
+              <button id="build-step-nominatim-btn" class="subtle" onclick="startStepBuild('nominatim')">Nominatim-Import starten</button>
+              <button id="build-step-valhalla-btn" class="subtle" onclick="startStepBuild('valhalla')">Valhalla-Import starten</button>
+              <button id="build-step-photon-btn" class="subtle" onclick="startStepBuild('photon')">Photon-Import starten</button>
             </div>
           </div>
         </div>
@@ -1058,8 +1072,13 @@ data:
         </div>
       </div>
 
+      <script id="service-targets-json" type="application/json">{{SERVICE_TARGETS_JSON}}</script>
       <script>
       var NODE_URL = "{{NODE_URL}}";
+      var SERVICE_TARGETS = {};
+      try {
+        SERVICE_TARGETS = JSON.parse(document.getElementById('service-targets-json').textContent || '{}');
+      } catch (e) {}
       var ALL_COUNTRIES = [];
       var refreshTimer = null;
       var WORKFLOW_RUNNING = false;
@@ -1067,9 +1086,25 @@ data:
 
       function updateLinks() {
         var baseUrl = (NODE_URL || (location.protocol + '//' + location.hostname)).replace(/\\/+$/, '');
+        function resolveServiceTarget(key, fallbackBase) {
+          var configured = (SERVICE_TARGETS && SERVICE_TARGETS[key]) || '';
+          if (configured) return configured.replace(/\\/+$/, '');
+          return fallbackBase.replace(/\\/+$/, '');
+        }
+        var webUrl = resolveServiceTarget('web', baseUrl + ':30084');
+        var valhallaUrl = resolveServiceTarget('valhalla', baseUrl + ':30082');
+        var nominatimUrl = resolveServiceTarget('nominatim', baseUrl + ':30081');
+        var tileserverUrl = resolveServiceTarget('tileserver', baseUrl + ':30085');
         ['web-link','valhalla-link','nominatim-link','tileserver-link'].forEach(function(id) {
           var a = document.getElementById(id);
-          if (a && a.dataset.port) a.href = baseUrl + ':' + a.dataset.port + '/';
+          if (!a) return;
+          var targetUrl = {
+            'web-link': webUrl,
+            'valhalla-link': valhallaUrl,
+            'nominatim-link': nominatimUrl,
+            'tileserver-link': tileserverUrl
+          }[id] || '';
+          if (targetUrl) a.href = targetUrl + '/';
         });
         // Point Maputnik at TileServer-GL's own resolved style endpoint, not the raw
         // stored style.json (served via /api/style): the stored file's source uses
@@ -1077,14 +1112,12 @@ data:
         // itself rewrites into real tile/TileJSON URLs when serving /styles/<id>/style.json.
         // Loading the raw file directly left Maputnik with an unresolvable source, so
         // no basemap was drawn and the source inspector showed empty/localhost fields.
-        var tileserverLink = document.getElementById('tileserver-link');
-        var tileserverPort = (tileserverLink && tileserverLink.dataset.port) || '30085';
-        var styleApiUrl = baseUrl + ':' + tileserverPort + '/styles/osm/style.json';
+        var styleApiUrl = tileserverUrl + '/styles/osm/style.json';
         CURRENT_STYLE_API_URL = styleApiUrl;
         ['style-editor-link', 'style-editor-link-2'].forEach(function(id) {
           var styleLink = document.getElementById(id);
           if (styleLink) {
-            styleLink.href = baseUrl + ':' + styleLink.dataset.port + '/?style=' + encodeURIComponent(styleApiUrl);
+            styleLink.href = (styleLink.dataset.port ? (baseUrl + ':' + styleLink.dataset.port) : tileserverUrl) + '/?style=' + encodeURIComponent(styleApiUrl);
           }
         });
       }
@@ -1193,8 +1226,6 @@ data:
           '</div>';
         document.getElementById('add-country-btn').disabled = running;
         document.getElementById('build-btn').disabled = running;
-        document.getElementById('download-merge-btn').disabled = running;
-        document.getElementById('download-only-btn').disabled = running;
         document.getElementById('check-updates-btn').disabled = running;
         var activeStep = ['tileserver', 'nominatim', 'valhalla', 'photon'].indexOf(phase) !== -1 ? phase : null;
         ['tileserver', 'nominatim', 'valhalla', 'photon'].forEach(function(step) {

@@ -386,6 +386,7 @@ spec:
               from pathlib import Path
 
               data_dir = Path('/data')
+              temp_dir = Path('/temp')
               request_file = data_dir / 'status' / 'import-request.json'
               with request_file.open('r', encoding='utf-8') as handle:
                   request = json.load(handle)
@@ -404,7 +405,7 @@ spec:
               merge_requested = bool(request.get('merge_requested', True))
 
               library_dir = data_dir / 'library'
-              import_dir = data_dir / 'import'
+              import_dir = temp_dir / 'import'
               library_dir.mkdir(parents=True, exist_ok=True)
               import_dir.mkdir(parents=True, exist_ok=True)
 
@@ -522,16 +523,15 @@ spec:
             - name: osm-data
               mountPath: /data
             - name: temp-data
-              mountPath: /data/import
+              mountPath: /temp
       volumes:
         - name: osm-data
           hostPath:
             path: ${DATA_DIR}
             type: DirectoryOrCreate
         - name: temp-data
-          hostPath:
-            path: ${TEMP_DIR}/import
-            type: DirectoryOrCreate
+          persistentVolumeClaim:
+            claimName: osm-temp
 EOF
   local rc=0
   wait_for_job "${job_name}" || rc=$?
@@ -639,25 +639,25 @@ swap_stage() {
 
   log "Scaling deployment/${deployment} down to 0 before promoting ${service} to release file locks."
   if ! kubectl -n "${NAMESPACE}" scale "deployment/${deployment}" --replicas=0 >/dev/null; then
-    log "Failed to scale deployment/${deployment} down before promoting ${service}."
+    log "Failed to scale deployment/${deployment} down before promoting ${service}; aborting promotion."
     return 1
   fi
 
   wait_start="$(date +%s)"
   selector="$(deployment_selector "${deployment}")"
   while kubectl -n "${NAMESPACE}" get pods -l "${selector}" --no-headers 2>/dev/null | grep -q .; do
-    check_config_change
-    if abort_requested; then
-      log "Abort requested while waiting for deployment/${deployment} pods to terminate."
-      kubectl -n "${NAMESPACE}" scale "deployment/${deployment}" --replicas=1 >/dev/null 2>&1 || true
-      return 2
-    fi
-    if [ "$(( $(date +%s) - wait_start ))" -gt "${POD_TERMINATION_TIMEOUT_SECONDS}" ]; then
-      log "Timed out waiting for deployment/${deployment} pods to terminate before promoting ${service}."
-      return 1
-    fi
-    sleep 3
-  done
+      check_config_change
+      if abort_requested; then
+        log "Abort requested while waiting for deployment/${deployment} pods to terminate."
+        kubectl -n "${NAMESPACE}" scale "deployment/${deployment}" --replicas=1 >/dev/null 2>&1 || true
+        return 2
+      fi
+      if [ "$(( $(date +%s) - wait_start ))" -gt "${POD_TERMINATION_TIMEOUT_SECONDS}" ]; then
+        log "Timed out waiting for deployment/${deployment} pods to terminate before promoting ${service}."
+        return 1
+      fi
+      sleep 3
+    done
 
   rm -rf "${backup_dir}" 2>/dev/null || true
   if [ -d "${active_dir}" ]; then
@@ -698,8 +698,8 @@ swap_stage() {
 
   log "Scaling deployment/${deployment} back to 1 after promoting ${service}."
   if ! kubectl -n "${NAMESPACE}" scale "deployment/${deployment}" --replicas=1 >/dev/null; then
-    log "Failed to scale deployment/${deployment} back up after promoting ${service}."
-    return 1
+    log "Failed to scale deployment/${deployment} back up after promoting ${service}; continuing without the scale operation."
+    return 0
   fi
   if [ "${deployment}" = "nominatim" ]; then
     if ! wait_for_nominatim_rollout 600; then
@@ -721,6 +721,9 @@ run_step() {
   # Start from a clean temp-dir scratch area in case a previous run crashed
   # before it could clean up after itself.
   cleanup_temp_dir "$(dirname "${staging_dir}")"
+  # Import jobs are expected to be autonomous: the orchestrator only submits
+  # them and should not own the service-level rollout/restart logic. Each job
+  # should manage its own deployment lifecycle and data promotion steps.
   log "Starting ${service} import job."
   write_state true "${service}" 10 "${service} import started." "Submitting ${job_name}."
   kubectl -n "${NAMESPACE}" delete job "${job_name}" --ignore-not-found >/dev/null 2>&1 || true
@@ -735,6 +738,17 @@ run_step() {
     write_state false "failed" 0 "${service} import failed." "See job logs for details."
     archive_dir "$(dirname "${staging_dir}")" "failed"
     return 1
+  fi
+  if [ "${service}" = "nominatim" ] || [ "${service}" = "valhalla" ] || [ "${service}" = "photon" ]; then
+    write_state false "${service}" 100 "${service} import completed." "The import job handles promotion and cleanup internally."
+    return 0
+  fi
+  if [ "${service}" = "tileserver" ]; then
+    if [ "${auto_promote}" != "true" ]; then
+      log "${service} import already promotes data inside the tileserver-gl PVC; auto-promote=false has no separate staging step to keep."
+    fi
+    write_state false "${service}" 100 "${service} import promoted." "tileserver-gl is serving the newly imported data from its PVC."
+    return 0
   fi
   if [ "${auto_promote}" != "true" ]; then
     log "${service} import staged; auto-promote disabled, leaving deployment/${deployment} untouched."
@@ -772,7 +786,7 @@ run_parallel_step_group() {
   for step in "${steps[@]}"; do
     case "${step}" in
       tileserver)
-        run_step "tileserver" "tileserver-import" "tileserver-import-job.yaml" "${DATA_DIR}/tileserver/active" "${TEMP_DIR}/tileserver/staging" "tileserver-gl" "${AUTO_PROMOTE}" &
+        run_step "tileserver" "tileserver-import" "planetiler-import-job.yaml" "${DATA_DIR}/tileserver/active" "${TEMP_DIR}/tileserver/staging" "tileserver-gl" "${AUTO_PROMOTE}" &
         pids+=("$!")
         launched_steps+=("${step}")
         ;;
