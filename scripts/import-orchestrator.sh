@@ -104,7 +104,7 @@ clear_abort_flag() {
   rm -f "${ABORT_FILE}" 2>/dev/null || true
 }
 
-# Tracks which import steps (tileserver/nominatim/valhalla/photon) have already been
+# Tracks which import steps (tileserver/nominatim/valhalla/photon/pelias) have already been
 # completed for the *current* request, so that a container/pod restart in the
 # middle of a multi-step import (e.g. after Valhalla finished but before the
 # loop reached its end) resumes instead of redoing already-promoted steps.
@@ -559,7 +559,7 @@ PY
 }
 
 # Space-separated list of steps (subset of "tileserver nominatim valhalla
-# photon") that should be executed for the current request. Missing/empty
+# photon pelias") that should be executed for the current request. Missing/empty
 # "steps" means "run all four", which keeps older/manual requests (e.g.
 # written by scripts/run-import.sh) working unchanged.
 request_steps() {
@@ -577,14 +577,14 @@ with open(path, 'r', encoding='utf-8') as handle:
 if 'steps' in request:
     steps = request.get('steps') or []
 else:
-    steps = ['tileserver', 'nominatim', 'valhalla', 'photon']
+    steps = ['tileserver', 'nominatim', 'valhalla', 'photon', 'pelias']
 normalized = []
 seen = set()
 for raw in steps:
     step = str(raw).strip().lower()
     if not step:
         continue
-    if step not in {'tileserver', 'nominatim', 'valhalla', 'photon'}:
+    if step not in {'tileserver', 'nominatim', 'valhalla', 'photon', 'pelias'}:
         raise SystemExit(f'Unsupported step: {step}')
     if step in seen:
         raise SystemExit(f'Duplicate step requested: {step}')
@@ -739,7 +739,7 @@ run_step() {
     archive_dir "$(dirname "${staging_dir}")" "failed"
     return 1
   fi
-  if [ "${service}" = "nominatim" ] || [ "${service}" = "valhalla" ] || [ "${service}" = "photon" ]; then
+  if [ "${service}" = "nominatim" ] || [ "${service}" = "valhalla" ] || [ "${service}" = "photon" ] || [ "${service}" = "pelias" ]; then
     write_state false "${service}" 100 "${service} import completed." "The import job handles promotion and cleanup internally."
     return 0
   fi
@@ -982,6 +982,29 @@ main() {
         continue
       fi
       mark_step_done "photon"
+    fi
+
+    local prc3=0
+    if ! step_requested "pelias"; then
+      log "Pelias step not requested for this import request; skipping."
+    elif step_already_done "pelias"; then
+      log "Pelias already promoted for this request (resumed after restart); skipping re-import."
+    else
+      run_step "pelias" "pelias-import" "pelias-import-job.yaml" "${DATA_DIR}/pelias/active" "${TEMP_DIR}/pelias/staging" "pelias" "${AUTO_PROMOTE}" || prc3=$?
+      if [ "${prc3}" -ne 0 ]; then
+        if [ "${prc3}" -eq 2 ]; then
+          log "Import aborted by user during Pelias import; archiving import request and scratch data for recovery."
+          archive_file "${REQUEST_FILE}" "aborted"
+        else
+          log "Pelias import failed; archiving import request and scratch data to prevent retry loop while preserving data."
+          archive_file "${REQUEST_FILE}" "failed"
+        fi
+        cleanup_import_scratch
+        clear_abort_flag
+        clear_completed_steps
+        continue
+      fi
+      mark_step_done "pelias"
     fi
 
     # The merged planet.osm.pbf itself is intentionally kept (see

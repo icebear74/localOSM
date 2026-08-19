@@ -38,6 +38,7 @@ data:
     VALHALLA_URL = SERVICE_TARGETS.get("valhalla", os.environ.get("VALHALLA_URL", "http://valhalla.osm.svc.cluster.local:8002"))
     NOMINATIM_URL = SERVICE_TARGETS.get("nominatim", os.environ.get("NOMINATIM_URL", "http://nominatim.osm.svc.cluster.local:8080"))
     PHOTON_URL = SERVICE_TARGETS.get("photon", os.environ.get("PHOTON_URL", "http://photon.osm.svc.cluster.local:2322"))
+    PELIAS_URL = SERVICE_TARGETS.get("pelias", os.environ.get("PELIAS_URL", "http://pelias.osm.svc.cluster.local:4000"))
     TILESERVER_URL = SERVICE_TARGETS.get("tileserver", os.environ.get("TILESERVER_URL", "http://tileserver-gl.osm.svc.cluster.local"))
     STATUS_URL = SERVICE_TARGETS.get("status", os.environ.get("STATUS_URL", ""))
     PLANET_UPDATE_REQUEST_FILE = os.environ.get("PLANET_UPDATE_REQUEST_FILE", "/state/planet-update-request.flag")
@@ -88,6 +89,7 @@ data:
         .photon-results div { padding: 0.4rem 0.5rem; font-size: 0.8rem; cursor: pointer; border-bottom: 1px solid #eee; }
         .photon-results div:last-child { border-bottom: none; }
         .photon-results div:hover, .photon-results div.active { background: #eaf2f8; }
+        .hidden { display: none !important; }
         .advanced-options { display: none; }
         .advanced-options.visible { display: block; }
         .advanced-param { display: flex; flex-direction: column; gap: 0.25rem; }
@@ -103,13 +105,20 @@ data:
     </div>
     <div id="main">
       <div id="sidebar">
-        <div class="section-title">Start</div>
-        <div class="photon-search">
-          <label>Volltextsuche (Photon)</label>
-          <input id="startPhoton" placeholder="Ab 3 Zeichen tippen ..." autocomplete="off"
-                 oninput="onPhotonInput('start')" onkeydown="onPhotonKeydown(event, 'start')">
-          <div id="startPhotonResults" class="photon-results"></div>
+      <div>
+        <label>Suchdienst</label>
+        <select id="geocoder-provider" onchange="updateGeocoderUi()">
+          <option value="photon_nominatim">Photon + Nominatim</option>
+          <option value="pelias">Pelias</option>
+        </select>
         </div>
+      <div class="section-title">Start</div>
+      <div class="photon-search provider-photon-only">
+        <label>Volltextsuche (Photon)</label>
+        <input id="startPhoton" placeholder="Ab 3 Zeichen tippen ..." autocomplete="off"
+               oninput="onPhotonInput('start')" onkeydown="onPhotonKeydown(event, 'start')">
+        <div id="startPhotonResults" class="photon-results"></div>
+      </div>
         <div>
           <label>Adresse suchen</label>
           <div class="geocode-row">
@@ -123,7 +132,7 @@ data:
         </div>
 
         <div class="section-title">Ziel</div>
-        <div class="photon-search">
+        <div class="photon-search provider-photon-only">
           <label>Volltextsuche (Photon)</label>
           <input id="endPhoton" placeholder="Ab 3 Zeichen tippen ..." autocomplete="off"
                  oninput="onPhotonInput('end')" onkeydown="onPhotonKeydown(event, 'end')">
@@ -559,7 +568,8 @@ data:
     // Reverse geocode a coordinate and populate the address input
     async function reverseGeocode(which, lat, lon) {
       try {
-        var resp = await fetch('/api/reverse?lat=' + lat + '&lon=' + lon);
+        var provider = document.getElementById('geocoder-provider').value || 'photon_nominatim';
+        var resp = await fetch('/api/reverse?provider=' + encodeURIComponent(provider) + '&lat=' + lat + '&lon=' + lon);
         var data = await resp.json();
         if (!data.error && data.display_name) {
           document.getElementById(which + 'Addr').value = data.display_name;
@@ -987,10 +997,11 @@ data:
     async function geocode(which) {
       var addrInput = document.getElementById(which + 'Addr').value.trim();
       if (!addrInput) return;
+      var provider = document.getElementById('geocoder-provider').value || 'photon_nominatim';
       var box = document.getElementById('result-box');
       box.innerHTML = '&#128269; Suche: ' + addrInput + ' ...';
       try {
-        var resp = await fetch('/api/geocode?q=' + encodeURIComponent(addrInput));
+        var resp = await fetch('/api/geocode?provider=' + encodeURIComponent(provider) + '&q=' + encodeURIComponent(addrInput));
         var data = await resp.json();
         if (data.error) { box.innerHTML = '<span class="err">Geocoding-Fehler: ' + data.error + '</span>'; return; }
         var results = data.results || [];
@@ -998,9 +1009,22 @@ data:
         var r = results[0];
         setMarker(which, parseFloat(r.lat), parseFloat(r.lon));
         map.flyTo({center: [parseFloat(r.lon), parseFloat(r.lat)], zoom: 15});
-        box.innerHTML = '<span class="ok">&#10003; ' + (which === 'start' ? 'Start' : 'Ziel') + ' gesetzt</span><br>' + (r.display_name || '');
+        var providerLabel = provider === 'pelias' ? 'Pelias' : 'Photon+Nominatim';
+        box.innerHTML = '<span class="ok">&#10003; ' + (which === 'start' ? 'Start' : 'Ziel') + ' gesetzt (' + providerLabel + ')</span><br>' + (r.display_name || '');
       } catch(err) {
         box.innerHTML = '<span class="err">Geocoding-Fehler: ' + err + '</span>';
+      }
+    }
+
+    function updateGeocoderUi() {
+      var provider = document.getElementById('geocoder-provider').value || 'photon_nominatim';
+      var photonOnly = provider !== 'pelias';
+      document.querySelectorAll('.provider-photon-only').forEach(function(el) {
+        el.classList.toggle('hidden', !photonOnly);
+      });
+      if (!photonOnly) {
+        closePhotonResults('start');
+        closePhotonResults('end');
       }
     }
 
@@ -1152,6 +1176,7 @@ data:
         if (wrap && !wrap.contains(event.target)) closePhotonResults(which);
       });
     });
+    updateGeocoderUi();
 
     function esc(value) {
       return String(value).replace(/[&<>"']/g, function(c) {
@@ -1467,7 +1492,7 @@ data:
                 return
 
             if self.path == "/api/status":
-                self._send_json({"status": "ok", "valhalla": VALHALLA_URL, "nominatim": NOMINATIM_URL, "photon": PHOTON_URL})
+                self._send_json({"status": "ok", "valhalla": VALHALLA_URL, "nominatim": NOMINATIM_URL, "photon": PHOTON_URL, "pelias": PELIAS_URL})
                 return
 
             if self.path == "/api/bounds":
@@ -1493,40 +1518,75 @@ data:
             if self.path.startswith("/api/geocode"):
                 query = self.path.split("?", 1)[1] if "?" in self.path else ""
                 params = urllib.parse.parse_qs(query)
+                provider = params.get("provider", ["photon_nominatim"])[0].strip().lower()
                 q = params.get("q", [""])[0]
                 if not q:
                     self._send_json({"error": "missing query parameter q"}, 400)
                     return
                 try:
-                    req = urllib.request.Request(
-                        f"{NOMINATIM_URL}/search?q={urllib.parse.quote(q)}&format=jsonv2&limit=1",
-                        headers={"User-Agent": "localosm-web/1.0"}
-                    )
-                    with urllib.request.urlopen(req, timeout=5) as response:
-                        data = json.loads(response.read().decode("utf-8"))
-                    self._send_json({"results": data})
+                    if provider == "pelias":
+                        req = urllib.request.Request(
+                            f"{PELIAS_URL}/v1/search?text={urllib.parse.quote(q)}&size=1",
+                            headers={"User-Agent": "localosm-web/1.0"}
+                        )
+                        with urllib.request.urlopen(req, timeout=5) as response:
+                            data = json.loads(response.read().decode("utf-8"))
+                        features = data.get("features", []) if isinstance(data, dict) else []
+                        mapped = []
+                        for feature in features:
+                            coords = ((feature or {}).get("geometry") or {}).get("coordinates") or []
+                            props = (feature or {}).get("properties") or {}
+                            if not isinstance(coords, list) or len(coords) != 2:
+                                continue
+                            mapped.append({
+                                "lat": coords[1],
+                                "lon": coords[0],
+                                "display_name": props.get("label") or props.get("name") or q,
+                            })
+                        self._send_json({"results": mapped})
+                    else:
+                        req = urllib.request.Request(
+                            f"{NOMINATIM_URL}/search?q={urllib.parse.quote(q)}&format=jsonv2&limit=1",
+                            headers={"User-Agent": "localosm-web/1.0"}
+                        )
+                        with urllib.request.urlopen(req, timeout=5) as response:
+                            data = json.loads(response.read().decode("utf-8"))
+                        self._send_json({"results": data})
                 except Exception as exc:  # noqa: BLE001
-                    self._send_json({"error": self._friendly_error(exc, "Nominatim (Geocoding)")}, 502)
+                    self._send_json({"error": self._friendly_error(exc, "Pelias" if provider == "pelias" else "Nominatim (Geocoding)")}, 502)
                 return
 
             if self.path.startswith("/api/reverse"):
                 query = self.path.split("?", 1)[1] if "?" in self.path else ""
                 params = urllib.parse.parse_qs(query)
+                provider = params.get("provider", ["photon_nominatim"])[0].strip().lower()
                 lat = params.get("lat", [""])[0]
                 lon = params.get("lon", [""])[0]
                 if not lat or not lon:
                     self._send_json({"error": "missing lat/lon parameters"}, 400)
                     return
                 try:
-                    req = urllib.request.Request(
-                        f"{NOMINATIM_URL}/reverse?lat={urllib.parse.quote(lat)}&lon={urllib.parse.quote(lon)}&format=jsonv2",
-                        headers={"User-Agent": "localosm-web/1.0"}
-                    )
-                    with urllib.request.urlopen(req, timeout=5) as response:
-                        data = json.loads(response.read().decode("utf-8"))
-                    self._send_json({"display_name": data.get("display_name", "")})
+                    if provider == "pelias":
+                        req = urllib.request.Request(
+                            f"{PELIAS_URL}/v1/reverse?point.lat={urllib.parse.quote(lat)}&point.lon={urllib.parse.quote(lon)}&size=1",
+                            headers={"User-Agent": "localosm-web/1.0"}
+                        )
+                        with urllib.request.urlopen(req, timeout=5) as response:
+                            data = json.loads(response.read().decode("utf-8"))
+                        features = data.get("features", []) if isinstance(data, dict) else []
+                        first = features[0] if features else {}
+                        props = (first or {}).get("properties") or {}
+                        self._send_json({"display_name": props.get("label") or props.get("name") or ""})
+                    else:
+                        req = urllib.request.Request(
+                            f"{NOMINATIM_URL}/reverse?lat={urllib.parse.quote(lat)}&lon={urllib.parse.quote(lon)}&format=jsonv2",
+                            headers={"User-Agent": "localosm-web/1.0"}
+                        )
+                        with urllib.request.urlopen(req, timeout=5) as response:
+                            data = json.loads(response.read().decode("utf-8"))
+                        self._send_json({"display_name": data.get("display_name", "")})
                 except Exception as exc:  # noqa: BLE001
-                    self._send_json({"error": self._friendly_error(exc, "Nominatim (Reverse Geocoding)")}, 502)
+                    self._send_json({"error": self._friendly_error(exc, "Pelias" if provider == "pelias" else "Nominatim (Reverse Geocoding)")}, 502)
                 return
 
             if self.path.startswith("/api/photon-search"):
@@ -1821,6 +1881,8 @@ spec:
               value: "http://nominatim.osm.svc.cluster.local:8080"
             - name: PHOTON_URL
               value: "http://photon.osm.svc.cluster.local:2322"
+            - name: PELIAS_URL
+              value: "http://pelias.osm.svc.cluster.local:4000"
             - name: TILESERVER_URL
               value: "http://tileserver-gl.osm.svc.cluster.local"
             - name: STATUS_URL

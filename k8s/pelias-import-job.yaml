@@ -1,0 +1,167 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pelias-import
+  namespace: osm
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  activeDeadlineSeconds: 172800
+  template:
+    spec:
+      serviceAccountName: planetiler-import
+      nodeSelector:
+        osm: "true"
+      restartPolicy: Never
+      initContainers:
+        - name: pelias-schema
+          image: pelias/schema:master
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              node <<'NODE'
+              const http = require('http');
+              let tries = 0;
+              const maxTries = 120;
+              function check() {
+                tries += 1;
+                const req = http.get('http://pelias.osm.svc.cluster.local:9200/_cluster/health?wait_for_status=yellow&timeout=1s', (res) => {
+                  if (res.statusCode >= 200 && res.statusCode < 300) {
+                    process.exit(0);
+                  }
+                  if (tries >= maxTries) {
+                    console.error(`Elasticsearch not ready (status ${res.statusCode})`);
+                    process.exit(1);
+                  }
+                  setTimeout(check, 5000);
+                });
+                req.on('error', () => {
+                  if (tries >= maxTries) {
+                    console.error('Elasticsearch not reachable');
+                    process.exit(1);
+                  }
+                  setTimeout(check, 5000);
+                });
+              }
+              check();
+              NODE
+              INDEX_NAME="pelias-$(date +%Y%m%d%H%M%S)"
+              cp /config/import-pelias-template.json /work/pelias.json
+              sed -i "s/__PELIAS_INDEX__/${INDEX_NAME}/g" /work/pelias.json
+              echo "${INDEX_NAME}" > /work/index-name
+              export PELIAS_CONFIG=/work/pelias.json
+              ./bin/create_index
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "1"
+          volumeMounts:
+            - name: pelias-config
+              mountPath: /config
+            - name: work
+              mountPath: /work
+      containers:
+        - name: pelias-import
+          image: pelias/openstreetmap:master
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              INDEX_NAME="$(cat /work/index-name)"
+              mkdir -p /osm-temp/pelias/work/openstreetmap /osm-temp/pelias/work/leveldb
+              ln -sfn /planet/europa.osm.pbf /osm-temp/pelias/work/openstreetmap/europa.osm.pbf
+              export PELIAS_CONFIG=/work/pelias.json
+              npm start
+
+              node <<'NODE'
+              const fs = require('fs');
+              const http = require('http');
+
+              const indexName = fs.readFileSync('/work/index-name', 'utf8').trim();
+              const aliasName = 'pelias';
+
+              function request(method, path, body) {
+                return new Promise((resolve, reject) => {
+                  const payload = body ? Buffer.from(JSON.stringify(body)) : null;
+                  const req = http.request({
+                    hostname: 'pelias.osm.svc.cluster.local',
+                    port: 9200,
+                    path,
+                    method,
+                    headers: payload ? { 'Content-Type': 'application/json', 'Content-Length': payload.length } : {}
+                  }, (res) => {
+                    const chunks = [];
+                    res.on('data', (c) => chunks.push(c));
+                    res.on('end', () => {
+                      const text = Buffer.concat(chunks).toString('utf8');
+                      if (res.statusCode >= 200 && res.statusCode < 300) {
+                        resolve(text ? JSON.parse(text) : {});
+                        return;
+                      }
+                      if (res.statusCode === 404) {
+                        resolve({ _notFound: true });
+                        return;
+                      }
+                      reject(new Error(`HTTP ${res.statusCode}: ${text}`));
+                    });
+                  });
+                  req.on('error', reject);
+                  if (payload) req.write(payload);
+                  req.end();
+                });
+              }
+
+              async function run() {
+                const aliasInfo = await request('GET', `/_alias/${aliasName}`);
+                const actions = [];
+                if (!aliasInfo._notFound) {
+                  Object.keys(aliasInfo).forEach((idx) => {
+                    actions.push({ remove: { index: idx, alias: aliasName } });
+                  });
+                }
+                actions.push({ add: { index: indexName, alias: aliasName } });
+                await request('POST', '/_aliases', { actions });
+              }
+
+              run().catch((err) => {
+                console.error(err && err.stack ? err.stack : String(err));
+                process.exit(1);
+              });
+              NODE
+
+              find /osm-temp/pelias/work -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          resources:
+            requests:
+              memory: "6Gi"
+              cpu: "3"
+            limits:
+              memory: "24Gi"
+              cpu: "12"
+          volumeMounts:
+            - name: planet
+              mountPath: /planet
+              readOnly: true
+            - name: osm-temp
+              mountPath: /osm-temp
+            - name: pelias-config
+              mountPath: /config
+            - name: work
+              mountPath: /work
+      volumes:
+        - name: planet
+          persistentVolumeClaim:
+            claimName: planet
+        - name: osm-temp
+          persistentVolumeClaim:
+            claimName: osm-temp
+        - name: pelias-config
+          configMap:
+            name: osm-pelias-config
+        - name: work
+          emptyDir: {}
