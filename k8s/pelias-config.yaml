@@ -11,7 +11,7 @@ data:
         "timestamp": false
       },
       "esclient": {
-        "apiVersion": "7.5",
+        "apiVersion": "7.17",
         "hosts": [
           {
             "host": "127.0.0.1",
@@ -34,7 +34,7 @@ data:
         "timestamp": false
       },
       "esclient": {
-        "apiVersion": "7.5",
+        "apiVersion": "7.17",
         "hosts": [
           {
             "host": "pelias-elasticsearch.osm.svc.cluster.local",

@@ -86,6 +86,35 @@ spec:
               set -euo pipefail
               INDEX_NAME="$(cat /work/index-name)"
               PBF_FILE="$(cat /work/pbf-file)"
+              FAILED=1
+              cleanup_failed_import() {
+                if [ "${FAILED}" != "1" ]; then
+                  return
+                fi
+                node <<'NODE'
+                const fs = require('fs');
+                const http = require('http');
+                const ES_HOST = 'pelias-elasticsearch.osm.svc.cluster.local';
+                const indexName = fs.readFileSync('/work/index-name', 'utf8').trim();
+                const req = http.request({
+                  hostname: ES_HOST,
+                  port: 9200,
+                  path: `/${encodeURIComponent(indexName)}`,
+                  method: 'DELETE',
+                }, (res) => {
+                  if (res.statusCode >= 200 && res.statusCode < 300) {
+                    process.exit(0);
+                  }
+                  if (res.statusCode === 404) {
+                    process.exit(0);
+                  }
+                  process.exit(1);
+                });
+                req.on('error', () => process.exit(1));
+                req.end();
+                NODE
+              }
+              trap cleanup_failed_import EXIT
               mkdir -p /osm-temp/pelias/work/openstreetmap /osm-temp/pelias/work/leveldb
               ln -sfn "/planet/${PBF_FILE}" "/osm-temp/pelias/work/openstreetmap/${PBF_FILE}"
               export PELIAS_CONFIG=/work/pelias.json
@@ -148,6 +177,8 @@ spec:
               });
               NODE
 
+              FAILED=0
+              trap - EXIT
               find /osm-temp/pelias/work -mindepth 1 -maxdepth 1 -exec rm -rf {} +
           resources:
             requests:
