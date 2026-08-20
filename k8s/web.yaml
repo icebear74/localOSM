@@ -35,12 +35,15 @@ data:
         return cleaned
 
     SERVICE_TARGETS = _load_service_targets()
-    VALHALLA_URL = SERVICE_TARGETS.get("valhalla", os.environ.get("VALHALLA_URL", "http://valhalla.osm.svc.cluster.local:8002"))
-    NOMINATIM_URL = SERVICE_TARGETS.get("nominatim", os.environ.get("NOMINATIM_URL", "http://nominatim.osm.svc.cluster.local:8080"))
-    PHOTON_URL = SERVICE_TARGETS.get("photon", os.environ.get("PHOTON_URL", "http://photon.osm.svc.cluster.local:2322"))
-    PELIAS_URL = SERVICE_TARGETS.get("pelias", os.environ.get("PELIAS_URL", "http://pelias.osm.svc.cluster.local:4000"))
-    TILESERVER_URL = SERVICE_TARGETS.get("tileserver", os.environ.get("TILESERVER_URL", "http://tileserver-gl.osm.svc.cluster.local"))
-    STATUS_URL = SERVICE_TARGETS.get("status", os.environ.get("STATUS_URL", ""))
+    # SERVICE_TARGETS contains browser-facing URLs (for links/buttons). Backend
+    # proxy requests from this pod should continue to use the cluster-internal
+    # service URLs from the explicit environment variables below.
+    VALHALLA_URL = os.environ.get("VALHALLA_URL", "http://valhalla.osm.svc.cluster.local:8002")
+    NOMINATIM_URL = os.environ.get("NOMINATIM_URL", "http://nominatim.osm.svc.cluster.local:8080")
+    PHOTON_URL = os.environ.get("PHOTON_URL", "http://photon.osm.svc.cluster.local:2322")
+    PELIAS_URL = os.environ.get("PELIAS_URL", "http://pelias.osm.svc.cluster.local:4000")
+    TILESERVER_URL = os.environ.get("TILESERVER_URL", "http://tileserver-gl.osm.svc.cluster.local")
+    STATUS_URL = os.environ.get("STATUS_URL", "")
     PLANET_UPDATE_REQUEST_FILE = os.environ.get("PLANET_UPDATE_REQUEST_FILE", "/state/planet-update-request.flag")
     PLANET_UPDATE_STATUS_FILE = os.environ.get("PLANET_UPDATE_STATUS_FILE", "/status/planet-update.json")
 
@@ -401,8 +404,8 @@ data:
     } catch (e) {}
     function resolveServiceTarget(key, fallbackBase) {
       var configured = (SERVICE_TARGETS && SERVICE_TARGETS[key]) || '';
-      if (configured) return configured.replace(/\/+$/, '');
-      return fallbackBase.replace(/\/+$/, '');
+      if (configured) return configured.replace(/\\/+$/, '');
+      return fallbackBase.replace(/\\/+$/, '');
     }
     function updateLinks() {
       var baseUrl = location.protocol + '//' + location.hostname;
@@ -1353,8 +1356,7 @@ data:
                 return
 
             if self.path == "/favicon.ico":
-                # Return a minimal favicon (or 404, browsers don't care much)
-                self.send_response(404)
+                self.send_response(204)
                 self.end_headers()
                 return
 
