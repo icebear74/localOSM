@@ -286,10 +286,10 @@ spec:
               const fs = require('fs');
               const http = require('http');
               const ES_HOST = process.env.PELIAS_ELASTICSEARCH_HOST || 'pelias-elasticsearch.osm.svc.cluster.local';
- 
+
               const indexName = fs.readFileSync('/work/index-name', 'utf8').trim();
               const aliasName = 'pelias';
- 
+
               function request(method, path, body) {
                 return new Promise((resolve, reject) => {
                   const payload = body ? Buffer.from(JSON.stringify(body)) : null;
@@ -320,7 +320,7 @@ spec:
                   req.end();
                 });
               }
- 
+
               async function run() {
                 const aliasInfo = await request('GET', `/_alias/${aliasName}`);
                 const actions = [];
@@ -332,7 +332,7 @@ spec:
                 actions.push({ add: { index: indexName, alias: aliasName } });
                 await request('POST', '/_aliases', { actions });
               }
- 
+
               run().catch((err) => {
                 console.error(err && err.stack ? err.stack : String(err));
                 process.exit(1);

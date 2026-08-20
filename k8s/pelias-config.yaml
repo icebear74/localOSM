@@ -70,7 +70,7 @@ data:
       },
       "imports": {
         "adminLookup": {
-          "enabled": "__PELIAS_ADMIN_LOOKUP__"
+          "enabled": __PELIAS_ADMIN_LOOKUP__
         },
         "openstreetmap": {
           "datapath": "__PELIAS_TEMP_ROOT__/work/openstreetmap",

@@ -50,7 +50,7 @@ data:
               .setAttr("subclass", feature.getString("attraction", feature.getString("tourism", "attraction")))
               .setMinZoom(9);
           }
- 
+
           if (feature.isPoint()) {
             features.point("poi")
               .setAttr("class", "attraction")
@@ -59,7 +59,7 @@ data:
               .setMinZoom(12);
           }
         }
- 
+
         if (feature.canBeLine() && (feature.hasTag("highway", "construction") || feature.hasTag("construction"))) {
           features.line("transportation")
             .setBufferPixels(4)
