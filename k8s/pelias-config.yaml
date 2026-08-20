@@ -23,7 +23,6 @@ data:
   # into pelias_wof_root, then imports it with `pelias import wof`.
   # Set pelias_wof_enabled to "false" to skip WOF enrichment entirely.
   pelias_wof_enabled: "true"
-  pelias_wof_sqlite: "true"
   pelias_wof_root: /osm-temp/pelias/wof
   runtime-pelias.json: |
     {

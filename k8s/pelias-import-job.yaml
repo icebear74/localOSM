@@ -133,7 +133,7 @@ spec:
             - name: work
               mountPath: /work
         - name: pelias-wof-download
-          image: pelias/whosonfirst:master
+          image: pelias/whosonfirst:v8.5.0
           imagePullPolicy: IfNotPresent
           env:
             - name: PELIAS_WOF_ENABLED
@@ -166,7 +166,7 @@ spec:
             - name: work
               mountPath: /work
         - name: pelias-wof-import
-          image: pelias/whosonfirst:master
+          image: pelias/whosonfirst:v8.5.0
           imagePullPolicy: IfNotPresent
           env:
             - name: PELIAS_WOF_ENABLED
