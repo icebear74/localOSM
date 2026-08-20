@@ -15,6 +15,14 @@ data:
   # Default to POI-relevant OSM tags so parks, attractions and medical sites
   # are searchable by their names in Pelias.
   pelias_extra_tags: "amenity,leisure,tourism,healthcare"
+  # Enable Pelias admin lookup so places can be associated with countries, regions
+  # and cities when Who's On First data is present.
+  pelias_admin_lookup: "true"
+  # Optional Who's On First import configuration. Set this to "true" and provide
+  # a local WOF file inside pelias_wof_root to enable admin lookup enrichment.
+  pelias_wof_enabled: "false"
+  pelias_wof_root: /osm-temp/pelias/wof
+  pelias_wof_file: ""
   runtime-pelias.json: |
     {
       "logger": {
@@ -62,7 +70,7 @@ data:
       },
       "imports": {
         "adminLookup": {
-          "enabled": false
+          "enabled": "__PELIAS_ADMIN_LOOKUP__"
         },
         "openstreetmap": {
           "datapath": "__PELIAS_TEMP_ROOT__/work/openstreetmap",
@@ -70,6 +78,14 @@ data:
           "import": [
             {
               "filename": "__PELIAS_PBF_FILE__"
+            }
+          ]
+        },
+        "whosonfirst": {
+          "datapath": "__PELIAS_WOF_ROOT__",
+          "import": [
+            {
+              "filename": "__PELIAS_WOF_FILE__"
             }
           ]
         }

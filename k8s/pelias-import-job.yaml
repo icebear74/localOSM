@@ -40,6 +40,26 @@ spec:
                 configMapKeyRef:
                   name: osm-pelias-config
                   key: elasticsearch-host
+            - name: PELIAS_ADMIN_LOOKUP
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-pelias-config
+                  key: pelias_admin_lookup
+            - name: PELIAS_WOF_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-pelias-config
+                  key: pelias_wof_enabled
+            - name: PELIAS_WOF_ROOT
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-pelias-config
+                  key: pelias_wof_root
+            - name: PELIAS_WOF_FILE
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-pelias-config
+                  key: pelias_wof_file
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -94,6 +114,9 @@ spec:
               sed -i "s|__PELIAS_PBF_FILE__|${PBF_FILE}|g" /work/pelias.json
               sed -i "s|__PELIAS_TEMP_ROOT__|${TEMP_ROOT}|g" /work/pelias.json
               sed -i "s|__PELIAS_ELASTICSEARCH_HOST__|${ES_HOST}|g" /work/pelias.json
+              sed -i "s|__PELIAS_ADMIN_LOOKUP__|${PELIAS_ADMIN_LOOKUP:-true}|g" /work/pelias.json
+              sed -i "s|__PELIAS_WOF_ROOT__|${PELIAS_WOF_ROOT:-/osm-temp/pelias/wof}|g" /work/pelias.json
+              sed -i "s|__PELIAS_WOF_FILE__|${PELIAS_WOF_FILE:-}|g" /work/pelias.json
               echo "${INDEX_NAME}" > /work/index-name
               echo "${PBF_FILE}" > /work/pbf-file
               echo "${PBF_ROOT}" > /work/pbf-root
@@ -145,13 +168,34 @@ spec:
                 configMapKeyRef:
                   name: osm-pelias-config
                   key: pelias_extra_tags
+            - name: PELIAS_ADMIN_LOOKUP
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-pelias-config
+                  key: pelias_admin_lookup
+            - name: PELIAS_WOF_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-pelias-config
+                  key: pelias_wof_enabled
+            - name: PELIAS_WOF_ROOT
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-pelias-config
+                  key: pelias_wof_root
+            - name: PELIAS_WOF_FILE
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-pelias-config
+                  key: pelias_wof_file
           command: ["/bin/sh", "-c"]
           args:
             - |
               set -eu
               TEMP_ROOT="${PELIAS_TEMP_ROOT:-/osm-temp/pelias}"
-              mkdir -p "${TEMP_ROOT}" "${TEMP_ROOT}/work/openstreetmap" "${TEMP_ROOT}/work/leveldb"
-              chown -R 1000:1000 "${TEMP_ROOT}" 2>/dev/null || true
+              WOF_ROOT="${PELIAS_WOF_ROOT:-/osm-temp/pelias/wof}"
+              mkdir -p "${TEMP_ROOT}" "${TEMP_ROOT}/work/openstreetmap" "${TEMP_ROOT}/work/leveldb" "${WOF_ROOT}"
+              chown -R 1000:1000 "${TEMP_ROOT}" "${WOF_ROOT}" 2>/dev/null || true
               INDEX_NAME="$(cat /work/index-name)"
               PBF_FILE="$(cat /work/pbf-file)"
               PBF_ROOT="${PELIAS_PBF_ROOT:-/planet}"
@@ -207,11 +251,31 @@ spec:
                 .filter(Boolean);
               const featureTags = extraTags.map((tag) => /[+~]/.test(tag) ? tag : `${tag}+name`);
               const venueTags = Array.from(new Set([...(config.imports?.openstreetmap?.layers?.venue?.tags || []), ...featureTags]));
+              const adminLookupEnabled = (process.env.PELIAS_ADMIN_LOOKUP || 'true').toLowerCase() === 'true';
+              const wofEnabled = (process.env.PELIAS_WOF_ENABLED || 'false').toLowerCase() === 'true';
+              const wofRoot = process.env.PELIAS_WOF_ROOT || '/osm-temp/pelias/wof';
+              const wofFile = (process.env.PELIAS_WOF_FILE || '').trim();
               config.imports = config.imports || {};
+              config.imports.adminLookup = config.imports.adminLookup || {};
+              config.imports.adminLookup.enabled = adminLookupEnabled;
               config.imports.openstreetmap = config.imports.openstreetmap || {};
               config.imports.openstreetmap.layers = config.imports.openstreetmap.layers || {};
               config.imports.openstreetmap.layers.venue = config.imports.openstreetmap.layers.venue || {};
               config.imports.openstreetmap.layers.venue.tags = venueTags;
+              if (wofEnabled && wofFile) {
+                const wofPath = require('path').join(wofRoot, wofFile);
+                if (fs.existsSync(wofPath)) {
+                  config.imports.whosonfirst = {
+                    datapath: wofRoot,
+                    import: [{ filename: wofFile }]
+                  };
+                } else {
+                  console.warn(`[WARN] WOF file not found at ${wofPath}; continuing without WOF enrichment.`);
+                  delete config.imports.whosonfirst;
+                }
+              } else {
+                delete config.imports.whosonfirst;
+              }
               fs.writeFileSync(path, JSON.stringify(config, null, 2));
               NODE
               npm start

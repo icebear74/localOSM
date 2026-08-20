@@ -129,14 +129,28 @@ The value is passed to Photon's `-extra-tags` import flag during
 the index with the configured tags.
  
 ### Tuning the Pelias index
- 
+  
 Pelias can also be configured with additional OSM venue tags via
 `k8s/pelias-config.yaml` (`ConfigMap osm-pelias-config`). Set
 `pelias_extra_tags` to a comma-separated list of tag keys such as
 `brand,network,operator`.
- 
+  
 Each tag is expanded to `<tag>+name` for the importer, so a re-run of the
 Pelias import job will rebuild the index with the configured tags.
+  
+For better place enrichment, Pelias now also supports admin lookup with
+Who's On First (WOF) data. Enable `pelias_admin_lookup: "true"` and provide a
+local WOF dataset file via `pelias_wof_enabled: "true"`,
+`pelias_wof_root`, and `pelias_wof_file`. The import job will use that data
+when present; without WOF data, Pelias can still index the OSM data, but the
+country/region/city enrichment will remain incomplete. This is the same
+one-time setup step required for accurate admin hierarchy data in Pelias.
+  
+This setup uses Pelias' built-in Elasticsearch-backed text search. It is a
+strong geocoding/full-text search stack, but it is not the same as a separate
+LLM-based semantic search layer. For this repository, the relevant setup step is
+therefore the extra tag indexing plus the WOF admin lookup, not an external
+AI model.
  
 ## URLs
 
