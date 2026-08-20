@@ -402,10 +402,15 @@ data:
     try {
       SERVICE_TARGETS = JSON.parse(document.getElementById('service-targets-json').textContent || '{}');
     } catch (e) {}
+    function trimTrailingSlashes(value) {
+      var text = String(value || '');
+      while (text.endsWith('/')) text = text.slice(0, -1);
+      return text;
+    }
     function resolveServiceTarget(key, fallbackBase) {
       var configured = (SERVICE_TARGETS && SERVICE_TARGETS[key]) || '';
-      if (configured) return configured.replace(/\\/+$/, '');
-      return fallbackBase.replace(/\\/+$/, '');
+      if (configured) return trimTrailingSlashes(configured);
+      return trimTrailingSlashes(fallbackBase);
     }
     function updateLinks() {
       var baseUrl = location.protocol + '//' + location.hostname;
@@ -1747,8 +1752,9 @@ data:
                 return
 
             if self.path.startswith("/api/pelias-search"):
-                # Search-as-you-type suggestions for the Pelias full-text search
-                # fields; queries Pelias directly and returns up to 10 results.
+                # Search-as-you-type suggestions for the Pelias fields; queries
+                # Pelias' autocomplete endpoint directly and returns up to 10
+                # results.
                 query = self.path.split("?", 1)[1] if "?" in self.path else ""
                 params = urllib.parse.parse_qs(query)
                 q = params.get("q", [""])[0]
@@ -1758,7 +1764,7 @@ data:
                 limit = params.get("limit", ["10"])[0]
                 try:
                     req = urllib.request.Request(
-                        f"{PELIAS_URL}/v1/search?text={urllib.parse.quote(q)}&size={urllib.parse.quote(limit)}",
+                        f"{PELIAS_URL}/v1/autocomplete?text={urllib.parse.quote(q)}&size={urllib.parse.quote(limit)}",
                         headers={"User-Agent": "localosm-web/1.0"}
                     )
                     with urllib.request.urlopen(req, timeout=5) as response:
