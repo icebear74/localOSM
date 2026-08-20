@@ -84,11 +84,14 @@ data:
         .geocode-row button { white-space: nowrap; padding: 0 0.6rem; border: 1px solid #ccc; border-radius: 4px; background: #e9ecef; cursor: pointer; font-size: 0.8rem; }
         .photon-search { position: relative; }
         .photon-search input { border-color: #2c7ab5; }
-        .photon-results { position: absolute; z-index: 20; left: 0; right: 0; top: 100%; background: #fff; border: 1px solid #ccc;
+        .pelias-search { position: relative; }
+        .pelias-search input { border-color: #b55a2c; }
+        .photon-results, .pelias-results { position: absolute; z-index: 20; left: 0; right: 0; top: 100%; background: #fff; border: 1px solid #ccc;
                           border-top: none; border-radius: 0 0 4px 4px; max-height: 220px; overflow-y: auto; box-shadow: 0 4px 8px rgba(0,0,0,.15); display: none; }
-        .photon-results div { padding: 0.4rem 0.5rem; font-size: 0.8rem; cursor: pointer; border-bottom: 1px solid #eee; }
-        .photon-results div:last-child { border-bottom: none; }
-        .photon-results div:hover, .photon-results div.active { background: #eaf2f8; }
+        .photon-results div, .pelias-results div { padding: 0.4rem 0.5rem; font-size: 0.8rem; cursor: pointer; border-bottom: 1px solid #eee; }
+        .photon-results div:last-child, .pelias-results div:last-child { border-bottom: none; }
+        .photon-results div:hover, .photon-results div.active,
+        .pelias-results div:hover, .pelias-results div.active { background: #eaf2f8; }
         .hidden { display: none !important; }
         .advanced-options { display: none; }
         .advanced-options.visible { display: block; }
@@ -119,6 +122,12 @@ data:
                oninput="onPhotonInput('start')" onkeydown="onPhotonKeydown(event, 'start')">
         <div id="startPhotonResults" class="photon-results"></div>
       </div>
+      <div class="pelias-search provider-pelias-only">
+        <label>Volltextsuche (Pelias)</label>
+        <input id="startPelias" placeholder="Ab 3 Zeichen tippen ..." autocomplete="off"
+               oninput="onPeliasInput('start')" onkeydown="onPeliasKeydown(event, 'start')">
+        <div id="startPeliasResults" class="pelias-results"></div>
+      </div>
         <div>
           <label>Adresse suchen</label>
           <div class="geocode-row">
@@ -137,6 +146,12 @@ data:
           <input id="endPhoton" placeholder="Ab 3 Zeichen tippen ..." autocomplete="off"
                  oninput="onPhotonInput('end')" onkeydown="onPhotonKeydown(event, 'end')">
           <div id="endPhotonResults" class="photon-results"></div>
+        </div>
+        <div class="pelias-search provider-pelias-only">
+          <label>Volltextsuche (Pelias)</label>
+          <input id="endPelias" placeholder="Ab 3 Zeichen tippen ..." autocomplete="off"
+                 oninput="onPeliasInput('end')" onkeydown="onPeliasKeydown(event, 'end')">
+          <div id="endPeliasResults" class="pelias-results"></div>
         </div>
         <div>
           <label>Adresse suchen</label>
@@ -1019,12 +1034,20 @@ data:
     function updateGeocoderUi() {
       var provider = document.getElementById('geocoder-provider').value || 'photon_nominatim';
       var photonOnly = provider !== 'pelias';
+      var peliasOnly = provider === 'pelias';
       document.querySelectorAll('.provider-photon-only').forEach(function(el) {
         el.classList.toggle('hidden', !photonOnly);
+      });
+      document.querySelectorAll('.provider-pelias-only').forEach(function(el) {
+        el.classList.toggle('hidden', !peliasOnly);
       });
       if (!photonOnly) {
         closePhotonResults('start');
         closePhotonResults('end');
+      }
+      if (!peliasOnly) {
+        closePeliasResults('start');
+        closePeliasResults('end');
       }
     }
 
@@ -1066,7 +1089,7 @@ data:
       var state = photonState[which];
       var myRequestId = ++state.requestId;
       try {
-        var resp = await fetch('/api/photon-search?q=' + encodeURIComponent(query) + '&limit=8');
+        var resp = await fetch('/api/photon-search?q=' + encodeURIComponent(query) + '&limit=10');
         var data = await resp.json();
         // Ignore stale responses from a previous, slower request.
         if (myRequestId !== state.requestId) return;
@@ -1174,9 +1197,112 @@ data:
       ['start', 'end'].forEach(function(which) {
         var wrap = document.getElementById(which + 'Photon').closest('.photon-search');
         if (wrap && !wrap.contains(event.target)) closePhotonResults(which);
+        var wrapP = document.getElementById(which + 'Pelias') && document.getElementById(which + 'Pelias').closest('.pelias-search');
+        if (wrapP && !wrapP.contains(event.target)) closePeliasResults(which);
       });
     });
     updateGeocoderUi();
+
+    // --- Pelias full-text search-as-you-type ---------------------------------
+    var peliasState = {
+      start: { timer: null, requestId: 0, items: [], active: -1 },
+      end:   { timer: null, requestId: 0, items: [], active: -1 }
+    };
+
+    function closePeliasResults(which) {
+      var box = document.getElementById(which + 'PeliasResults');
+      if (!box) return;
+      box.style.display = 'none';
+      box.innerHTML = '';
+      peliasState[which].items = [];
+      peliasState[which].active = -1;
+    }
+
+    function onPeliasInput(which) {
+      var state = peliasState[which];
+      var query = document.getElementById(which + 'Pelias').value.trim();
+      clearTimeout(state.timer);
+      if (query.length < 3) {
+        closePeliasResults(which);
+        return;
+      }
+      state.timer = setTimeout(function() { runPeliasSearch(which, query); }, 250);
+    }
+
+    async function runPeliasSearch(which, query) {
+      var state = peliasState[which];
+      var myRequestId = ++state.requestId;
+      try {
+        var resp = await fetch('/api/pelias-search?q=' + encodeURIComponent(query) + '&limit=10');
+        var data = await resp.json();
+        if (myRequestId !== state.requestId) return;
+        var items = (data.results || []);
+        state.items = items;
+        renderPeliasResults(which, items);
+      } catch (e) {
+        if (myRequestId !== state.requestId) return;
+        closePeliasResults(which);
+      }
+    }
+
+    function renderPeliasResults(which, items) {
+      var box = document.getElementById(which + 'PeliasResults');
+      var state = peliasState[which];
+      state.active = -1;
+      if (!items.length) {
+        box.innerHTML = '<div>Keine Treffer</div>';
+        box.style.display = 'block';
+        return;
+      }
+      box.innerHTML = '';
+      items.forEach(function(item, idx) {
+        var entry = document.createElement('div');
+        entry.textContent = item.display_name || 'Unbenannt';
+        entry.dataset.index = idx;
+        entry.onclick = function() { selectPeliasResult(which, idx); };
+        box.appendChild(entry);
+      });
+      box.style.display = 'block';
+    }
+
+    function onPeliasKeydown(event, which) {
+      var state = peliasState[which];
+      if (!state.items.length) return;
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        state.active = Math.min(state.active + 1, state.items.length - 1);
+        highlightPeliasResult(which);
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        state.active = Math.max(state.active - 1, 0);
+        highlightPeliasResult(which);
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        if (state.active >= 0) selectPeliasResult(which, state.active);
+      } else if (event.key === 'Escape') {
+        closePeliasResults(which);
+      }
+    }
+
+    function highlightPeliasResult(which) {
+      var box = document.getElementById(which + 'PeliasResults');
+      var state = peliasState[which];
+      Array.prototype.forEach.call(box.children, function(child, idx) {
+        child.classList.toggle('active', idx === state.active);
+      });
+    }
+
+    function selectPeliasResult(which, idx) {
+      var state = peliasState[which];
+      var item = state.items[idx];
+      closePeliasResults(which);
+      document.getElementById(which + 'Pelias').value = item.display_name || '';
+      document.getElementById(which + 'Addr').value = item.display_name || '';
+      setMarker(which, parseFloat(item.lat), parseFloat(item.lon));
+      map.flyTo({center: [parseFloat(item.lon), parseFloat(item.lat)], zoom: 15});
+      var box = document.getElementById('result-box');
+      box.innerHTML = '<span class="ok">&#10003; ' + (which === 'start' ? 'Start' : 'Ziel') + ' via Pelias gesetzt</span><br>' + esc(item.display_name || '');
+    }
 
     function esc(value) {
       return String(value).replace(/[&<>"']/g, function(c) {
@@ -1529,7 +1655,7 @@ data:
                 try:
                     if provider == "pelias":
                         req = urllib.request.Request(
-                            f"{PELIAS_URL}/v1/search?text={urllib.parse.quote(q)}&size=1",
+                            f"{PELIAS_URL}/v1/search?text={urllib.parse.quote(q)}&size=10",
                             headers={"User-Agent": "localosm-web/1.0"}
                         )
                         with urllib.request.urlopen(req, timeout=5) as response:
@@ -1605,7 +1731,7 @@ data:
                 if not q or len(q) < 3:
                     self._send_json({"error": "query parameter q must be at least 3 characters"}, 400)
                     return
-                limit = params.get("limit", ["8"])[0]
+                limit = params.get("limit", ["10"])[0]
                 try:
                     req = urllib.request.Request(
                         f"{PHOTON_URL}/api?q={urllib.parse.quote(q)}&limit={urllib.parse.quote(limit)}&lang=de",
@@ -1617,6 +1743,41 @@ data:
                 except Exception as exc:  # noqa: BLE001
                     self._send_json({"error": self._friendly_error(exc, "Photon (Volltextsuche)")}, 502)
                 return
+
+            if self.path.startswith("/api/pelias-search"):
+                # Search-as-you-type suggestions for the Pelias full-text search
+                # fields; queries Pelias directly and returns up to 10 results.
+                query = self.path.split("?", 1)[1] if "?" in self.path else ""
+                params = urllib.parse.parse_qs(query)
+                q = params.get("q", [""])[0]
+                if not q or len(q) < 3:
+                    self._send_json({"error": "query parameter q must be at least 3 characters"}, 400)
+                    return
+                limit = params.get("limit", ["10"])[0]
+                try:
+                    req = urllib.request.Request(
+                        f"{PELIAS_URL}/v1/search?text={urllib.parse.quote(q)}&size={urllib.parse.quote(limit)}",
+                        headers={"User-Agent": "localosm-web/1.0"}
+                    )
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        data = json.loads(response.read().decode("utf-8"))
+                    features = data.get("features", []) if isinstance(data, dict) else []
+                    mapped = []
+                    for feature in features:
+                        coords = ((feature or {}).get("geometry") or {}).get("coordinates") or []
+                        props = (feature or {}).get("properties") or {}
+                        if not isinstance(coords, list) or len(coords) != 2:
+                            continue
+                        mapped.append({
+                            "lat": coords[1],
+                            "lon": coords[0],
+                            "display_name": props.get("label") or props.get("name") or q,
+                        })
+                    self._send_json({"results": mapped})
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": self._friendly_error(exc, "Pelias (Volltextsuche)")}, 502)
+                return
+
 
             if self.path.startswith("/api/nominatim-lookup"):
                 # Resolves a Photon result's OSM id/type via Nominatim's
