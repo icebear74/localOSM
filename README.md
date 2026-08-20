@@ -154,6 +154,40 @@ LLM-based semantic search layer. For this repository, the relevant setup step is
 therefore the extra tag indexing plus the WOF admin lookup, not an external
 AI model.
 
+## Root CA certificate injection
+
+All pods include a `ca-injector` init container that can inject a custom Root CA certificate into every container at startup — useful when your cluster sits behind a corporate proxy or a custom PKI.
+
+### Setup
+
+```bash
+cp k8s/ca-bundle-config.yaml.example k8s/ca-bundle-config.yaml
+```
+
+Edit `k8s/ca-bundle-config.yaml`:
+
+```yaml
+data:
+  ca-enabled: "true"        # set to "true" to enable injection
+  ca.crt: |                 # paste your full PEM certificate(s) here
+    -----BEGIN CERTIFICATE-----
+    ...
+    -----END CERTIFICATE-----
+```
+
+`k8s/ca-bundle-config.yaml` is listed in `.gitignore` so the certificate is never committed.
+
+### How it works
+
+1. **`ca-injector`** (Alpine 3.20) always writes a valid cert bundle to `/ca-certs/ca.crt`:
+   - Disabled (or empty cert): copies the Alpine system CA bundle — all existing env vars still work.
+   - Enabled: appends the custom CA to the system bundle.
+2. All containers mount `/ca-certs` read-only and have these env vars set automatically:
+   `SSL_CERT_FILE`, `CURL_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`.
+3. Java containers (`eclipse-temurin`, `pelias/elasticsearch`) additionally get a **`java-ca-injector`** that creates a JKS keystore at `/ca-certs/cacerts` and sets `JAVA_TOOL_OPTIONS` to use it.
+
+If `ca-bundle-config.yaml` is absent when `deploy-osm.sh` runs, a disabled placeholder is created automatically from the example file.
+
 ## URLs
 
 - Status dashboard: `http://<node-ip>:30083/`

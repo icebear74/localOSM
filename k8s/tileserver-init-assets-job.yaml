@@ -15,32 +15,94 @@ spec:
         fsGroup: 1000
         runAsUser: 1000
       containers:
-        - name: tileserver-init-assets
-          image: alpine:3.20
-          command: ["/bin/sh", "-c"]
-          args:
-            - |
-              set -eu
-              mkdir -p /tileserver-gl
-              cp -R /bootstrap/. /tileserver-gl/
-          resources:
-            requests:
-              cpu: "50m"
-              memory: "256Mi"
-            limits:
-              cpu: "200m"
-              memory: "1Gi"
-          volumeMounts:
-            - name: bootstrap-assets
-              mountPath: /bootstrap
-              readOnly: true
-            - name: tileserver-gl
-              mountPath: /tileserver-gl
-      volumes:
+      - name: tileserver-init-assets
+        image: alpine:3.20
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -eu
+          mkdir -p /tileserver-gl
+          cp -R /bootstrap/. /tileserver-gl/
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "256Mi"
+          limits:
+            cpu: "200m"
+            memory: "1Gi"
+        volumeMounts:
         - name: bootstrap-assets
-          hostPath:
-            path: /mnt/OSM/tileserver/bootstrap
-            type: Directory
+          mountPath: /bootstrap
+          readOnly: true
         - name: tileserver-gl
-          persistentVolumeClaim:
-            claimName: tileserver-gl
+          mountPath: /tileserver-gl
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
+        env:
+        - name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
+      volumes:
+      - name: bootstrap-assets
+        hostPath:
+          path: /mnt/OSM/tileserver/bootstrap
+          type: Directory
+      - name: tileserver-gl
+        persistentVolumeClaim:
+          claimName: tileserver-gl
+      - name: ca-certs
+        emptyDir: {}
+      initContainers:
+      - name: ca-injector
+        image: alpine:3.20
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: CA_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: osm-ca-bundle
+              key: ca-enabled
+        - name: CA_CRT
+          valueFrom:
+            configMapKeyRef:
+              name: osm-ca-bundle
+              key: ca.crt
+        command:
+        - /bin/sh
+        - -c
+        args:
+        - |
+          set -eu
+          # Install system CA bundle (may be a no-op if already present).
+          apk add --no-cache ca-certificates >/dev/null 2>&1 || true
+          # Seed /ca-certs/ca.crt with the system bundle so env vars always point
+          # to a valid file, even when the custom CA is disabled.
+          if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+            cp /etc/ssl/certs/ca-certificates.crt /ca-certs/ca.crt
+          else
+            touch /ca-certs/ca.crt
+          fi
+          if [ "${CA_ENABLED}" = "true" ] && [ -n "${CA_CRT}" ]; then
+            # Append the custom Root CA to the bundle so public CAs stay trusted too.
+            printf '\n%s\n' "${CA_CRT}" >> /ca-certs/ca.crt
+            touch /ca-certs/ca-enabled
+            echo "[ca-injector] Custom CA appended to bundle at /ca-certs/ca.crt"
+          else
+            echo "[ca-injector] CA injection disabled; system bundle at /ca-certs/ca.crt"
+          fi
+        resources:
+          requests:
+            memory: 16Mi
+            cpu: 10m
+          limits:
+            memory: 64Mi
+            cpu: 50m
+        volumeMounts:
+        - name: ca-certs
+          mountPath: /ca-certs

@@ -14,85 +14,146 @@ spec:
       securityContext:
         fsGroup: 100
       containers:
-        - name: nominatim-promotion
-          image: mediagis/nominatim:4.5
-          imagePullPolicy: IfNotPresent
-          env:
-            - name: PGDATA
-              value: /source/nominatim/work/current
-            - name: PGDATA_TARGET_CURRENT
-              value: /target/current
-            - name: PGDATA_TARGET_STAGED
-              value: /target/staged
-            - name: PGDATA_TARGET_PREVIOUS
-              value: /target/previous
-          command: ["/bin/bash", "-c"]
-          args:
-            - |
-              set -euo pipefail
-              mkdir -p /source /target
-              if [ ! -f "${PGDATA}/PG_VERSION" ]; then
-                echo "ERROR: source database is missing at ${PGDATA}" >&2
-                exit 1
-              fi
-              rm -rf "${PGDATA_TARGET_STAGED}" "${PGDATA_TARGET_PREVIOUS}" 2>/dev/null || true
-              mkdir -p "${PGDATA_TARGET_STAGED}"
-              chown -R 100:100 "${PGDATA}" "${PGDATA_TARGET_STAGED}" 2>/dev/null || true
-              chmod 0700 "${PGDATA}" "${PGDATA_TARGET_STAGED}" 2>/dev/null || true
+      - name: nominatim-promotion
+        image: mediagis/nominatim:4.5
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: PGDATA
+          value: /source/nominatim/work/current
+        - name: PGDATA_TARGET_CURRENT
+          value: /target/current
+        - name: PGDATA_TARGET_STAGED
+          value: /target/staged
+        - name: PGDATA_TARGET_PREVIOUS
+          value: /target/previous
+        - name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          mkdir -p /source /target
+          if [ ! -f "${PGDATA}/PG_VERSION" ]; then
+            echo "ERROR: source database is missing at ${PGDATA}" >&2
+            exit 1
+          fi
+          rm -rf "${PGDATA_TARGET_STAGED}" "${PGDATA_TARGET_PREVIOUS}" 2>/dev/null || true
+          mkdir -p "${PGDATA_TARGET_STAGED}"
+          chown -R 100:100 "${PGDATA}" "${PGDATA_TARGET_STAGED}" 2>/dev/null || true
+          chmod 0700 "${PGDATA}" "${PGDATA_TARGET_STAGED}" 2>/dev/null || true
 
-              echo "Starting PostgreSQL to run cleanup on the temporary database..."
-              mkdir -p /etc/postgresql/16/main/conf.d
-              cat > /etc/postgresql/16/main/conf.d/zz-promotion.conf <<EOF
-              data_directory = '${PGDATA}'
-              EOF
-              service postgresql start
-              for _ in $(seq 1 60); do
-                if pg_isready -q; then
-                  break
-                fi
-                sleep 2
-              done
-              if ! pg_isready -q; then
-                echo "ERROR: PostgreSQL could not be started for cleanup." >&2
-                exit 1
-              fi
+          echo "Starting PostgreSQL to run cleanup on the temporary database..."
+          mkdir -p /etc/postgresql/16/main/conf.d
+          cat > /etc/postgresql/16/main/conf.d/zz-promotion.conf <<EOF
+          data_directory = '${PGDATA}'
+          EOF
+          service postgresql start
+          for _ in $(seq 1 60); do
+            if pg_isready -q; then
+              break
+            fi
+            sleep 2
+          done
+          if ! pg_isready -q; then
+            echo "ERROR: PostgreSQL could not be started for cleanup." >&2
+            exit 1
+          fi
 
-              echo "Running database cleanup and compaction on the temporary database..."
-              sudo -u postgres psql -v ON_ERROR_STOP=1 -d nominatim <<'SQL'
-              VACUUM (FULL, ANALYZE);
-              REINDEX DATABASE nominatim;
-              CHECKPOINT;
-              SQL
+          echo "Running database cleanup and compaction on the temporary database..."
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d nominatim <<'SQL'
+          VACUUM (FULL, ANALYZE);
+          REINDEX DATABASE nominatim;
+          CHECKPOINT;
+          SQL
 
-              echo "Stopping PostgreSQL before copying the data directory..."
-              service postgresql stop
+          echo "Stopping PostgreSQL before copying the data directory..."
+          service postgresql stop
 
-              echo "Copying the compacted database into the production volume..."
-              cp -a "${PGDATA}/." "${PGDATA_TARGET_STAGED}/"
-              chown -R 100:100 "${PGDATA_TARGET_STAGED}"
-              touch "${PGDATA_TARGET_STAGED}/import-finished"
+          echo "Copying the compacted database into the production volume..."
+          cp -a "${PGDATA}/." "${PGDATA_TARGET_STAGED}/"
+          chown -R 100:100 "${PGDATA_TARGET_STAGED}"
+          touch "${PGDATA_TARGET_STAGED}/import-finished"
 
-              if [ -d "${PGDATA_TARGET_CURRENT}" ]; then
-                mv "${PGDATA_TARGET_CURRENT}" "${PGDATA_TARGET_PREVIOUS}"
-              fi
-              mv "${PGDATA_TARGET_STAGED}" "${PGDATA_TARGET_CURRENT}"
-              fstrim -av /target >/dev/null 2>&1 || true
-          resources:
-            requests:
-              cpu: "2"
-              memory: "4Gi"
-            limits:
-              cpu: "4"
-              memory: "8Gi"
-          volumeMounts:
-            - name: osm-temp
-              mountPath: /source
-            - name: nominatim
-              mountPath: /target
-      volumes:
+          if [ -d "${PGDATA_TARGET_CURRENT}" ]; then
+            mv "${PGDATA_TARGET_CURRENT}" "${PGDATA_TARGET_PREVIOUS}"
+          fi
+          mv "${PGDATA_TARGET_STAGED}" "${PGDATA_TARGET_CURRENT}"
+          fstrim -av /target >/dev/null 2>&1 || true
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+        volumeMounts:
         - name: osm-temp
-          persistentVolumeClaim:
-            claimName: osm-temp
+          mountPath: /source
         - name: nominatim
-          persistentVolumeClaim:
-            claimName: nominatim
+          mountPath: /target
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
+      volumes:
+      - name: osm-temp
+        persistentVolumeClaim:
+          claimName: osm-temp
+      - name: nominatim
+        persistentVolumeClaim:
+          claimName: nominatim
+      - name: ca-certs
+        emptyDir: {}
+      initContainers:
+      - name: ca-injector
+        image: alpine:3.20
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: CA_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: osm-ca-bundle
+              key: ca-enabled
+        - name: CA_CRT
+          valueFrom:
+            configMapKeyRef:
+              name: osm-ca-bundle
+              key: ca.crt
+        command:
+        - /bin/sh
+        - -c
+        args:
+        - |
+          set -eu
+          # Install system CA bundle (may be a no-op if already present).
+          apk add --no-cache ca-certificates >/dev/null 2>&1 || true
+          # Seed /ca-certs/ca.crt with the system bundle so env vars always point
+          # to a valid file, even when the custom CA is disabled.
+          if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+            cp /etc/ssl/certs/ca-certificates.crt /ca-certs/ca.crt
+          else
+            touch /ca-certs/ca.crt
+          fi
+          if [ "${CA_ENABLED}" = "true" ] && [ -n "${CA_CRT}" ]; then
+            # Append the custom Root CA to the bundle so public CAs stay trusted too.
+            printf '\n%s\n' "${CA_CRT}" >> /ca-certs/ca.crt
+            touch /ca-certs/ca-enabled
+            echo "[ca-injector] Custom CA appended to bundle at /ca-certs/ca.crt"
+          else
+            echo "[ca-injector] CA injection disabled; system bundle at /ca-certs/ca.crt"
+          fi
+        resources:
+          requests:
+            memory: 16Mi
+            cpu: 10m
+          limits:
+            memory: 64Mi
+            cpu: 50m
+        volumeMounts:
+        - name: ca-certs
+          mountPath: /ca-certs

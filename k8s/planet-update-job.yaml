@@ -23,87 +23,159 @@ spec:
         runAsUser: 1000
       # Init-container: Duplikatschutz – verhindert Start wenn ein planet-update-Job bereits läuft
       initContainers:
-        - name: preflight-dedup
-          image: bitnami/kubectl:latest
-          command: ["/bin/sh", "-c"]
-          args:
-            - |
-              set -e
-              echo "=== Planet-Update: Duplikatschutz-Prüfung ==="
-              # Zähle aktive (nicht-abgeschlossene) planet-update Jobs
-              ACTIVE=$(kubectl get pods -n osm -l osm-job-type=planet-update \
-                --field-selector=status.phase=Running \
-                --no-headers 2>/dev/null | wc -l | tr -d ' ')
-              echo "Aktive planet-update Pods: ${ACTIVE}"
-              # Dieser Init-Container selbst läuft bereits, also müssen >= 1 weitere aktiv sein
-              if [ "${ACTIVE}" -gt 1 ]; then
-                echo "ERROR: Es läuft bereits ein planet-update Job. Abbruch." >&2
-                exit 1
-              fi
-              echo "Kein doppelter planet-update Job gefunden. Weiter."
-          resources:
-            requests:
-              cpu: "50m"
-              memory: "64Mi"
-            limits:
-              cpu: "200m"
-              memory: "128Mi"
+      - name: ca-injector
+        image: alpine:3.20
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: CA_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: osm-ca-bundle
+              key: ca-enabled
+        - name: CA_CRT
+          valueFrom:
+            configMapKeyRef:
+              name: osm-ca-bundle
+              key: ca.crt
+        command:
+        - /bin/sh
+        - -c
+        args:
+        - |
+          set -eu
+          # Install system CA bundle (may be a no-op if already present).
+          apk add --no-cache ca-certificates >/dev/null 2>&1 || true
+          # Seed /ca-certs/ca.crt with the system bundle so env vars always point
+          # to a valid file, even when the custom CA is disabled.
+          if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+            cp /etc/ssl/certs/ca-certificates.crt /ca-certs/ca.crt
+          else
+            touch /ca-certs/ca.crt
+          fi
+          if [ "${CA_ENABLED}" = "true" ] && [ -n "${CA_CRT}" ]; then
+            # Append the custom Root CA to the bundle so public CAs stay trusted too.
+            printf '\n%s\n' "${CA_CRT}" >> /ca-certs/ca.crt
+            touch /ca-certs/ca-enabled
+            echo "[ca-injector] Custom CA appended to bundle at /ca-certs/ca.crt"
+          else
+            echo "[ca-injector] CA injection disabled; system bundle at /ca-certs/ca.crt"
+          fi
+        resources:
+          requests:
+            memory: 16Mi
+            cpu: 10m
+          limits:
+            memory: 64Mi
+            cpu: 50m
+        volumeMounts:
+        - name: ca-certs
+          mountPath: /ca-certs
+      - name: preflight-dedup
+        image: bitnami/kubectl:latest
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -e
+          echo "=== Planet-Update: Duplikatschutz-Prüfung ==="
+          # Zähle aktive (nicht-abgeschlossene) planet-update Jobs
+          ACTIVE=$(kubectl get pods -n osm -l osm-job-type=planet-update \
+            --field-selector=status.phase=Running \
+            --no-headers 2>/dev/null | wc -l | tr -d ' ')
+          echo "Aktive planet-update Pods: ${ACTIVE}"
+          # Dieser Init-Container selbst läuft bereits, also müssen >= 1 weitere aktiv sein
+          if [ "${ACTIVE}" -gt 1 ]; then
+            echo "ERROR: Es läuft bereits ein planet-update Job. Abbruch." >&2
+            exit 1
+          fi
+          echo "Kein doppelter planet-update Job gefunden. Weiter."
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "200m"
+            memory: "128Mi"
+        volumeMounts:
+        - &id005
+          name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
+        env:
+        - &id001
+          name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - &id002
+          name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - &id003
+          name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - &id004
+          name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
       containers:
-        - name: planet-update
+      - name: planet-update
           # Das Image wird aus auto-update/Dockerfile gebaut.
           # Ersetze den Image-Namen mit dem tatsächlichen Registry-Pfad.
-          image: 127.0.0.1:5000/planet-update:latest
-          imagePullPolicy: Always
-          env:
-            - name: WORK_DIR
-              value: /work
-            - name: CONF_DIR
-              value: /conf
-            - name: STATUS_DIR
-              value: /status
-            - name: PLANET_DOWNLOAD_URL
-              value: https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf
-          resources:
-            requests:
-              memory: "8Gi"
-              cpu: "4"
-            limits:
-              memory: "32Gi"
-              cpu: "16"
-          volumeMounts:
-            - name: planet-work
-              mountPath: /work
-            - name: geojson-config
-              mountPath: /conf/mein_europa.geojson
-              subPath: mein_europa.geojson
-              readOnly: true
-            - name: geojson-config
-              mountPath: /conf/japan.geojson
-              subPath: japan.geojson
-              readOnly: true
-            - name: geojson-config
-              mountPath: /conf/privat.osm
-              subPath: privat.osm
-              readOnly: true
-            - name: filter-config
-              mountPath: /conf/welt_filter.txt
-              subPath: welt_filter.txt
-              readOnly: true
-            - name: status
-              mountPath: /status
-      volumes:
+        image: 127.0.0.1:5000/planet-update:latest
+        imagePullPolicy: Always
+        env:
+        - name: WORK_DIR
+          value: /work
+        - name: CONF_DIR
+          value: /conf
+        - name: STATUS_DIR
+          value: /status
+        - name: PLANET_DOWNLOAD_URL
+          value: https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf
+        - *id001
+        - *id002
+        - *id003
+        - *id004
+        resources:
+          requests:
+            memory: "8Gi"
+            cpu: "4"
+          limits:
+            memory: "32Gi"
+            cpu: "16"
+        volumeMounts:
         - name: planet-work
-          persistentVolumeClaim:
-            claimName: planet
-        - name: status
-          persistentVolumeClaim:
-            claimName: osm-status
+          mountPath: /work
         - name: geojson-config
-          configMap:
-            name: osm-auto-update-geojson-config
+          mountPath: /conf/mein_europa.geojson
+          subPath: mein_europa.geojson
+          readOnly: true
+        - name: geojson-config
+          mountPath: /conf/japan.geojson
+          subPath: japan.geojson
+          readOnly: true
+        - name: geojson-config
+          mountPath: /conf/privat.osm
+          subPath: privat.osm
+          readOnly: true
         - name: filter-config
-          configMap:
-            name: osm-auto-update-filter-config
+          mountPath: /conf/welt_filter.txt
+          subPath: welt_filter.txt
+          readOnly: true
+        - name: status
+          mountPath: /status
+        - *id005
+      volumes:
+      - name: planet-work
+        persistentVolumeClaim:
+          claimName: planet
+      - name: status
+        persistentVolumeClaim:
+          claimName: osm-status
+      - name: geojson-config
+        configMap:
+          name: osm-auto-update-geojson-config
+      - name: filter-config
+        configMap:
+          name: osm-auto-update-filter-config
+      - name: ca-certs
+        emptyDir: {}
 ---
 # Optional: CronJob für wöchentliches automatisches Planet-Update (z.B. jeden Montag um 02:00 UTC)
 apiVersion: batch/v1
@@ -133,57 +205,118 @@ spec:
             fsGroup: 1000
             runAsUser: 1000
           containers:
-            - name: planet-update
-              image: 127.0.0.1:5000/planet-update:latest
-              imagePullPolicy: IfNotPresent
-              env:
-                - name: WORK_DIR
-                  value: /work
-                - name: CONF_DIR
-                  value: /conf
-                - name: STATUS_DIR
-                  value: /status
-                - name: PLANET_DOWNLOAD_URL
-                  value: https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf
-              resources:
-                requests:
-                  memory: "8Gi"
-                  cpu: "4"
-                limits:
-                  memory: "32Gi"
-                  cpu: "16"
-              volumeMounts:
-                - name: planet-work
-                  mountPath: /work
-                - name: geojson-config
-                  mountPath: /conf/mein_europa.geojson
-                  subPath: mein_europa.geojson
-                  readOnly: true
-                - name: geojson-config
-                  mountPath: /conf/japan.geojson
-                  subPath: japan.geojson
-                  readOnly: true
-                - name: geojson-config
-                  mountPath: /conf/privat.osm
-                  subPath: privat.osm
-                  readOnly: true
-                - name: filter-config
-                  mountPath: /conf/welt_filter.txt
-                  subPath: welt_filter.txt
-                  readOnly: true
-                - name: status
-                  mountPath: /status
-          volumes:
+          - name: planet-update
+            image: 127.0.0.1:5000/planet-update:latest
+            imagePullPolicy: IfNotPresent
+            env:
+            - name: WORK_DIR
+              value: /work
+            - name: CONF_DIR
+              value: /conf
+            - name: STATUS_DIR
+              value: /status
+            - name: PLANET_DOWNLOAD_URL
+              value: https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf
+            - name: SSL_CERT_FILE
+              value: /ca-certs/ca.crt
+            - name: CURL_CA_BUNDLE
+              value: /ca-certs/ca.crt
+            - name: REQUESTS_CA_BUNDLE
+              value: /ca-certs/ca.crt
+            - name: NODE_EXTRA_CA_CERTS
+              value: /ca-certs/ca.crt
+            resources:
+              requests:
+                memory: "8Gi"
+                cpu: "4"
+              limits:
+                memory: "32Gi"
+                cpu: "16"
+            volumeMounts:
             - name: planet-work
-              persistentVolumeClaim:
-                claimName: planet
-            - name: status
-              persistentVolumeClaim:
-                claimName: osm-status
-
+              mountPath: /work
             - name: geojson-config
-              configMap:
-                name: osm-auto-update-geojson-config
+              mountPath: /conf/mein_europa.geojson
+              subPath: mein_europa.geojson
+              readOnly: true
+            - name: geojson-config
+              mountPath: /conf/japan.geojson
+              subPath: japan.geojson
+              readOnly: true
+            - name: geojson-config
+              mountPath: /conf/privat.osm
+              subPath: privat.osm
+              readOnly: true
             - name: filter-config
-              configMap:
-                name: osm-auto-update-filter-config
+              mountPath: /conf/welt_filter.txt
+              subPath: welt_filter.txt
+              readOnly: true
+            - name: status
+              mountPath: /status
+            - name: ca-certs
+              mountPath: /ca-certs
+              readOnly: true
+          volumes:
+          - name: planet-work
+            persistentVolumeClaim:
+              claimName: planet
+          - name: status
+            persistentVolumeClaim:
+              claimName: osm-status
+
+          - name: geojson-config
+            configMap:
+              name: osm-auto-update-geojson-config
+          - name: filter-config
+            configMap:
+              name: osm-auto-update-filter-config
+          - name: ca-certs
+            emptyDir: {}
+          initContainers:
+          - name: ca-injector
+            image: alpine:3.20
+            imagePullPolicy: IfNotPresent
+            env:
+            - name: CA_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-ca-bundle
+                  key: ca-enabled
+            - name: CA_CRT
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-ca-bundle
+                  key: ca.crt
+            command:
+            - /bin/sh
+            - -c
+            args:
+            - |
+              set -eu
+              # Install system CA bundle (may be a no-op if already present).
+              apk add --no-cache ca-certificates >/dev/null 2>&1 || true
+              # Seed /ca-certs/ca.crt with the system bundle so env vars always point
+              # to a valid file, even when the custom CA is disabled.
+              if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+                cp /etc/ssl/certs/ca-certificates.crt /ca-certs/ca.crt
+              else
+                touch /ca-certs/ca.crt
+              fi
+              if [ "${CA_ENABLED}" = "true" ] && [ -n "${CA_CRT}" ]; then
+                # Append the custom Root CA to the bundle so public CAs stay trusted too.
+                printf '\n%s\n' "${CA_CRT}" >> /ca-certs/ca.crt
+                touch /ca-certs/ca-enabled
+                echo "[ca-injector] Custom CA appended to bundle at /ca-certs/ca.crt"
+              else
+                echo "[ca-injector] CA injection disabled; system bundle at /ca-certs/ca.crt"
+              fi
+            resources:
+              requests:
+                memory: 16Mi
+                cpu: 10m
+              limits:
+                memory: 64Mi
+                cpu: 50m
+            volumeMounts:
+            - name: ca-certs
+              mountPath: /ca-certs

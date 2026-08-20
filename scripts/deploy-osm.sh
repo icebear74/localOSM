@@ -314,6 +314,17 @@ echo ">>> Applying Kubernetes manifests …"
 terminate_existing_pods
 kubectl apply -f "${BASE_DIR}/manifests/namespace.yaml"
 
+# Apply the Root CA bundle ConfigMap before any pods start.
+# The real file is git-ignored; create it from the example if it is missing.
+CA_BUNDLE_SRC="${REPO_ROOT}/k8s/ca-bundle-config.yaml"
+CA_BUNDLE_EXAMPLE="${REPO_ROOT}/k8s/ca-bundle-config.yaml.example"
+if [ ! -f "${CA_BUNDLE_SRC}" ]; then
+  echo "[WARN] k8s/ca-bundle-config.yaml not found; creating a disabled placeholder from the example."
+  echo "[WARN] To enable CA injection copy the example, set ca-enabled: \"true\", and paste your PEM cert."
+  ${SUDO} cp "${CA_BUNDLE_EXAMPLE}" "${CA_BUNDLE_SRC}"
+fi
+kubectl apply -f "${CA_BUNDLE_SRC}"
+
 if [ -f "${REPO_ROOT}/k8s/style.json" ]; then
   style_files=("--from-file=style.json=${REPO_ROOT}/k8s/style.json")
   if [ -f "${REPO_ROOT}/k8s/dark_style.json" ]; then

@@ -709,7 +709,7 @@ data:
       }
       container.innerHTML = '<div class="section-title">Route-Anweisungen</div><ol style="margin:0.25rem 0 0 1rem;padding:0;display:grid;gap:0.35rem">' + instructions.map(function(text) { return '<li>' + esc(text) + '</li>'; }).join('') + '</ol>';
     }
-  
+
     var ROUTE_DEFAULTS_KEY = 'localosm.routing.defaults';
 
     function getRouteDefaults() {
@@ -929,7 +929,7 @@ data:
       toggle.addEventListener('change', syncAdvancedInputStates);
     });
     applyRouteDefaults();
-  
+
     async function doRoute() {
       var box = document.getElementById('result-box');
       var payload = getPayload();
@@ -1830,105 +1830,176 @@ spec:
       nodeSelector:
         osm: "true"
       initContainers:
-        - name: fetch-static
-          image: alpine:3.20
-          command: ["/bin/sh", "-c"]
-          args:
-            - |
-              MLGL_VERSION="4.7.1"
-              mkdir -p /data/static
-              if [ ! -f /data/static/maplibre-gl.js ]; then
-                echo "Downloading maplibre-gl.js v${MLGL_VERSION} (one-time setup)..."
-                wget -q -O /data/static/maplibre-gl.js \
-                  "https://unpkg.com/maplibre-gl@${MLGL_VERSION}/dist/maplibre-gl.js" \
-                  || { rm -f /data/static/maplibre-gl.js; echo "ERROR: maplibre-gl.js download failed"; exit 1; }
-              fi
-              if [ ! -f /data/static/maplibre-gl.css ]; then
-                echo "Downloading maplibre-gl.css v${MLGL_VERSION} (one-time setup)..."
-                wget -q -O /data/static/maplibre-gl.css \
-                  "https://unpkg.com/maplibre-gl@${MLGL_VERSION}/dist/maplibre-gl.css" \
-                  || { rm -f /data/static/maplibre-gl.css; echo "ERROR: maplibre-gl.css download failed"; exit 1; }
-              fi
-              echo "Static assets ready."
-          resources:
-            requests:
-              cpu: "50m"
-              memory: "64Mi"
-            limits:
-              cpu: "200m"
-              memory: "128Mi"
-          volumeMounts:
-            - name: web-static
-              mountPath: /data/static
-      containers:
-        - name: web
-          image: python:3.12-alpine
-          imagePullPolicy: IfNotPresent
-          command: ["/bin/sh", "-c"]
-          args:
-            - |
-              cp /config/app.py /tmp/app.py
-              python /tmp/app.py
-          resources:
-            requests:
-              cpu: "100m"
-              memory: "128Mi"
-            limits:
-              cpu: "300m"
-              memory: "256Mi"
-          env:
-            - name: WEB_HOST
-              value: "0.0.0.0"
-            - name: WEB_PORT
-              value: "8080"
-            - name: VALHALLA_URL
-              value: "http://valhalla.osm.svc.cluster.local:8002"
-            - name: NOMINATIM_URL
-              value: "http://nominatim.osm.svc.cluster.local:8080"
-            - name: PHOTON_URL
-              value: "http://photon.osm.svc.cluster.local:2322"
-            - name: PELIAS_URL
-              value: "http://pelias.osm.svc.cluster.local:4000"
-            - name: TILESERVER_URL
-              value: "http://tileserver-gl.osm.svc.cluster.local"
-            - name: STATUS_URL
-              value: ""
-            - name: SERVICE_TARGETS_JSON
-              valueFrom:
-                configMapKeyRef:
-                  name: osm-service-targets
-                  key: service-targets.json
-            - name: PLANET_UPDATE_REQUEST_FILE
-              value: "/state/planet-update-request.flag"
-            - name: PLANET_UPDATE_STATUS_FILE
-              value: "/status/planet-update.json"
-          ports:
-            - containerPort: 8080
-          volumeMounts:
-            - name: app-code
-              mountPath: /config
-            - name: web-static
-              mountPath: /data/static
-            - name: state
-              mountPath: /state
-            - name: planet-status
-              mountPath: /status
-      volumes:
-        - name: app-code
-          configMap:
-            name: osm-web-app
+      - name: ca-injector
+        image: alpine:3.20
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: CA_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: osm-ca-bundle
+              key: ca-enabled
+        - name: CA_CRT
+          valueFrom:
+            configMapKeyRef:
+              name: osm-ca-bundle
+              key: ca.crt
+        command:
+        - /bin/sh
+        - -c
+        args:
+        - |
+          set -eu
+          # Install system CA bundle (may be a no-op if already present).
+          apk add --no-cache ca-certificates >/dev/null 2>&1 || true
+          # Seed /ca-certs/ca.crt with the system bundle so env vars always point
+          # to a valid file, even when the custom CA is disabled.
+          if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+            cp /etc/ssl/certs/ca-certificates.crt /ca-certs/ca.crt
+          else
+            touch /ca-certs/ca.crt
+          fi
+          if [ "${CA_ENABLED}" = "true" ] && [ -n "${CA_CRT}" ]; then
+            # Append the custom Root CA to the bundle so public CAs stay trusted too.
+            printf '\n%s\n' "${CA_CRT}" >> /ca-certs/ca.crt
+            touch /ca-certs/ca-enabled
+            echo "[ca-injector] Custom CA appended to bundle at /ca-certs/ca.crt"
+          else
+            echo "[ca-injector] CA injection disabled; system bundle at /ca-certs/ca.crt"
+          fi
+        resources:
+          requests:
+            memory: 16Mi
+            cpu: 10m
+          limits:
+            memory: 64Mi
+            cpu: 50m
+        volumeMounts:
+        - name: ca-certs
+          mountPath: /ca-certs
+      - name: fetch-static
+        image: alpine:3.20
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          MLGL_VERSION="4.7.1"
+          mkdir -p /data/static
+          if [ ! -f /data/static/maplibre-gl.js ]; then
+            echo "Downloading maplibre-gl.js v${MLGL_VERSION} (one-time setup)..."
+            wget -q -O /data/static/maplibre-gl.js \
+              "https://unpkg.com/maplibre-gl@${MLGL_VERSION}/dist/maplibre-gl.js" \
+              || { rm -f /data/static/maplibre-gl.js; echo "ERROR: maplibre-gl.js download failed"; exit 1; }
+          fi
+          if [ ! -f /data/static/maplibre-gl.css ]; then
+            echo "Downloading maplibre-gl.css v${MLGL_VERSION} (one-time setup)..."
+            wget -q -O /data/static/maplibre-gl.css \
+              "https://unpkg.com/maplibre-gl@${MLGL_VERSION}/dist/maplibre-gl.css" \
+              || { rm -f /data/static/maplibre-gl.css; echo "ERROR: maplibre-gl.css download failed"; exit 1; }
+          fi
+          echo "Static assets ready."
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "200m"
+            memory: "128Mi"
+        volumeMounts:
         - name: web-static
-          hostPath:
-            path: /mnt/OSM/web-static
-            type: DirectoryOrCreate
+          mountPath: /data/static
+        - &id005
+          name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
+        env:
+        - &id001
+          name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - &id002
+          name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - &id003
+          name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - &id004
+          name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
+      containers:
+      - name: web
+        image: python:3.12-alpine
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          cp /config/app.py /tmp/app.py
+          python /tmp/app.py
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "300m"
+            memory: "256Mi"
+        env:
+        - name: WEB_HOST
+          value: "0.0.0.0"
+        - name: WEB_PORT
+          value: "8080"
+        - name: VALHALLA_URL
+          value: "http://valhalla.osm.svc.cluster.local:8002"
+        - name: NOMINATIM_URL
+          value: "http://nominatim.osm.svc.cluster.local:8080"
+        - name: PHOTON_URL
+          value: "http://photon.osm.svc.cluster.local:2322"
+        - name: PELIAS_URL
+          value: "http://pelias.osm.svc.cluster.local:4000"
+        - name: TILESERVER_URL
+          value: "http://tileserver-gl.osm.svc.cluster.local"
+        - name: STATUS_URL
+          value: ""
+        - name: SERVICE_TARGETS_JSON
+          valueFrom:
+            configMapKeyRef:
+              name: osm-service-targets
+              key: service-targets.json
+        - name: PLANET_UPDATE_REQUEST_FILE
+          value: "/state/planet-update-request.flag"
+        - name: PLANET_UPDATE_STATUS_FILE
+          value: "/status/planet-update.json"
+        - *id001
+        - *id002
+        - *id003
+        - *id004
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: app-code
+          mountPath: /config
+        - name: web-static
+          mountPath: /data/static
         - name: state
-          hostPath:
-            path: /mnt/OSM/status
-            type: DirectoryOrCreate
+          mountPath: /state
         - name: planet-status
-          hostPath:
-            path: /mnt/OSM/status
-            type: DirectoryOrCreate
+          mountPath: /status
+        - *id005
+      volumes:
+      - name: app-code
+        configMap:
+          name: osm-web-app
+      - name: web-static
+        hostPath:
+          path: /mnt/OSM/web-static
+          type: DirectoryOrCreate
+      - name: state
+        hostPath:
+          path: /mnt/OSM/status
+          type: DirectoryOrCreate
+      - name: planet-status
+        hostPath:
+          path: /mnt/OSM/status
+          type: DirectoryOrCreate
+      - name: ca-certs
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -1940,7 +2011,7 @@ spec:
   selector:
     app: web
   ports:
-    - name: http
-      port: 8080
-      targetPort: 8080
-      nodePort: 30084
+  - name: http
+    port: 8080
+    targetPort: 8080
+    nodePort: 30084

@@ -40,98 +40,161 @@ spec:
       # exactly the crash-recovery/timeout loop this is meant to avoid.
       terminationGracePeriodSeconds: 3660
       initContainers:
-        - name: wait-for-data
-          image: busybox:1.36
-          env:
-            - name: PGDATA
-              value: /nominatim-data/current
-          command: ["/bin/sh", "-c"]
-          args:
-            - |
-              trap 'echo "Terminating wait script..."; exit 0' TERM INT
-              PGDATA_ROOT="$(dirname "${PGDATA}")"
-              DB="${PGDATA}/PG_VERSION"
-              IMPORT_FINISHED="${PGDATA}/import-finished"
-              STAGING_DB="${PGDATA_ROOT}/staging/PG_VERSION"
-              STAGING_IMPORT_FINISHED="${PGDATA_ROOT}/staging/import-finished"
-              LAST_MISSING=""
-              until { [ -f "$DB" ] && [ -f "$IMPORT_FINISHED" ]; } || { [ -f "$STAGING_DB" ] && [ -f "$STAGING_IMPORT_FINISHED" ]; }; do
-                CURRENT_READY=false
-                STAGING_READY=false
-                CURRENT_DIR_PRESENT=false
-                STAGING_DIR_PRESENT=false
-                if [ -d "${PGDATA}" ] && [ -n "$(ls -A "${PGDATA}" 2>/dev/null)" ]; then
-                  CURRENT_DIR_PRESENT=true
-                fi
-                if [ -d "${PGDATA_ROOT}/staging" ] && [ -n "$(ls -A "${PGDATA_ROOT}/staging" 2>/dev/null)" ]; then
-                  STAGING_DIR_PRESENT=true
-                fi
-                [ -f "$DB" ] && [ -f "$IMPORT_FINISHED" ] && CURRENT_READY=true
-                [ -f "$STAGING_DB" ] && [ -f "$STAGING_IMPORT_FINISHED" ] && STAGING_READY=true
-                if [ "$CURRENT_DIR_PRESENT" != true ] && [ "$STAGING_DIR_PRESENT" != true ]; then
-                  echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') No active or staged Nominatim database found under ${PGDATA_ROOT}; refusing to start an import from the deployment pod."
-                  exit 1
-                fi
-                MISSING=""
-                if [ "$CURRENT_READY" != true ]; then
-                  [ -f "$DB" ] || MISSING="$DB"
-                  [ -f "$IMPORT_FINISHED" ] || MISSING="${MISSING:+$MISSING, }$IMPORT_FINISHED"
-                fi
-                if [ "$STAGING_READY" != true ]; then
-                  [ -f "$STAGING_DB" ] || MISSING="${MISSING:+$MISSING, }$STAGING_DB"
-                  [ -f "$STAGING_IMPORT_FINISHED" ] || MISSING="${MISSING:+$MISSING, }$STAGING_IMPORT_FINISHED"
-                fi
-                if [ "$MISSING" != "$LAST_MISSING" ]; then
-                  echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for imported Nominatim database markers at $MISSING ..."
-                  LAST_MISSING="$MISSING"
-                fi
-                sleep 5
-              done
-              echo "Database ready — starting Nominatim."
-          resources:
-            requests:
-              cpu: "10m"
-              memory: "16Mi"
-            limits:
-              cpu: "50m"
-              memory: "64Mi"
-          volumeMounts:
-            - name: nominatim-data
-              mountPath: /nominatim-data
-              readOnly: true
+      - name: ca-injector
+        image: alpine:3.20
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: CA_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: osm-ca-bundle
+              key: ca-enabled
+        - name: CA_CRT
+          valueFrom:
+            configMapKeyRef:
+              name: osm-ca-bundle
+              key: ca.crt
+        command:
+        - /bin/sh
+        - -c
+        args:
+        - |
+          set -eu
+          # Install system CA bundle (may be a no-op if already present).
+          apk add --no-cache ca-certificates >/dev/null 2>&1 || true
+          # Seed /ca-certs/ca.crt with the system bundle so env vars always point
+          # to a valid file, even when the custom CA is disabled.
+          if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+            cp /etc/ssl/certs/ca-certificates.crt /ca-certs/ca.crt
+          else
+            touch /ca-certs/ca.crt
+          fi
+          if [ "${CA_ENABLED}" = "true" ] && [ -n "${CA_CRT}" ]; then
+            # Append the custom Root CA to the bundle so public CAs stay trusted too.
+            printf '\n%s\n' "${CA_CRT}" >> /ca-certs/ca.crt
+            touch /ca-certs/ca-enabled
+            echo "[ca-injector] Custom CA appended to bundle at /ca-certs/ca.crt"
+          else
+            echo "[ca-injector] CA injection disabled; system bundle at /ca-certs/ca.crt"
+          fi
+        resources:
+          requests:
+            memory: 16Mi
+            cpu: 10m
+          limits:
+            memory: 64Mi
+            cpu: 50m
+        volumeMounts:
+        - name: ca-certs
+          mountPath: /ca-certs
+      - name: wait-for-data
+        image: busybox:1.36
+        env:
+        - name: PGDATA
+          value: /nominatim-data/current
+        - &id001
+          name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - &id002
+          name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - &id003
+          name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - &id004
+          name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          trap 'echo "Terminating wait script..."; exit 0' TERM INT
+          PGDATA_ROOT="$(dirname "${PGDATA}")"
+          DB="${PGDATA}/PG_VERSION"
+          IMPORT_FINISHED="${PGDATA}/import-finished"
+          STAGING_DB="${PGDATA_ROOT}/staging/PG_VERSION"
+          STAGING_IMPORT_FINISHED="${PGDATA_ROOT}/staging/import-finished"
+          LAST_MISSING=""
+          until { [ -f "$DB" ] && [ -f "$IMPORT_FINISHED" ]; } || { [ -f "$STAGING_DB" ] && [ -f "$STAGING_IMPORT_FINISHED" ]; }; do
+            CURRENT_READY=false
+            STAGING_READY=false
+            CURRENT_DIR_PRESENT=false
+            STAGING_DIR_PRESENT=false
+            if [ -d "${PGDATA}" ] && [ -n "$(ls -A "${PGDATA}" 2>/dev/null)" ]; then
+              CURRENT_DIR_PRESENT=true
+            fi
+            if [ -d "${PGDATA_ROOT}/staging" ] && [ -n "$(ls -A "${PGDATA_ROOT}/staging" 2>/dev/null)" ]; then
+              STAGING_DIR_PRESENT=true
+            fi
+            [ -f "$DB" ] && [ -f "$IMPORT_FINISHED" ] && CURRENT_READY=true
+            [ -f "$STAGING_DB" ] && [ -f "$STAGING_IMPORT_FINISHED" ] && STAGING_READY=true
+            if [ "$CURRENT_DIR_PRESENT" != true ] && [ "$STAGING_DIR_PRESENT" != true ]; then
+              echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') No active or staged Nominatim database found under ${PGDATA_ROOT}; refusing to start an import from the deployment pod."
+              exit 1
+            fi
+            MISSING=""
+            if [ "$CURRENT_READY" != true ]; then
+              [ -f "$DB" ] || MISSING="$DB"
+              [ -f "$IMPORT_FINISHED" ] || MISSING="${MISSING:+$MISSING, }$IMPORT_FINISHED"
+            fi
+            if [ "$STAGING_READY" != true ]; then
+              [ -f "$STAGING_DB" ] || MISSING="${MISSING:+$MISSING, }$STAGING_DB"
+              [ -f "$STAGING_IMPORT_FINISHED" ] || MISSING="${MISSING:+$MISSING, }$STAGING_IMPORT_FINISHED"
+            fi
+            if [ "$MISSING" != "$LAST_MISSING" ]; then
+              echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for imported Nominatim database markers at $MISSING ..."
+              LAST_MISSING="$MISSING"
+            fi
+            sleep 5
+          done
+          echo "Database ready — starting Nominatim."
+        resources:
+          requests:
+            cpu: "10m"
+            memory: "16Mi"
+          limits:
+            cpu: "50m"
+            memory: "64Mi"
+        volumeMounts:
+        - name: nominatim-data
+          mountPath: /nominatim-data
+          readOnly: true
+        - &id005
+          name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
       containers:
-        - name: nominatim
-          image: mediagis/nominatim:4.5
-          imagePullPolicy: IfNotPresent
-          env:
-            - name: NOMINATIM_PASSWORD
-              valueFrom:
-                configMapKeyRef:
-                  name: osm-nominatim-import-config
-                  key: import_password
-            - name: THREADS
-              valueFrom:
-                configMapKeyRef:
-                  name: osm-nominatim-import-config
-                  key: import_threads
+      - name: nominatim
+        image: mediagis/nominatim:4.5
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: NOMINATIM_PASSWORD
+          valueFrom:
+            configMapKeyRef:
+              name: osm-nominatim-import-config
+              key: import_password
+        - name: THREADS
+          valueFrom:
+            configMapKeyRef:
+              name: osm-nominatim-import-config
+              key: import_threads
             # config.sh (invoked by the image's start.sh) unconditionally requires either
             # PBF_URL or PBF_PATH to be set, even though the actual import already ran via
             # nominatim-import-job.yaml and start.sh only uses this file when the
             # import-finished marker is missing. Without it the container crash-loops.
-            - name: PBF_PATH
-              value: /planet/europa.osm.pbf
-            - name: PHOTON_DB_USER
-              valueFrom:
-                configMapKeyRef:
-                  name: osm-photon-config
-                  key: photon_db_user
-            - name: PHOTON_DB_PASSWORD
-              valueFrom:
-                configMapKeyRef:
-                  name: osm-photon-config
-                  key: photon_db_password
-            - name: PGDATA
-              value: /nominatim-data/current
+        - name: PBF_PATH
+          value: /planet/europa.osm.pbf
+        - name: PHOTON_DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: osm-photon-config
+              key: photon_db_user
+        - name: PHOTON_DB_PASSWORD
+          valueFrom:
+            configMapKeyRef:
+              name: osm-photon-config
+              key: photon_db_password
+        - name: PGDATA
+          value: /nominatim-data/current
             # pg_ctl (invoked internally by `service postgresql start`/`stop`
             # via pg_ctlcluster) defaults to only waiting 60 seconds for
             # Postgres to become ready/stop. On this planet-scale database a
@@ -141,180 +204,187 @@ spec:
             # time" and crash-loops the whole container (start.sh runs with
             # `set -e`). Raise it well above worst-case recovery time; must
             # stay below terminationGracePeriodSeconds above.
-            - name: PGCTLTIMEOUT
-              value: "3600"
-          command: ["/bin/bash", "-c"]
-          args:
-            - |
-              set -euo pipefail
-              # start.sh invokes `service postgresql start`, which runs
-              # pg_ctlcluster(1) (Debian's postgresql-common wrapper). That
-              # wrapper unconditionally replaces its *entire* inherited
-              # environment with only the contents of the cluster's
-              # /etc/postgresql/16/main/environment file (plus LANG), so the
-              # PGCTLTIMEOUT container env var above never actually reaches
-              # pg_ctl and the crash-recovery timeout fix silently has no
-              # effect (pg_ctl keeps using its 60s default, still causing
-              # "pg_ctl: server did not start in time" on long WAL replays).
-              # pg_ctlcluster does honor a separate pg_ctl.conf file though,
-              # whose "pg_ctl_options" value is appended verbatim to the
-              # pg_ctl command line, so set the timeout there instead.
-              PG_CTL_CONF=/etc/postgresql/16/main/pg_ctl.conf
-              LEGACY_PGDATA_DIR=/var/lib/postgresql/16/main
-              LEGACY_IMPORT_FINISHED="${LEGACY_PGDATA_DIR}/import-finished"
-              mkdir -p "$(dirname "${PG_CTL_CONF}")"
-              echo "pg_ctl_options = '-t ${PGCTLTIMEOUT}'" > "${PG_CTL_CONF}"
-              PG_DATA_DIR="${PGDATA:-/var/lib/postgresql/16/main}"
-              PG_DATA_ROOT="$(dirname "${PG_DATA_DIR}")"
-              STAGING_DATA_DIR="${PG_DATA_ROOT}/staging"
-              CURRENT_DATA_DIR="${PG_DATA_DIR}"
-              PREVIOUS_DATA_DIR="${PG_DATA_ROOT}/previous"
-              mkdir -p "${PG_DATA_DIR}"
-              mkdir -p /etc/postgresql/16/main/conf.d
-              cat > /etc/postgresql/16/main/conf.d/zz-nominatim-data.conf <<EOF
-              data_directory = '${PG_DATA_DIR}'
-              EOF
-              chown -R 100:100 "${PG_DATA_DIR}" 2>/dev/null || true
-              if [ -d "${STAGING_DATA_DIR}" ] && [ -f "${STAGING_DATA_DIR}/PG_VERSION" ] && [ -f "${STAGING_DATA_DIR}/import-finished" ]; then
-                echo "Promoting staged Nominatim data from ${STAGING_DATA_DIR} to ${CURRENT_DATA_DIR}"
-                if [ -d "${CURRENT_DATA_DIR}" ]; then
-                  rm -rf "${PREVIOUS_DATA_DIR}" 2>/dev/null || true
-                  mv "${CURRENT_DATA_DIR}" "${PREVIOUS_DATA_DIR}"
-                fi
-                if ! mv "${STAGING_DATA_DIR}" "${CURRENT_DATA_DIR}"; then
-                  echo "ERROR: failed to promote staged Nominatim data" >&2
-                  exit 1
-                fi
-                chown -R 100:100 "${CURRENT_DATA_DIR}" 2>/dev/null || true
-                chmod 0700 "${CURRENT_DATA_DIR}" 2>/dev/null || true
-                touch "${CURRENT_DATA_DIR}/import-finished"
-                fstrim -av "${PG_DATA_ROOT}" >/dev/null 2>&1 || true
+        - name: PGCTLTIMEOUT
+          value: "3600"
+        - *id001
+        - *id002
+        - *id003
+        - *id004
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          # start.sh invokes `service postgresql start`, which runs
+          # pg_ctlcluster(1) (Debian's postgresql-common wrapper). That
+          # wrapper unconditionally replaces its *entire* inherited
+          # environment with only the contents of the cluster's
+          # /etc/postgresql/16/main/environment file (plus LANG), so the
+          # PGCTLTIMEOUT container env var above never actually reaches
+          # pg_ctl and the crash-recovery timeout fix silently has no
+          # effect (pg_ctl keeps using its 60s default, still causing
+          # "pg_ctl: server did not start in time" on long WAL replays).
+          # pg_ctlcluster does honor a separate pg_ctl.conf file though,
+          # whose "pg_ctl_options" value is appended verbatim to the
+          # pg_ctl command line, so set the timeout there instead.
+          PG_CTL_CONF=/etc/postgresql/16/main/pg_ctl.conf
+          LEGACY_PGDATA_DIR=/var/lib/postgresql/16/main
+          LEGACY_IMPORT_FINISHED="${LEGACY_PGDATA_DIR}/import-finished"
+          mkdir -p "$(dirname "${PG_CTL_CONF}")"
+          echo "pg_ctl_options = '-t ${PGCTLTIMEOUT}'" > "${PG_CTL_CONF}"
+          PG_DATA_DIR="${PGDATA:-/var/lib/postgresql/16/main}"
+          PG_DATA_ROOT="$(dirname "${PG_DATA_DIR}")"
+          STAGING_DATA_DIR="${PG_DATA_ROOT}/staging"
+          CURRENT_DATA_DIR="${PG_DATA_DIR}"
+          PREVIOUS_DATA_DIR="${PG_DATA_ROOT}/previous"
+          mkdir -p "${PG_DATA_DIR}"
+          mkdir -p /etc/postgresql/16/main/conf.d
+          cat > /etc/postgresql/16/main/conf.d/zz-nominatim-data.conf <<EOF
+          data_directory = '${PG_DATA_DIR}'
+          EOF
+          chown -R 100:100 "${PG_DATA_DIR}" 2>/dev/null || true
+          if [ -d "${STAGING_DATA_DIR}" ] && [ -f "${STAGING_DATA_DIR}/PG_VERSION" ] && [ -f "${STAGING_DATA_DIR}/import-finished" ]; then
+            echo "Promoting staged Nominatim data from ${STAGING_DATA_DIR} to ${CURRENT_DATA_DIR}"
+            if [ -d "${CURRENT_DATA_DIR}" ]; then
+              rm -rf "${PREVIOUS_DATA_DIR}" 2>/dev/null || true
+              mv "${CURRENT_DATA_DIR}" "${PREVIOUS_DATA_DIR}"
+            fi
+            if ! mv "${STAGING_DATA_DIR}" "${CURRENT_DATA_DIR}"; then
+              echo "ERROR: failed to promote staged Nominatim data" >&2
+              exit 1
+            fi
+            chown -R 100:100 "${CURRENT_DATA_DIR}" 2>/dev/null || true
+            chmod 0700 "${CURRENT_DATA_DIR}" 2>/dev/null || true
+            touch "${CURRENT_DATA_DIR}/import-finished"
+            fstrim -av "${PG_DATA_ROOT}" >/dev/null 2>&1 || true
+          fi
+          if [ ! -f "${CURRENT_DATA_DIR}/PG_VERSION" ] || [ ! -f "${CURRENT_DATA_DIR}/import-finished" ]; then
+            echo "ERROR: no imported Nominatim database is available at ${CURRENT_DATA_DIR}, and no staged database could be promoted." >&2
+            exit 1
+          fi
+          mkdir -p "${LEGACY_PGDATA_DIR}"
+          ln -sfn "${CURRENT_DATA_DIR}/import-finished" "${LEGACY_IMPORT_FINISHED}"
+          # Photon (k8s/photon-import-job.yaml) builds its search index directly
+          # from this running Nominatim's embedded Postgres over the network (via
+          # the nominatim-postgres Service below) instead of downloading OSM data
+          # separately. The stock image only allows local connections, so append a
+          # single additive pg_hba.conf rule (never replacing the file, so
+          # Nominatim's own local/peer auth entries stay untouched) that lets the
+          # dedicated read-only "${PHOTON_DB_USER}" role connect over TCP.
+          HBA_FILE=/etc/postgresql/16/main/pg_hba.conf
+          HBA_LINE="host nominatim ${PHOTON_DB_USER} 0.0.0.0/0 scram-sha-256"
+          mkdir -p "$(dirname "${HBA_FILE}")"
+          touch "${HBA_FILE}"
+          if ! grep -qxF "${HBA_LINE}" "${HBA_FILE}"; then
+            echo "${HBA_LINE}" >> "${HBA_FILE}"
+          fi
+          # Postgres itself is only started by /app/start.sh below, so create/
+          # update the Photon role in the background once it becomes reachable
+          # (this never blocks startup of the normal Nominatim service).
+          (
+            for _ in $(seq 1 60); do
+              if pg_isready -q; then
+                break
               fi
-              if [ ! -f "${CURRENT_DATA_DIR}/PG_VERSION" ] || [ ! -f "${CURRENT_DATA_DIR}/import-finished" ]; then
-                echo "ERROR: no imported Nominatim database is available at ${CURRENT_DATA_DIR}, and no staged database could be promoted." >&2
-                exit 1
-              fi
-              mkdir -p "${LEGACY_PGDATA_DIR}"
-              ln -sfn "${CURRENT_DATA_DIR}/import-finished" "${LEGACY_IMPORT_FINISHED}"
-              # Photon (k8s/photon-import-job.yaml) builds its search index directly
-              # from this running Nominatim's embedded Postgres over the network (via
-              # the nominatim-postgres Service below) instead of downloading OSM data
-              # separately. The stock image only allows local connections, so append a
-              # single additive pg_hba.conf rule (never replacing the file, so
-              # Nominatim's own local/peer auth entries stay untouched) that lets the
-              # dedicated read-only "${PHOTON_DB_USER}" role connect over TCP.
-              HBA_FILE=/etc/postgresql/16/main/pg_hba.conf
-              HBA_LINE="host nominatim ${PHOTON_DB_USER} 0.0.0.0/0 scram-sha-256"
-              mkdir -p "$(dirname "${HBA_FILE}")"
-              touch "${HBA_FILE}"
-              if ! grep -qxF "${HBA_LINE}" "${HBA_FILE}"; then
-                echo "${HBA_LINE}" >> "${HBA_FILE}"
-              fi
-              # Postgres itself is only started by /app/start.sh below, so create/
-              # update the Photon role in the background once it becomes reachable
-              # (this never blocks startup of the normal Nominatim service).
-              (
-                for _ in $(seq 1 60); do
-                  if pg_isready -q; then
-                    break
-                  fi
-                  sleep 5
-                done
-                PSQL_OUTPUT=$(sudo -u postgres psql -v ON_ERROR_STOP=1 -d nominatim 2>&1 <<SQL
-                DO \$\$
-                BEGIN
-                  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${PHOTON_DB_USER}') THEN
-                    EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', '${PHOTON_DB_USER}', '${PHOTON_DB_PASSWORD}');
-                  ELSE
-                    EXECUTE format('ALTER ROLE %I PASSWORD %L', '${PHOTON_DB_USER}', '${PHOTON_DB_PASSWORD}');
-                  END IF;
-                END
-                \$\$;
-                GRANT CONNECT ON DATABASE nominatim TO ${PHOTON_DB_USER};
-                GRANT USAGE, CREATE ON SCHEMA public TO ${PHOTON_DB_USER};
-                GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${PHOTON_DB_USER};
-                ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ${PHOTON_DB_USER};
-                -- Photon's importer runs "CREATE INDEX ON placex (...)" during
-                -- import, which in Postgres requires table ownership (plain
-                -- SELECT/USAGE grants are not enough, and there is no separate
-                -- "CREATE INDEX" privilege to grant on an existing table).
-                -- Make the Photon role a member of whichever role owns placex
-                -- (the Nominatim import user) so it inherits owner privileges
-                -- on that table without needing superuser access.
-                DO \$\$
-                DECLARE
-                  placex_owner text;
-                BEGIN
-                  SELECT tableowner INTO placex_owner FROM pg_tables WHERE schemaname = 'public' AND tablename = 'placex';
-                  IF placex_owner IS NOT NULL THEN
-                    EXECUTE format('GRANT %I TO %I', placex_owner, '${PHOTON_DB_USER}');
-                  END IF;
-                END
-                \$\$;
-              SQL
-                ) || echo "WARNING: could not provision Photon Postgres role (Photon import may fail until this is fixed): ${PSQL_OUTPUT}"
-              ) &
-              exec /app/start.sh
-          ports:
-            - containerPort: 8080
-            - containerPort: 5432
-          resources:
-            requests:
-              memory: "2Gi"
-              cpu: "2"
-            limits:
-              memory: "24Gi"
-              cpu: "16"
-          startupProbe:
-            httpGet:
+              sleep 5
+            done
+            PSQL_OUTPUT=$(sudo -u postgres psql -v ON_ERROR_STOP=1 -d nominatim 2>&1 <<SQL
+            DO \$\$
+            BEGIN
+              IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${PHOTON_DB_USER}') THEN
+                EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', '${PHOTON_DB_USER}', '${PHOTON_DB_PASSWORD}');
+              ELSE
+                EXECUTE format('ALTER ROLE %I PASSWORD %L', '${PHOTON_DB_USER}', '${PHOTON_DB_PASSWORD}');
+              END IF;
+            END
+            \$\$;
+            GRANT CONNECT ON DATABASE nominatim TO ${PHOTON_DB_USER};
+            GRANT USAGE, CREATE ON SCHEMA public TO ${PHOTON_DB_USER};
+            GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${PHOTON_DB_USER};
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ${PHOTON_DB_USER};
+            -- Photon's importer runs "CREATE INDEX ON placex (...)" during
+            -- import, which in Postgres requires table ownership (plain
+            -- SELECT/USAGE grants are not enough, and there is no separate
+            -- "CREATE INDEX" privilege to grant on an existing table).
+            -- Make the Photon role a member of whichever role owns placex
+            -- (the Nominatim import user) so it inherits owner privileges
+            -- on that table without needing superuser access.
+            DO \$\$
+            DECLARE
+              placex_owner text;
+            BEGIN
+              SELECT tableowner INTO placex_owner FROM pg_tables WHERE schemaname = 'public' AND tablename = 'placex';
+              IF placex_owner IS NOT NULL THEN
+                EXECUTE format('GRANT %I TO %I', placex_owner, '${PHOTON_DB_USER}');
+              END IF;
+            END
+            \$\$;
+          SQL
+            ) || echo "WARNING: could not provision Photon Postgres role (Photon import may fail until this is fixed): ${PSQL_OUTPUT}"
+          ) &
+          exec /app/start.sh
+        ports:
+        - containerPort: 8080
+        - containerPort: 5432
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "2"
+          limits:
+            memory: "24Gi"
+            cpu: "16"
+        startupProbe:
+          httpGet:
               # Nominatim's Falcon API has no route at "/" (always 404); use
               # the dedicated /status endpoint so the probe can actually
               # succeed once the service is serving requests.
-              path: /status
-              port: 8080
+            path: /status
+            port: 8080
             # Nominatim may spend several minutes on cache warming, and on
             # top of that a WAL crash-recovery replay after an unclean
             # shutdown can take up to PGCTLTIMEOUT (see env above) before
             # Postgres itself is even ready, so startup must allow a very
             # long grace period here too, or Kubernetes would restart the
             # pod mid-recovery and restart the whole recovery from scratch.
-            periodSeconds: 10
-            failureThreshold: 540
-            timeoutSeconds: 5
-          readinessProbe:
-            httpGet:
-              path: /status
-              port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            failureThreshold: 6
-            timeoutSeconds: 5
-          volumeMounts:
-            - name: nominatim-data
-              mountPath: /nominatim-data
-            - name: planet
-              mountPath: /planet
-              readOnly: true
+          periodSeconds: 10
+          failureThreshold: 540
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /status
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 6
+          timeoutSeconds: 5
+        volumeMounts:
+        - name: nominatim-data
+          mountPath: /nominatim-data
+        - name: planet
+          mountPath: /planet
+          readOnly: true
             # Tunable Postgres settings for the running service (see
             # k8s/nominatim-postgres-tuning-config.yaml); loaded from conf.d
             # last, so these values win over any defaults.
-            - name: nominatim-postgres-tuning
-              mountPath: /etc/postgresql/16/main/conf.d/zz-tuning.conf
-              subPath: runtime-tuning.conf
-              readOnly: true
-      volumes:
-        - name: nominatim-data
-          persistentVolumeClaim:
-            claimName: nominatim
-        - name: planet
-          persistentVolumeClaim:
-            claimName: planet
         - name: nominatim-postgres-tuning
-          configMap:
-            name: nominatim-postgres-tuning
-            items:
-              - key: runtime-tuning.conf
-                path: runtime-tuning.conf
+          mountPath: /etc/postgresql/16/main/conf.d/zz-tuning.conf
+          subPath: runtime-tuning.conf
+          readOnly: true
+        - *id005
+      volumes:
+      - name: nominatim-data
+        persistentVolumeClaim:
+          claimName: nominatim
+      - name: planet
+        persistentVolumeClaim:
+          claimName: planet
+      - name: nominatim-postgres-tuning
+        configMap:
+          name: nominatim-postgres-tuning
+          items:
+          - key: runtime-tuning.conf
+            path: runtime-tuning.conf
+      - name: ca-certs
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
@@ -326,10 +396,10 @@ spec:
   selector:
     app: nominatim
   ports:
-    - name: http
-      port: 8080
-      targetPort: 8080
-      nodePort: 30081
+  - name: http
+    port: 8080
+    targetPort: 8080
+    nodePort: 30081
 ---
 # Internal-only (ClusterIP, no NodePort) access to Nominatim's embedded
 # Postgres so the Photon import job (k8s/photon-import-job.yaml) can build
@@ -346,6 +416,6 @@ spec:
   selector:
     app: nominatim
   ports:
-    - name: postgres
-      port: 5432
-      targetPort: 5432
+  - name: postgres
+    port: 5432
+    targetPort: 5432
