@@ -480,6 +480,9 @@ spec:
           readOnly: true
         - name: osm-temp
           mountPath: /osm-temp
+        - name: pelias-config
+          configMap:
+            name: osm-pelias-config
         - name: work
           mountPath: /work
         - *id005
