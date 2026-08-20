@@ -1201,8 +1201,6 @@ data:
         if (wrapP && !wrapP.contains(event.target)) closePeliasResults(which);
       });
     });
-    updateGeocoderUi();
-
     // --- Pelias full-text search-as-you-type ---------------------------------
     var peliasState = {
       start: { timer: null, requestId: 0, items: [], active: -1 },
@@ -1309,6 +1307,8 @@ data:
         return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
       });
     }
+
+    updateGeocoderUi();
     </script>
     </body>
     </html>
