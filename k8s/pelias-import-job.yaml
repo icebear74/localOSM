@@ -102,17 +102,13 @@ spec:
             configMapKeyRef:
               name: osm-pelias-config
               key: pelias_wof_root
-        - &id001
-          name: SSL_CERT_FILE
+        - name: SSL_CERT_FILE
           value: /ca-certs/ca.crt
-        - &id002
-          name: CURL_CA_BUNDLE
+        - name: CURL_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id003
-          name: REQUESTS_CA_BUNDLE
+        - name: REQUESTS_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id004
-          name: NODE_EXTRA_CA_CERTS
+        - name: NODE_EXTRA_CA_CERTS
           value: /ca-certs/ca.crt
         command: ["/bin/sh", "-c"]
         args:
@@ -191,8 +187,7 @@ spec:
           mountPath: /config
         - name: work
           mountPath: /work
-        - &id005
-          name: ca-certs
+        - name: ca-certs
           mountPath: /ca-certs
           readOnly: true
       - name: pelias-wof-download
@@ -206,10 +201,14 @@ spec:
               key: pelias_wof_enabled
         - name: PELIAS_CONFIG
           value: /work/pelias.json
-        - *id001
-        - *id002
-        - *id003
-        - *id004
+        - name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -232,7 +231,9 @@ spec:
           mountPath: /osm-temp
         - name: work
           mountPath: /work
-        - *id005
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
       - name: pelias-wof-import
         image: pelias/whosonfirst:v8.5.0
         imagePullPolicy: IfNotPresent
@@ -244,10 +245,14 @@ spec:
               key: pelias_wof_enabled
         - name: PELIAS_CONFIG
           value: /work/pelias.json
-        - *id001
-        - *id002
-        - *id003
-        - *id004
+        - name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -270,7 +275,9 @@ spec:
           mountPath: /osm-temp
         - name: work
           mountPath: /work
-        - *id005
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
       containers:
       - name: pelias-import
         image: pelias/openstreetmap:v8.5.2
@@ -316,10 +323,14 @@ spec:
             configMapKeyRef:
               name: osm-pelias-config
               key: pelias_wof_root
-        - *id001
-        - *id002
-        - *id003
-        - *id004
+        - name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -481,11 +492,12 @@ spec:
         - name: osm-temp
           mountPath: /osm-temp
         - name: pelias-config
-          configMap:
-            name: osm-pelias-config
+          mountPath: /config
         - name: work
           mountPath: /work
-        - *id005
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
       volumes:
       - name: planet
         persistentVolumeClaim:
