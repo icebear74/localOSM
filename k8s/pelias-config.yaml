@@ -18,11 +18,13 @@ data:
   # Enable Pelias admin lookup so places can be associated with countries, regions
   # and cities when Who's On First data is present.
   pelias_admin_lookup: "true"
-  # Optional Who's On First import configuration. Set this to "true" and provide
-  # a local WOF file inside pelias_wof_root to enable admin lookup enrichment.
-  pelias_wof_enabled: "false"
+  # Who's On First (WOF) import configuration.
+  # Pelias downloads the WOF SQLite database automatically via `pelias download wof`
+  # into pelias_wof_root, then imports it with `pelias import wof`.
+  # Set pelias_wof_enabled to "false" to skip WOF enrichment entirely.
+  pelias_wof_enabled: "true"
+  pelias_wof_sqlite: "true"
   pelias_wof_root: /osm-temp/pelias/wof
-  pelias_wof_file: ""
   runtime-pelias.json: |
     {
       "logger": {
@@ -83,11 +85,8 @@ data:
         },
         "whosonfirst": {
           "datapath": "__PELIAS_WOF_ROOT__",
-          "import": [
-            {
-              "filename": "__PELIAS_WOF_FILE__"
-            }
-          ]
+          "sqlite": true,
+          "importPostcodes": false
         }
       }
     }
