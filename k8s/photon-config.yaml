@@ -21,6 +21,12 @@ data:
   # Comma-separated language codes Photon should index/translate names into
   # (passed to `photon import -languages`), in addition to the local name.
   photon_languages: "de,en,fr,it"
+  # Optional extra tags Photon should import into the search index. Set to
+  # `ALL` to import all available tags, or provide a comma-separated list of
+  # tag keys such as `brand,network,operator`.
+  # Default to POI-relevant OSM tags so parks, attractions and medical sites
+  # are searchable by their names in Photon.
+  photon_extra_tags: "amenity,leisure,tourism,healthcare"
   # Photon release (jar) to download from the GitHub release page; see
   # https://github.com/komoot/photon/releases. Requires Java 21+, matching
   # the eclipse-temurin:21-jre image used in k8s/photon.yaml and

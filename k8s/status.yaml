@@ -144,7 +144,7 @@ data:
     # ABORT_FLAG_FILE to cancel whatever it is currently doing.
     ORCHESTRATOR_STATE_FILE = os.path.join(STATUS_DIR, "import-orchestrator.json")
     ABORT_FLAG_FILE = os.path.join(STATUS_DIR, "import-abort.flag")
-    IMPORT_JOB_NAMES = ("import-prep", "tileserver-import", "nominatim-import", "valhalla-import", "photon-import")
+    IMPORT_JOB_NAMES = ("import-prep", "tileserver-import", "nominatim-import", "valhalla-import", "photon-import", "pelias-import")
     PROMOTE_POD_TERMINATION_TIMEOUT_SECONDS = 240
     PROMOTE_READY_TIMEOUT_SECONDS = 900
     PROMOTE_NOMINATIM_READY_TIMEOUT_SECONDS = 1200
@@ -170,10 +170,15 @@ data:
             "active_dir": os.path.join(DATA_DIR, "photon", "active"),
             "staging_dir": os.path.join(TEMP_DIR, "photon", "staging"),
         },
+        "pelias": {
+            "deployment": "pelias",
+            "active_dir": os.path.join(DATA_DIR, "pelias", "active"),
+            "staging_dir": os.path.join(TEMP_DIR, "pelias", "staging"),
+        },
     }
 
     # Fixed pipeline order the import-orchestrator always runs these steps in.
-    BUILD_STEPS = ("tileserver", "nominatim", "valhalla", "photon")
+    BUILD_STEPS = ("tileserver", "nominatim", "valhalla", "photon", "pelias")
 
     CONFIG_DEFAULTS = {
         "node_url": "",
@@ -199,6 +204,7 @@ data:
         ("nominatim", "nominatim.osm.svc.cluster.local", 8080, "http", "/status"),
         ("valhalla", "valhalla.osm.svc.cluster.local", 8002, "http", "/"),
         ("photon", "photon.osm.svc.cluster.local", 2322, "http", "/status"),
+        ("pelias", "pelias.osm.svc.cluster.local", 4000, "http", "/v1"),
         ("web", "web.osm.svc.cluster.local", 8080, "http", "/healthz"),
     ]
 
@@ -925,6 +931,7 @@ data:
         <a href="#" id="web-link" data-port="30084">&#128205; Routing-UI</a>
         <a href="#" id="valhalla-link" data-port="30082">Valhalla API</a>
         <a href="#" id="nominatim-link" data-port="30081">Nominatim</a>
+        <a href="#" id="pelias-link" data-port="30088">Pelias</a>
         <a href="#" id="tileserver-link" data-port="30085">TileServer GL</a>
         <a href="#" id="style-editor-link" data-port="30086" target="_blank" rel="noopener" aria-label="Style-Editor">&#127912; Style-Editor</a>
       </div>
@@ -979,6 +986,9 @@ data:
               <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.82rem">
                 <input type="checkbox" id="auto-update-step-photon" style="width:auto" checked> Photon bauen
               </label>
+              <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.82rem">
+                <input type="checkbox" id="auto-update-step-pelias" style="width:auto" checked> Pelias bauen
+              </label>
             </div>
             <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
               <input type="checkbox" id="auto-update-auto-promote" style="width:auto" checked>
@@ -1018,6 +1028,7 @@ data:
               <button id="build-step-nominatim-btn" class="subtle" onclick="startStepBuild('nominatim')">Nominatim-Import starten</button>
               <button id="build-step-valhalla-btn" class="subtle" onclick="startStepBuild('valhalla')">Valhalla-Import starten</button>
               <button id="build-step-photon-btn" class="subtle" onclick="startStepBuild('photon')">Photon-Import starten</button>
+              <button id="build-step-pelias-btn" class="subtle" onclick="startStepBuild('pelias')">Pelias-Import starten</button>
             </div>
           </div>
         </div>
@@ -1095,13 +1106,14 @@ data:
         var valhallaUrl = resolveServiceTarget('valhalla', baseUrl + ':30082');
         var nominatimUrl = resolveServiceTarget('nominatim', baseUrl + ':30081');
         var tileserverUrl = resolveServiceTarget('tileserver', baseUrl + ':30085');
-        ['web-link','valhalla-link','nominatim-link','tileserver-link'].forEach(function(id) {
+        ['web-link','valhalla-link','nominatim-link','pelias-link','tileserver-link'].forEach(function(id) {
           var a = document.getElementById(id);
           if (!a) return;
           var targetUrl = {
             'web-link': webUrl,
             'valhalla-link': valhallaUrl,
             'nominatim-link': nominatimUrl,
+            'pelias-link': resolveServiceTarget('pelias', baseUrl + ':30088'),
             'tileserver-link': tileserverUrl
           }[id] || '';
           if (targetUrl) a.href = targetUrl + '/';
@@ -1227,8 +1239,8 @@ data:
         document.getElementById('add-country-btn').disabled = running;
         document.getElementById('build-btn').disabled = running;
         document.getElementById('check-updates-btn').disabled = running;
-        var activeStep = ['tileserver', 'nominatim', 'valhalla', 'photon'].indexOf(phase) !== -1 ? phase : null;
-        ['tileserver', 'nominatim', 'valhalla', 'photon'].forEach(function(step) {
+        var activeStep = ['tileserver', 'nominatim', 'valhalla', 'photon', 'pelias'].indexOf(phase) !== -1 ? phase : null;
+        ['tileserver', 'nominatim', 'valhalla', 'photon', 'pelias'].forEach(function(step) {
           var stepBtn = document.getElementById('build-step-' + step + '-btn');
           if (stepBtn) stepBtn.disabled = running && activeStep === step;
         });
@@ -1244,7 +1256,7 @@ data:
       function renderPromote(promote) {
         var el = document.getElementById('promote-list');
         var services = promote && promote.services ? promote.services : {};
-        var keys = ['tileserver', 'nominatim', 'valhalla', 'photon'];
+        var keys = ['tileserver', 'nominatim', 'valhalla', 'photon', 'pelias'];
         var html = '<div class="stack">';
         keys.forEach(function(name) {
           var row = services[name] || {};
@@ -1522,8 +1534,8 @@ data:
           document.getElementById('auto-update-cron').value = cfg.auto_update_cron || '0 3 * * *';
           document.getElementById('auto-update-mode').value = cfg.auto_update_mode || 'download_merge';
           document.getElementById('auto-update-auto-promote').checked = !!cfg.auto_update_auto_promote;
-          var autoSteps = cfg.auto_update_steps || ['tileserver', 'nominatim', 'valhalla', 'photon'];
-          ['tileserver', 'nominatim', 'valhalla', 'photon'].forEach(function(step) {
+          var autoSteps = cfg.auto_update_steps || ['tileserver', 'nominatim', 'valhalla', 'photon', 'pelias'];
+          ['tileserver', 'nominatim', 'valhalla', 'photon', 'pelias'].forEach(function(step) {
             var box = document.getElementById('auto-update-step-' + step);
             if (box) box.checked = autoSteps.indexOf(step) !== -1;
           });
@@ -1568,7 +1580,7 @@ data:
         var cron = document.getElementById('auto-update-cron').value.trim();
         var mode = document.getElementById('auto-update-mode').value;
         var autoPromote = document.getElementById('auto-update-auto-promote').checked;
-        var steps = ['tileserver', 'nominatim', 'valhalla', 'photon'].filter(function(step) {
+        var steps = ['tileserver', 'nominatim', 'valhalla', 'photon', 'pelias'].filter(function(step) {
           var box = document.getElementById('auto-update-step-' + step);
           return box && box.checked;
         });
@@ -3200,6 +3212,8 @@ data:
                     ok, detail = check_http("http://valhalla.osm.svc.cluster.local:8002/")
                 elif name == "photon":
                     ok, detail = check_http("http://photon.osm.svc.cluster.local:2322/status")
+                elif name == "pelias":
+                    ok, detail = check_http("http://pelias.osm.svc.cluster.local:4000/v1")
                 elif name == "web":
                     ok, detail = check_http("http://web.osm.svc.cluster.local:8080/healthz")
                 else:
@@ -3368,4 +3382,3 @@ data:
             pass
         finally:
             server.server_close()
-

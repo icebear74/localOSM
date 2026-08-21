@@ -5,7 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NAMESPACE="osm"
 BASE_DIR="/mnt/OSM"
 TEMP_BASE_DIR="${OSM_TEMP_DIR:-${BASE_DIR}/TempDir}"
-DEPLOYMENTS=(tileserver-gl nominatim valhalla photon import-orchestrator status web)
+DEPLOYMENTS=(tileserver-gl nominatim valhalla photon pelias import-orchestrator status web)
 PRESERVE_PATHS=("${BASE_DIR}/library" "${BASE_DIR}/status")
 CLEAN=false
 PRESERVE_DOWNLOADS=false
@@ -172,7 +172,8 @@ for dir in \
   "${TEMP_BASE_DIR}/tileserver/staging" \
   "${TEMP_BASE_DIR}/nominatim/staging" \
   "${TEMP_BASE_DIR}/valhalla/staging" \
-  "${TEMP_BASE_DIR}/photon/staging"; do
+  "${TEMP_BASE_DIR}/photon/staging" \
+  "${TEMP_BASE_DIR}/pelias/staging"; do
   ${SUDO} mkdir -p "$dir"
 done
 
@@ -205,6 +206,7 @@ ${SUDO} chown -R 1000:1000 "${TEMP_BASE_DIR}/tileserver"          2>/dev/null ||
 ${SUDO} chown -R 100:100   "${TEMP_BASE_DIR}/nominatim"           2>/dev/null || true
 ${SUDO} chown -R 1000:1000 "${TEMP_BASE_DIR}/valhalla"            2>/dev/null || true
 ${SUDO} chown -R 0:0       "${TEMP_BASE_DIR}/photon"              2>/dev/null || true
+${SUDO} chown -R 1000:1000 "${TEMP_BASE_DIR}/pelias"              2>/dev/null || true
 
 echo ">>> Copying static manifests and orchestrator script …"
 # Manifests that hardcode the OSM_TEMP_DIR mount use the placeholder
@@ -224,6 +226,10 @@ for manifest in \
   photon-config.yaml \
   photon.yaml \
   photon-import-job.yaml \
+  pelias-config.yaml \
+  pelias.yaml \
+  pelias-import-job.yaml \
+  pelias-cleanup-job.yaml \
   status.yaml \
   status-deployment.yaml \
   status-config.yaml \
@@ -308,6 +314,17 @@ echo ">>> Applying Kubernetes manifests …"
 terminate_existing_pods
 kubectl apply -f "${BASE_DIR}/manifests/namespace.yaml"
 
+# Apply the Root CA bundle ConfigMap before any pods start.
+# The real file is git-ignored; create it from the example if it is missing.
+CA_BUNDLE_SRC="${REPO_ROOT}/k8s/ca-bundle-config.yaml"
+CA_BUNDLE_EXAMPLE="${REPO_ROOT}/k8s/ca-bundle-config.yaml.example"
+if [ ! -f "${CA_BUNDLE_SRC}" ]; then
+  echo "[WARN] k8s/ca-bundle-config.yaml not found; creating a disabled placeholder from the example."
+  echo "[WARN] To enable CA injection copy the example, set ca-enabled: \"true\", and paste your PEM cert."
+  ${SUDO} cp "${CA_BUNDLE_EXAMPLE}" "${CA_BUNDLE_SRC}"
+fi
+kubectl apply -f "${CA_BUNDLE_SRC}"
+
 if [ -f "${REPO_ROOT}/k8s/style.json" ]; then
   style_files=("--from-file=style.json=${REPO_ROOT}/k8s/style.json")
   if [ -f "${REPO_ROOT}/k8s/dark_style.json" ]; then
@@ -318,7 +335,7 @@ fi
 
 kubectl -n "${NAMESPACE}" create configmap osm-status-config --from-file=config.json="${CONFIG_PATH}" --dry-run=client -o yaml | kubectl apply -f -
 
-for manifest in osm-persistentvolumeclaims.yaml planetiler-rbac.yaml tileserver-gl-deployment.yaml nominatim.yaml nominatim-promotion-job.yaml nominatim-postgres-tuning-config.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml photon-config.yaml photon.yaml status.yaml status-deployment.yaml nominatim-import-config.yaml tileserver-import-config.yaml tileserver-import-profile-config.yaml import-orchestrator.yaml web.yaml style-editor.yaml; do
+for manifest in osm-persistentvolumeclaims.yaml planetiler-rbac.yaml tileserver-gl-deployment.yaml nominatim.yaml nominatim-promotion-job.yaml nominatim-postgres-tuning-config.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml photon-config.yaml photon.yaml pelias-config.yaml pelias.yaml pelias-import-job.yaml pelias-cleanup-job.yaml status.yaml status-deployment.yaml nominatim-import-config.yaml tileserver-import-config.yaml tileserver-import-profile-config.yaml import-orchestrator.yaml web.yaml style-editor.yaml; do
   echo ">>> Applying ${manifest}"
   kubectl apply -f "${BASE_DIR}/manifests/${manifest}"
 done
@@ -335,6 +352,7 @@ Status dashboard : ${NODE_DISPLAY}:30083
 Web / Routing UI : ${NODE_DISPLAY}:30084
 Nominatim        : ${NODE_DISPLAY}:30081
 Valhalla         : ${NODE_DISPLAY}:30082
+Pelias           : ${NODE_DISPLAY}:30088
 TileServer GL    : ${NODE_DISPLAY}:30085
 Style-Editor     : ${NODE_DISPLAY}:30086
 EOF
