@@ -206,6 +206,9 @@ spec:
           value: /ca-certs/ca.crt
       - name: fetch-sources
         image: alpine:3.20
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
         command: ["/bin/sh", "-c"]
         args:
         - |
