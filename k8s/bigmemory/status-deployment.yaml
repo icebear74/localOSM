@@ -1,0 +1,219 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: status
+  namespace: osm
+  labels:
+    app: status
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: status
+  template:
+    metadata:
+      labels:
+        app: status
+    spec:
+      serviceAccountName: status-manager
+      nodeSelector:
+        osm: "true"
+      securityContext:
+        fsGroup: 1000
+      initContainers:
+      - name: ca-injector
+        image: alpine:3.20
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: CA_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: osm-ca-bundle
+              key: ca-enabled
+        - name: CA_CRT
+          valueFrom:
+            configMapKeyRef:
+              name: osm-ca-bundle
+              key: ca.crt
+        command:
+        - /bin/sh
+        - -c
+        args:
+        - |
+          set -eu
+          # Install system CA bundle (may be a no-op if already present).
+          apk add --no-cache ca-certificates >/dev/null 2>&1 || true
+          # Seed /ca-certs/ca.crt with the system bundle so env vars always point
+          # to a valid file, even when the custom CA is disabled.
+          if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+            cp /etc/ssl/certs/ca-certificates.crt /ca-certs/ca.crt
+          else
+            touch /ca-certs/ca.crt
+          fi
+          if [ "${CA_ENABLED}" = "true" ] && [ -n "${CA_CRT}" ]; then
+            # Append the custom Root CA to the bundle so public CAs stay trusted too.
+            printf '\n%s\n' "${CA_CRT}" >> /ca-certs/ca.crt
+            touch /ca-certs/ca-enabled
+            echo "[ca-injector] Custom CA appended to bundle at /ca-certs/ca.crt"
+          else
+            echo "[ca-injector] CA injection disabled; system bundle at /ca-certs/ca.crt"
+          fi
+        resources:
+          requests:
+            memory: 16Mi
+            cpu: 10m
+          limits:
+            memory: 64Mi
+            cpu: 50m
+        volumeMounts:
+        - name: ca-certs
+          mountPath: /ca-certs
+      - name: init-status-config
+        image: busybox:1.36
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -eu
+          mkdir -p /status
+          if [ ! -f /status/config.json ]; then
+            cp /seed/config.json /status/config.json
+          fi
+        resources:
+          requests:
+            cpu: "10m"
+            memory: "16Mi"
+          limits:
+            cpu: "50m"
+            memory: "64Mi"
+        volumeMounts:
+        - name: status-config-seed
+          mountPath: /seed
+          readOnly: true
+        - name: status-data
+          mountPath: /status
+        - &id005
+          name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
+        env:
+        - &id001
+          name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - &id002
+          name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - &id003
+          name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - &id004
+          name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
+      containers:
+      - name: status
+        image: python:3.12-slim
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -eu
+          export DEBIAN_FRONTEND=noninteractive
+          if command -v apt-get >/dev/null 2>&1; then
+            apt-get update >/tmp/apt-update.log 2>&1 || true
+            apt-get install -y --no-install-recommends osmium-tool >/tmp/apt-install.log 2>&1 || true
+            rm -rf /var/lib/apt/lists/* 2>/dev/null || true
+          fi
+          if ! command -v osmium >/dev/null 2>&1; then
+            echo "Warning: osmium-tool is not available; import workflows requiring osmium will return an error until it is installed." >&2
+          fi
+          cp /config/app.py /tmp/app.py
+          python /tmp/app.py
+        env:
+        - name: STATUS_HOST
+          value: "0.0.0.0"
+        - name: STATUS_PORT
+          value: "8080"
+        - name: OSM_NAMESPACE
+          value: "osm"
+        - name: OSM_DATA_DIR
+          value: "/mnt/OSM"
+        - name: OSM_TEMP_DIR
+          value: "__OSM_TEMP_DIR__"
+        - name: OSM_NODE_URL
+          value: ""
+        - name: SERVICE_TARGETS_JSON
+          valueFrom:
+            configMapKeyRef:
+              name: osm-service-targets
+              key: service-targets.json
+        - *id001
+        - *id002
+        - *id003
+        - *id004
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "300m"
+            memory: "256Mi"
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: status-config
+          mountPath: /config
+        - name: data
+          mountPath: /mnt/OSM
+        - name: valhalla-data
+          mountPath: /mnt/OSM/valhalla
+        - name: photon-data
+          mountPath: /mnt/OSM/photon
+        - name: status-data
+          mountPath: /mnt/OSM/status
+        - name: temp-data
+          mountPath: __OSM_TEMP_DIR__
+        - name: tileserver-active
+          mountPath: /mnt/OSM/tileserver/active
+        - *id005
+      volumes:
+      - name: status-config
+        configMap:
+          name: osm-status-app
+      - name: status-config-seed
+        configMap:
+          name: osm-status-config
+      - name: status-data
+        persistentVolumeClaim:
+          claimName: osm-status
+      - name: data
+        hostPath:
+          path: /mnt/OSM
+          type: DirectoryOrCreate
+      - name: temp-data
+        persistentVolumeClaim:
+          claimName: osm-temp
+      - name: valhalla-data
+        persistentVolumeClaim:
+          claimName: valhalla
+      - name: photon-data
+        persistentVolumeClaim:
+          claimName: photon
+      - name: tileserver-active
+        persistentVolumeClaim:
+          claimName: tileserver-gl
+      - name: ca-certs
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: status
+  namespace: osm
+spec:
+  type: NodePort
+  selector:
+    app: status
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    nodePort: 30083

@@ -1,0 +1,298 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nominatim-import
+  namespace: osm
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      nodeSelector:
+        osm: "true"
+      restartPolicy: Never
+      securityContext:
+        fsGroup: 100
+      containers:
+      - name: nominatim-import
+        image: mediagis/nominatim:4.5
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: PBF_PATH
+          value: /planet/europa.osm.pbf
+        - name: NOMINATIM_PASSWORD
+          valueFrom:
+            configMapKeyRef:
+              name: osm-nominatim-import-config
+              key: import_password
+        - name: THREADS
+          valueFrom:
+            configMapKeyRef:
+              name: osm-nominatim-import-config
+              key: import_threads
+        - name: NOMINATIM_OSM2PGSQL_CACHE
+          valueFrom:
+            configMapKeyRef:
+              name: osm-nominatim-import-config
+              key: import_cache_mb
+        - name: PGDATA
+          value: /osm-temp/nominatim/work/current
+        - name: PGDATA_TARGET_ROOT
+          value: /nominatim-data-prod
+        - name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
+        resources:
+          requests:
+            memory: "48Gi"
+            cpu: "8"
+          limits:
+            memory: "200Gi"
+            cpu: "50"
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          PGDATA_DIR="${PGDATA:-/nominatim-data/current}"
+          WORK_ROOT="$(dirname "${PGDATA_DIR}")"
+          PBF_SOURCE="${PBF_PATH:-/planet/europa.osm.pbf}"
+          trim_mount() {
+            local mountpoint="$1"
+            if command -v fstrim >/dev/null 2>&1; then
+              echo "[INFO] fstrim ${mountpoint}"
+              if ! fstrim "${mountpoint}"; then
+                echo "[WARN] fstrim failed for ${mountpoint}; continuing"
+              fi
+            else
+              echo "[INFO] fstrim not available for ${mountpoint}; continuing."
+            fi
+          }
+          cleanup() {
+            trim_mount /osm-temp
+            trim_mount /nominatim-data-prod
+            trim_mount /tmp
+          }
+          trap cleanup EXIT
+          echo "Resetting Nominatim temp database at ${PGDATA_DIR}"
+          rm -rf "${PGDATA_DIR}" 2>/dev/null || true
+          mkdir -p "${PGDATA_DIR}"
+          chown -R 100:100 "${PGDATA_DIR}" 2>/dev/null || true
+          if [ ! -f "${PBF_SOURCE}" ]; then
+            echo "ERROR: expected OSM PBF input at ${PBF_SOURCE}" >&2
+            exit 1
+          fi
+          mkdir -p /etc/postgresql/16/main/conf.d
+          cat > /etc/postgresql/16/main/conf.d/zz-nominatim-data.conf <<EOF
+          data_directory = '${PGDATA_DIR}'
+          EOF
+          /app/config.sh
+          if [ ! -f "${PGDATA_DIR}/PG_VERSION" ]; then
+            echo "Initializing PostgreSQL data directory at ${PGDATA_DIR}"
+            INITDB_BIN=""
+            for candidate in /usr/lib/postgresql/16/bin/initdb /usr/bin/initdb; do
+              if [ -x "${candidate}" ]; then
+                INITDB_BIN="${candidate}"
+                break
+              fi
+            done
+            if [ -z "${INITDB_BIN}" ]; then
+              echo "ERROR: could not find a usable PostgreSQL initdb binary for ${PGDATA_DIR}" >&2
+              exit 1
+            fi
+            sudo -u postgres "${INITDB_BIN}" -D "${PGDATA_DIR}" --encoding=UTF8 --locale=C.UTF-8 --auth-local=peer --auth-host=scram-sha-256 >/dev/null
+            chown -R 100:100 "${PGDATA_DIR}" 2>/dev/null || true
+          fi
+          if id nominatim >/dev/null 2>&1; then
+            echo "user nominatim already exists"
+          else
+            useradd -m -p "${NOMINATIM_PASSWORD}" nominatim
+          fi
+
+          # Patch init.sh um --osm2pgsql-cache zu ergänzen
+          if [ -n "${NOMINATIM_OSM2PGSQL_CACHE:-}" ]; then
+           sed -i '/nominatim import/ s/--threads \$THREADS/--threads \$THREADS --osm2pgsql-cache \$NOMINATIM_OSM2PGSQL_CACHE/g' /app/init.sh
+           if ! grep -q -- '--osm2pgsql-cache \$NOMINATIM_OSM2PGSQL_CACHE' /app/init.sh; then
+            echo "ERROR: failed to patch /app/init.sh to honor NOMINATIM_OSM2PGSQL_CACHE (upstream image's init.sh may have changed); aborting." >&2
+            exit 1
+           fi
+           if grep -q -- 'nominatim index --threads \$THREADS --osm2pgsql-cache' /app/init.sh; then
+            echo "ERROR: /app/init.sh patch incorrectly added --osm2pgsql-cache to the 'nominatim index' step, which does not support it; aborting." >&2
+            exit 1
+           fi
+          fi
+
+          /app/init.sh
+
+          # Nach erfolgreichem Import: Warte auf Background-PostgreSQL-Prozesse,
+          # erzwinge einen CHECKPOINT und stelle sicher, dass alle WAL-Einträge
+          # auf die Festplatte geschrieben wurden, bevor der Marker gesetzt wird.
+          #
+          # The upstream init.sh stops PostgreSQL as part of its cleanup
+          # (sudo service postgresql stop), so we must restart it here before
+          # issuing the CHECKPOINT, otherwise psql fails with
+          # "No such file or directory" on the socket.
+          echo "Nominatim-Import abgeschlossen. Warte 10 Sekunden auf Background-PostgreSQL-Prozesse..."
+          sleep 10
+          echo "Stelle sicher, dass PostgreSQL läuft, bevor CHECKPOINT ausgeführt wird..."
+          if ! pg_isready -q 2>/dev/null; then
+            echo "PostgreSQL ist nicht erreichbar – starte Service neu..."
+            sudo service postgresql start
+            # Wait until the socket is available (up to 30 s).
+            _pg_wait=0
+            while [ "${_pg_wait}" -lt 30 ]; do
+              pg_isready -q 2>/dev/null && break
+              sleep 1
+              _pg_wait=$(( _pg_wait + 1 ))
+            done
+            if ! pg_isready -q 2>/dev/null; then
+              echo "ERROR: PostgreSQL konnte nach dem Neustart nicht erreicht werden; CHECKPOINT wird übersprungen." >&2
+              exit 1
+            fi
+            echo "PostgreSQL erfolgreich neugestartet."
+          fi
+          echo "Erzwinge PostgreSQL CHECKPOINT, um alle Daten auf Disk zu schreiben..."
+          su -c "psql -c 'CHECKPOINT;'" postgres
+          echo "Warte 5 Sekunden auf WAL-Flush..."
+          sleep 5
+
+          SOURCE_DATA_DIR="${PGDATA:-/nominatim-data/current}"
+          TARGET_ROOT="${PGDATA_TARGET_ROOT:-/nominatim-data-prod}"
+          TARGET_STAGED="${TARGET_ROOT}/staging"
+          TARGET_CURRENT="${TARGET_ROOT}/current"
+          TARGET_PREVIOUS="${TARGET_ROOT}/previous"
+
+          echo "Starte PostgreSQL, um die temporäre Datenbank vor dem Copy-Upgrade zu bereinigen..."
+          mkdir -p /etc/postgresql/16/main/conf.d
+          cat > /etc/postgresql/16/main/conf.d/zz-promotion.conf <<EOF
+          data_directory = '${SOURCE_DATA_DIR}'
+          EOF
+          service postgresql start
+          for _ in $(seq 1 60); do
+            if pg_isready -q; then
+              break
+            fi
+            sleep 2
+          done
+          if ! pg_isready -q; then
+            echo "ERROR: PostgreSQL konnte für die Promotion nicht gestartet werden." >&2
+            exit 1
+          fi
+
+          echo "Führe Datenbankbereinigung und Compaction auf der temporären Datenbank aus..."
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -d nominatim <<'SQL'
+          VACUUM (FULL, ANALYZE);
+          REINDEX DATABASE nominatim;
+          CHECKPOINT;
+          SQL
+
+          echo "Stoppe PostgreSQL vor dem Kopieren des Datenverzeichnisses..."
+          service postgresql stop
+
+          echo "Preparing the compacted database in the production staging directory..."
+          mkdir -p "${TARGET_ROOT}"
+          rm -rf "${TARGET_STAGED}" "${TARGET_PREVIOUS}" 2>/dev/null || true
+          mkdir -p "${TARGET_STAGED}"
+
+          echo "Copying the database into the production staging directory..."
+          cp -a "${SOURCE_DATA_DIR}/." "${TARGET_STAGED}/"
+          chown -R 100:100 "${TARGET_STAGED}"
+          chmod 0700 "${TARGET_STAGED}" 2>/dev/null || true
+          touch "${TARGET_STAGED}/import-finished"
+
+          echo "WAL-Flush abgeschlossen. Setze import-finished Marker..."
+          touch "${SOURCE_DATA_DIR}/import-finished"
+
+          echo "Cleaning temporary Nominatim work directory..."
+          find "${WORK_ROOT}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
+          echo "Temporary and production volumes will be trimmed before exit."
+        volumeMounts:
+        - name: osm-temp
+          mountPath: /osm-temp
+        - name: nominatim-production-data
+          mountPath: /nominatim-data-prod
+        - name: nominatim-postgres-tuning
+          mountPath: /etc/postgresql/16/main/conf.d/zz-tuning.conf
+          subPath: import-tuning.conf
+          readOnly: true
+        - name: container-tmp
+          mountPath: /tmp
+        - name: planet
+          mountPath: /planet
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
+      volumes:
+      - name: planet
+        persistentVolumeClaim:
+          claimName: planet
+      - name: osm-temp
+        hostPath:
+          path: /mnt/osm-temp
+          type: DirectoryOrCreate
+      - name: nominatim-production-data
+        persistentVolumeClaim:
+          claimName: nominatim
+      - name: nominatim-postgres-tuning
+        configMap:
+          name: nominatim-postgres-tuning
+          items:
+          - key: import-tuning.conf
+            path: import-tuning.conf
+      - name: container-tmp
+        emptyDir: {}
+      - name: ca-certs
+        emptyDir: {}
+      initContainers:
+      - name: ca-injector
+        image: alpine:3.20
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: CA_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: osm-ca-bundle
+              key: ca-enabled
+        - name: CA_CRT
+          valueFrom:
+            configMapKeyRef:
+              name: osm-ca-bundle
+              key: ca.crt
+        command:
+        - /bin/sh
+        - -c
+        args:
+        - |
+          set -eu
+          # Install system CA bundle (may be a no-op if already present).
+          apk add --no-cache ca-certificates >/dev/null 2>&1 || true
+          # Seed /ca-certs/ca.crt with the system bundle so env vars always point
+          # to a valid file, even when the custom CA is disabled.
+          if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+            cp /etc/ssl/certs/ca-certificates.crt /ca-certs/ca.crt
+          else
+            touch /ca-certs/ca.crt
+          fi
+          if [ "${CA_ENABLED}" = "true" ] && [ -n "${CA_CRT}" ]; then
+            # Append the custom Root CA to the bundle so public CAs stay trusted too.
+            printf '\n%s\n' "${CA_CRT}" >> /ca-certs/ca.crt
+            touch /ca-certs/ca-enabled
+            echo "[ca-injector] Custom CA appended to bundle at /ca-certs/ca.crt"
+          else
+            echo "[ca-injector] CA injection disabled; system bundle at /ca-certs/ca.crt"
+          fi
+        resources:
+          requests:
+            memory: 16Mi
+            cpu: 10m
+          limits:
+            memory: 64Mi
+            cpu: 50m
+        volumeMounts:
+        - name: ca-certs
+          mountPath: /ca-certs

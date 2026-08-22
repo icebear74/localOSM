@@ -1,0 +1,90 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: planet
+  namespace: osm
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn-static
+  resources:
+    requests:
+      storage: 250Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: osm-temp
+  namespace: osm
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: longhorn-static
+  resources:
+    requests:
+      storage: 700Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tileserver-gl
+  namespace: osm
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn-static
+  resources:
+    requests:
+      storage: 150Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nominatim
+  namespace: osm
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: longhorn-static
+  resources:
+    requests:
+      storage: 150Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: valhalla
+  namespace: osm
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: longhorn-static
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: photon
+  namespace: osm
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: longhorn-static
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: osm-status
+  namespace: osm
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: longhorn-static
+  resources:
+    requests:
+      storage: 10Mi

@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: osm-pelias-config
+  namespace: osm
+data:
+  pbf-root: /planet
+  pbf-file: europa.osm.pbf
+  temp-root: /osm-temp/pelias
+  # Used by the Pelias import job, which runs in a separate pod.
+  elasticsearch-host: pelias-elasticsearch.osm.svc.cluster.local
+  # Comma-separated list of OSM tag keys Pelias should additionally import as
+  # venue tags. Each entry is expanded to `<tag>+name` when the import job
+  # writes the importer config.
+  # Default to POI-relevant OSM tags so parks, attractions and medical sites
+  # are searchable by their names in Pelias.
+  pelias_extra_tags: "amenity,leisure,tourism,healthcare"
+  # Enable Pelias admin lookup so places can be associated with countries, regions
+  # and cities when Who's On First data is present.
+  pelias_admin_lookup: "true"
+  # Who's On First (WOF) import configuration.
+  # Pelias downloads the WOF SQLite database automatically via `pelias download wof`
+  # into pelias_wof_root, then imports it with `pelias import wof`.
+  # Set pelias_wof_enabled to "false" to skip WOF enrichment entirely.
+  pelias_wof_enabled: "true"
+  pelias_wof_root: /osm-temp/pelias/wof
+  runtime-pelias.json: |
+    {
+      "logger": {
+        "level": "info",
+        "timestamp": false
+      },
+      "esclient": {
+        "apiVersion": "7.x",
+        "hosts": [
+          {
+            "host": "127.0.0.1",
+            "port": 9200,
+            "protocol": "http"
+          }
+        ]
+      },
+      "schema": {
+        "indexName": "pelias"
+      },
+      "api": {
+        "indexName": "pelias"
+      }
+    }
+  import-pelias-template.json: |
+    {
+      "logger": {
+        "level": "info",
+        "timestamp": false
+      },
+      "esclient": {
+        "apiVersion": "7.x",
+        "hosts": [
+          {
+            "host": "__PELIAS_ELASTICSEARCH_HOST__",
+            "port": 9200,
+            "protocol": "http"
+          }
+        ]
+      },
+      "schema": {
+        "indexName": "__PELIAS_INDEX__"
+      },
+      "api": {
+        "indexName": "__PELIAS_INDEX__"
+      },
+      "imports": {
+        "adminLookup": {
+          "enabled": __PELIAS_ADMIN_LOOKUP__
+        },
+        "openstreetmap": {
+          "datapath": "__PELIAS_TEMP_ROOT__/work/openstreetmap",
+          "leveldbpath": "__PELIAS_TEMP_ROOT__/work/leveldb",
+          "import": [
+            {
+              "filename": "__PELIAS_PBF_FILE__"
+            }
+          ]
+        },
+        "whosonfirst": {
+          "datapath": "__PELIAS_WOF_ROOT__",
+          "sqlite": true,
+          "importPostcodes": false
+        }
+      }
+    }

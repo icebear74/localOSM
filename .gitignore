@@ -3,3 +3,4 @@ __pycache__/
 *~
 # Root CA bundle – contains the private corporate certificate; never commit.
 k8s/ca-bundle-config.yaml
+k8s/bigmemory/ca-bundle-config.yaml

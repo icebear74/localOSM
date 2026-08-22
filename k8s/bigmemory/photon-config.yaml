@@ -1,0 +1,34 @@
+# Configuration for the Photon full-text search geocoder (k8s/photon.yaml,
+# k8s/photon-import-job.yaml). Photon builds its search index directly from
+# the *live* Nominatim Postgres instance (see the nominatim-postgres Service
+# in k8s/nominatim.yaml) instead of downloading a separate OSM data dump, so
+# no map data is re-downloaded for this step.
+#
+# photon_db_user/photon_db_password are the credentials of a dedicated,
+# read-only Postgres role that nominatim.yaml creates (idempotently, on
+# startup) in the "nominatim" database for Photon to connect with. Change
+# photon_db_password before deploying to production and re-apply both this
+# file and k8s/nominatim.yaml (then restart the nominatim Deployment) so the
+# new password takes effect.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: osm-photon-config
+  namespace: osm
+data:
+  photon_db_user: photon
+  photon_db_password: photon
+  # Comma-separated language codes Photon should index/translate names into
+  # (passed to `photon import -languages`), in addition to the local name.
+  photon_languages: "de,en,fr,it"
+  # Optional extra tags Photon should import into the search index. Set to
+  # `ALL` to import all available tags, or provide a comma-separated list of
+  # tag keys such as `brand,network,operator`.
+  # Default to POI-relevant OSM tags so parks, attractions and medical sites
+  # are searchable by their names in Photon.
+  photon_extra_tags: "amenity,leisure,tourism,healthcare"
+  # Photon release (jar) to download from the GitHub release page; see
+  # https://github.com/komoot/photon/releases. Requires Java 21+, matching
+  # the eclipse-temurin:21-jre image used in k8s/photon.yaml and
+  # k8s/photon-import-job.yaml.
+  photon_version: "1.2.1"

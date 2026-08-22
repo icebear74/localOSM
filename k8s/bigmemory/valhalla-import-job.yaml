@@ -1,0 +1,274 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: valhalla-import
+  namespace: osm
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      serviceAccountName: planetiler-import
+      nodeSelector:
+        osm: "true"
+      restartPolicy: Never
+      initContainers:
+      - name: ca-injector
+        image: alpine:3.20
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: CA_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: osm-ca-bundle
+              key: ca-enabled
+        - name: CA_CRT
+          valueFrom:
+            configMapKeyRef:
+              name: osm-ca-bundle
+              key: ca.crt
+        command:
+        - /bin/sh
+        - -c
+        args:
+        - |
+          set -eu
+          # Install system CA bundle (may be a no-op if already present).
+          apk add --no-cache ca-certificates >/dev/null 2>&1 || true
+          # Seed /ca-certs/ca.crt with the system bundle so env vars always point
+          # to a valid file, even when the custom CA is disabled.
+          if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+            cp /etc/ssl/certs/ca-certificates.crt /ca-certs/ca.crt
+          else
+            touch /ca-certs/ca.crt
+          fi
+          if [ "${CA_ENABLED}" = "true" ] && [ -n "${CA_CRT}" ]; then
+            # Append the custom Root CA to the bundle so public CAs stay trusted too.
+            printf '\n%s\n' "${CA_CRT}" >> /ca-certs/ca.crt
+            touch /ca-certs/ca-enabled
+            echo "[ca-injector] Custom CA appended to bundle at /ca-certs/ca.crt"
+          else
+            echo "[ca-injector] CA injection disabled; system bundle at /ca-certs/ca.crt"
+          fi
+        resources:
+          requests:
+            memory: 16Mi
+            cpu: 10m
+          limits:
+            memory: 64Mi
+            cpu: 50m
+        volumeMounts:
+        - name: ca-certs
+          mountPath: /ca-certs
+      - name: fetch-kubectl
+        image: curlimages/curl:8.10.1
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -eu
+          if [ ! -x /tools/kubectl ]; then
+            KUBECTL_VERSION=$(curl -fsSL https://dl.k8s.io/release/stable.txt 2>/dev/null || true)
+            if [ -z "${KUBECTL_VERSION}" ]; then
+              KUBECTL_VERSION="v1.30.0"
+            fi
+            curl -fsSL -o /tools/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+            chmod 0755 /tools/kubectl
+          fi
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+        volumeMounts:
+        - name: tools
+          mountPath: /tools
+        - &id005
+          name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
+        env:
+        - &id001
+          name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - &id002
+          name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - &id003
+          name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - &id004
+          name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
+      containers:
+      - name: valhalla-import
+        image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
+        imagePullPolicy: Always
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+        env:
+        - name: serve_tiles
+          value: "False"
+        - name: force_rebuild
+          value: "False"
+        - name: build_admins
+          value: "True"
+        - name: build_time_zones
+          value: "True"
+        - name: build_tar
+          value: "True"
+        - *id001
+        - *id002
+        - *id003
+        - *id004
+        resources:
+          requests:
+            memory: "18Gi"
+            cpu: "4"
+          limits:
+            memory: "64Gi"
+            cpu: "20"
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          echo '=== Valhalla Import Job ==='
+          SOURCE_PBF=/planet/europa.osm.pbf
+          WORK_ROOT=/osm-temp/valhalla
+          WORK_DIR="${WORK_ROOT}/work"
+          NEXT_DIR=/service-data/next
+          ACTIVE_DIR=/service-data/active
+          PREVIOUS_DIR=/service-data/previous
+          CONFIG_PATH=/tmp/valhalla-import.json
+          KUBECTL=/tools/kubectl
+          SCALED_DOWN=0
+          ORIGINAL_REPLICAS=0
+
+          cleanup_work_dir() {
+            mkdir -p "${WORK_DIR}"
+            find "${WORK_DIR}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          }
+
+          trim_mount() {
+            local mountpoint="$1"
+            if command -v fstrim >/dev/null 2>&1; then
+              echo "[INFO] fstrim ${mountpoint}"
+              if ! fstrim "${mountpoint}"; then
+                echo "[WARN] fstrim failed for ${mountpoint}; continuing"
+              fi
+            else
+              echo "[INFO] fstrim not available for ${mountpoint}; continuing."
+            fi
+          }
+
+          cleanup() {
+            if [ "${SCALED_DOWN}" = "1" ]; then
+              "${KUBECTL}" scale deployment valhalla --replicas="${ORIGINAL_REPLICAS}" -n osm || true
+            fi
+            trim_mount /osm-temp
+            trim_mount /service-data
+            trim_mount /tools
+          }
+          trap cleanup EXIT
+
+          wait_for_pods_terminated() {
+            local waited=0
+            while "${KUBECTL}" get pods -n osm -l app=valhalla --no-headers 2>/dev/null | grep -q .; do
+              if [ "${waited}" -ge 600 ]; then
+                echo "ERROR: Timed out waiting for Valhalla pods to terminate." >&2
+                return 1
+              fi
+              sleep 3
+              waited=$((waited + 3))
+            done
+          }
+
+          test -f "${SOURCE_PBF}" || { echo "ERROR: ${SOURCE_PBF} not found"; exit 1; }
+          PBF_SIZE=$(du -sh "${SOURCE_PBF}" | cut -f1)
+          echo "Found PBF file (${PBF_SIZE}). Building routing graph ..."
+
+          cleanup_work_dir
+          rm -rf "${NEXT_DIR}" "${PREVIOUS_DIR}" 2>/dev/null || true
+          mkdir -p "${WORK_DIR}" "${NEXT_DIR}"
+
+          sed \
+            -e "s|/data/tiles|${WORK_DIR}/tiles|g" \
+            -e "s|/data/valhalla_tiles.tar|${WORK_DIR}/valhalla_tiles.tar|g" \
+            -e "s|/data/traffic.tar|${WORK_DIR}/traffic.tar|g" \
+            -e "s|/data/timezone.sqlite|${WORK_DIR}/timezone.sqlite|g" \
+            -e "s|/data/admin.sqlite|${WORK_DIR}/admin.sqlite|g" \
+            /config/valhalla.json > "${CONFIG_PATH}"
+
+          valhalla_build_tiles -c "${CONFIG_PATH}" "${SOURCE_PBF}" -j 16
+          echo '=== Tile build complete. Creating tile extract archive ...'
+          valhalla_build_extract -c "${CONFIG_PATH}" -e "${WORK_DIR}/valhalla_tiles.tar" -O
+
+          echo '=== Copying Valhalla data into the next active release directory ...'
+          cp -a "${WORK_DIR}/." "${NEXT_DIR}/"
+
+          ORIGINAL_REPLICAS=$("${KUBECTL}" get deployment valhalla -n osm -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+          ORIGINAL_REPLICAS="${ORIGINAL_REPLICAS:-0}"
+          if [ "${ORIGINAL_REPLICAS}" -gt 0 ]; then
+            echo '=== Scaling down Valhalla before activating the new data ...'
+            "${KUBECTL}" scale deployment valhalla --replicas=0 -n osm >/dev/null
+            SCALED_DOWN=1
+            wait_for_pods_terminated
+          else
+            echo '=== Valhalla deployment is not running; writing data directly to active directory ...'
+          fi
+
+          if [ -d "${ACTIVE_DIR}" ]; then
+            mv "${ACTIVE_DIR}" "${PREVIOUS_DIR}"
+          fi
+          if ! mv "${NEXT_DIR}" "${ACTIVE_DIR}"; then
+            rm -rf "${ACTIVE_DIR}" 2>/dev/null || true
+            if [ -d "${PREVIOUS_DIR}" ]; then
+              mv "${PREVIOUS_DIR}" "${ACTIVE_DIR}" 2>/dev/null || true
+            fi
+            echo "ERROR: Failed to activate new Valhalla data." >&2
+            exit 1
+          fi
+          rm -rf "${PREVIOUS_DIR}" 2>/dev/null || true
+
+          if [ "${SCALED_DOWN}" = "1" ]; then
+            echo '=== Scaling Valhalla back up ...'
+            "${KUBECTL}" scale deployment valhalla --replicas="${ORIGINAL_REPLICAS}" -n osm >/dev/null
+            SCALED_DOWN=0
+            "${KUBECTL}" rollout status deployment/valhalla -n osm --timeout=600s >/dev/null
+          else
+            echo '=== Valhalla deployment was not running; active directory is ready for when the service starts. ==='
+          fi
+
+          cleanup_work_dir
+          echo '=== Import complete. Routing graph promoted and temp work directory cleaned. ==='
+        volumeMounts:
+        - name: osm-temp
+          mountPath: /osm-temp
+        - name: valhalla-root
+          mountPath: /service-data
+        - name: valhalla-config
+          mountPath: /config
+        - name: tools
+          mountPath: /tools
+        - name: planet
+          mountPath: /planet
+        - *id005
+      volumes:
+      - name: osm-temp
+        persistentVolumeClaim:
+          claimName: osm-temp
+      - name: valhalla-root
+        persistentVolumeClaim:
+          claimName: valhalla
+      - name: valhalla-config
+        configMap:
+          name: osm-valhalla-import-config
+      - name: planet
+        persistentVolumeClaim:
+          claimName: planet
+      - name: tools
+        emptyDir: {}
+      - name: ca-certs
+        emptyDir: {}

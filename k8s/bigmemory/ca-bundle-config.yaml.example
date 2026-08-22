@@ -1,0 +1,26 @@
+## Root CA Bundle ConfigMap
+##
+## Copy this file to k8s/ca-bundle-config.yaml and fill in your certificate.
+## The real file is git-ignored so the certificate never lands in version control.
+##
+## Usage:
+##   cp k8s/ca-bundle-config.yaml.example k8s/ca-bundle-config.yaml
+##   # Edit ca-bundle-config.yaml: set ca-enabled to "true" and paste your PEM cert.
+##   kubectl apply -f k8s/ca-bundle-config.yaml
+##
+## When ca-enabled is "false" (or the cert field is empty) the ca-injector init
+## container copies the Alpine system CA bundle to /ca-certs/ca.crt so that all
+## environment variables pointing there still work correctly.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: osm-ca-bundle
+  namespace: osm
+data:
+  ## Set to "true" to enable custom Root CA injection into all pods.
+  ca-enabled: "false"
+
+  ## Paste the full PEM-encoded Root CA certificate here.
+  ## Include the -----BEGIN CERTIFICATE----- and -----END CERTIFICATE----- lines.
+  ## Multiple certificates (a chain) are supported – just concatenate them.
+  ca.crt: ""

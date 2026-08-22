@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: osm-tileserver-import-config
+  namespace: osm
+data:
+  source_cache_dir: /data/sources
+  source_urls: |
+    lake_centerline=https://github.com/acalcutt/osm-lakelines/releases/latest/download/lake_centerline.shp.zip
+    water_polygons=https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip
+    natural_earth=https://naciscdn.org/naturalearth/packages/natural_earth_vector.sqlite.zip

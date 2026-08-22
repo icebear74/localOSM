@@ -1,0 +1,2194 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: osm-web-app
+  namespace: osm
+data:
+  app.py: |
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import gzip
+    import json
+    import math
+    import os
+    import re
+    import urllib.parse
+    import urllib.request
+    import urllib.error
+
+    HOST = os.environ.get("WEB_HOST", "0.0.0.0")
+    PORT = int(os.environ.get("WEB_PORT", "8080"))
+
+    def _load_service_targets():
+        raw = os.environ.get("SERVICE_TARGETS_JSON", "")
+        if not raw:
+            return {}
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        cleaned = {}
+        for key, value in payload.items():
+            if isinstance(value, str) and value.strip():
+                cleaned[key] = value.strip()
+        return cleaned
+
+    SERVICE_TARGETS = _load_service_targets()
+    # SERVICE_TARGETS contains browser-facing URLs (for links/buttons). Backend
+    # proxy requests from this pod should continue to use the cluster-internal
+    # service URLs from the explicit environment variables below.
+    VALHALLA_URL = os.environ.get("VALHALLA_URL", "http://valhalla.osm.svc.cluster.local:8002")
+    NOMINATIM_URL = os.environ.get("NOMINATIM_URL", "http://nominatim.osm.svc.cluster.local:8080")
+    PHOTON_URL = os.environ.get("PHOTON_URL", "http://photon.osm.svc.cluster.local:2322")
+    PELIAS_URL = os.environ.get("PELIAS_URL", "http://pelias.osm.svc.cluster.local:4000")
+    TILESERVER_URL = os.environ.get("TILESERVER_URL", "http://tileserver-gl.osm.svc.cluster.local")
+    STATUS_URL = os.environ.get("STATUS_URL", "")
+    PLANET_UPDATE_REQUEST_FILE = os.environ.get("PLANET_UPDATE_REQUEST_FILE", "/state/planet-update-request.flag")
+    PLANET_UPDATE_STATUS_FILE = os.environ.get("PLANET_UPDATE_STATUS_FILE", "/status/planet-update.json")
+    FAVICON_GIF = (
+        b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!"
+        b"\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00"
+        b"\x00\x02\x02L\x01\x00;"
+    )
+
+    INDEX_HTML = """<!doctype html>
+    <html lang="de">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>localOSM – Routing &amp; Karte</title>
+      <link rel="stylesheet" href="/static/maplibre-gl.css"/>
+      <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; display: flex; flex-direction: column; height: 100vh; }
+        #header { background: #2c7ab5; color: #fff; padding: 0.6rem 1rem; display: flex; align-items: center; gap: 1rem; }
+        #header h1 { font-size: 1.1rem; }
+        #header a { color: #cde; font-size: 0.85rem; text-decoration: none; }
+        #main { display: flex; flex: 1; overflow: hidden; }
+        #map-container { flex: 1; position: relative; display: flex; }
+        #sidebar { width: 340px; min-width: 280px; background: #f8f9fa; border-right: 1px solid #ddd;
+                   display: flex; flex-direction: column; overflow-y: auto; padding: 1rem; gap: 0.75rem; }
+        #map { flex: 1; height: 100%; }
+        label { font-size: 0.8rem; font-weight: 600; color: #444; display: block; margin-bottom: 2px; }
+        label input[type="checkbox"] { display: inline; width: auto; margin-right: 0.5rem; }
+        input, select { width: 100%; padding: 0.45rem 0.5rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem; }
+        .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+        .btn { padding: 0.55rem; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600; width: 100%; }
+        .btn-primary { background: #2c7ab5; color: #fff; }
+        .btn-secondary { background: #6c757d; color: #fff; }
+        .btn:hover { filter: brightness(1.1); }
+        #result-box { background: #fff; border: 1px solid #ddd; border-radius: 4px; padding: 0.75rem; font-size: 0.82rem; }
+        #result-box .ok { color: #1a7a1a; font-weight: 600; }
+        #result-box .err { color: #c00; font-weight: 600; }
+        .hint { font-size: 0.75rem; color: #888; }
+        #planet-update-box { background: #fff; border: 1px solid #ddd; border-radius: 4px; padding: 0.75rem; font-size: 0.82rem; }
+        #planet-update-box .pu-status { font-size: 0.78rem; color: #555; margin-top: 0.4rem; }
+        #planet-update-box .ok { color: #1a7a1a; font-weight: 600; }
+        #planet-update-box .err { color: #c00; font-weight: 600; }
+        .section-title { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: #777; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+        .geocode-row { display: flex; gap: 4px; }
+        .geocode-row input { flex: 1; }
+        .geocode-row button { white-space: nowrap; padding: 0 0.6rem; border: 1px solid #ccc; border-radius: 4px; background: #e9ecef; cursor: pointer; font-size: 0.8rem; }
+        .photon-search { position: relative; }
+        .photon-search input { border-color: #2c7ab5; }
+        .pelias-search { position: relative; }
+        .pelias-search input { border-color: #b55a2c; }
+        .photon-results, .pelias-results { position: absolute; z-index: 20; left: 0; right: 0; top: 100%; background: #fff; border: 1px solid #ccc;
+                          border-top: none; border-radius: 0 0 4px 4px; max-height: 220px; overflow-y: auto; box-shadow: 0 4px 8px rgba(0,0,0,.15); display: none; }
+        .photon-results div, .pelias-results div { padding: 0.4rem 0.5rem; font-size: 0.8rem; cursor: pointer; border-bottom: 1px solid #eee; }
+        .photon-results div:last-child, .pelias-results div:last-child { border-bottom: none; }
+        .photon-results div:hover, .photon-results div.active,
+        .pelias-results div:hover, .pelias-results div.active { background: #eaf2f8; }
+        .hidden { display: none !important; }
+        .advanced-options { display: none; }
+        .advanced-options.visible { display: block; }
+        .advanced-param { display: flex; flex-direction: column; gap: 0.25rem; }
+        .advanced-param .advanced-param-toggle { display: flex; align-items: center; gap: 0.35rem; font-size: 0.78rem; color: #4a4a4a; }
+        .advanced-param input:disabled, .advanced-param select:disabled { opacity: 0.6; background: #f1f3f5; }
+        #zoom-display { position: absolute; bottom: 10px; right: 10px; background: rgba(0,0,0,0.6); color: #fff; padding: 6px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 600; z-index: 10; pointer-events: none; }
+      </style>
+    </head>
+    <body>
+    <div id="header">
+      <h1>&#127757; localOSM</h1>
+      <a href="#" id="status-link" data-port="30083">Status-Dashboard &rarr;</a>
+    </div>
+    <div id="main">
+      <div id="sidebar">
+      <div>
+        <label>Suchdienst</label>
+        <select id="geocoder-provider" onchange="updateGeocoderUi()">
+          <option value="photon_nominatim">Photon + Nominatim</option>
+          <option value="pelias">Pelias</option>
+        </select>
+        </div>
+      <div class="section-title">Start</div>
+      <div class="photon-search provider-photon-only">
+        <label>Volltextsuche (Photon)</label>
+        <input id="startPhoton" placeholder="Ab 3 Zeichen tippen ..." autocomplete="off"
+               oninput="onPhotonInput('start')" onkeydown="onPhotonKeydown(event, 'start')">
+        <div id="startPhotonResults" class="photon-results"></div>
+      </div>
+      <div class="pelias-search provider-pelias-only">
+        <label>Volltextsuche (Pelias)</label>
+        <input id="startPelias" placeholder="Ab 3 Zeichen tippen ..." autocomplete="off"
+               oninput="onPeliasInput('start')" onkeydown="onPeliasKeydown(event, 'start')">
+        <div id="startPeliasResults" class="pelias-results"></div>
+      </div>
+        <div>
+          <label>Adresse suchen</label>
+          <div class="geocode-row">
+            <input id="startAddr" placeholder="z.B. Brandenburger Tor, Berlin">
+            <button onclick="geocode('start')">&#128269;</button>
+          </div>
+        </div>
+        <div class="row2">
+          <div><label>Breitengrad</label><input id="startLat" placeholder="wird per Klick/Suche gesetzt" step="any"></div>
+          <div><label>Längengrad</label><input id="startLon" placeholder="wird per Klick/Suche gesetzt" step="any"></div>
+        </div>
+
+        <div class="section-title">Ziel</div>
+        <div class="photon-search provider-photon-only">
+          <label>Volltextsuche (Photon)</label>
+          <input id="endPhoton" placeholder="Ab 3 Zeichen tippen ..." autocomplete="off"
+                 oninput="onPhotonInput('end')" onkeydown="onPhotonKeydown(event, 'end')">
+          <div id="endPhotonResults" class="photon-results"></div>
+        </div>
+        <div class="pelias-search provider-pelias-only">
+          <label>Volltextsuche (Pelias)</label>
+          <input id="endPelias" placeholder="Ab 3 Zeichen tippen ..." autocomplete="off"
+                 oninput="onPeliasInput('end')" onkeydown="onPeliasKeydown(event, 'end')">
+          <div id="endPeliasResults" class="pelias-results"></div>
+        </div>
+        <div>
+          <label>Adresse suchen</label>
+          <div class="geocode-row">
+            <input id="endAddr" placeholder="z.B. Alexanderplatz, Berlin">
+            <button onclick="geocode('end')">&#128269;</button>
+          </div>
+        </div>
+        <div class="row2">
+          <div><label>Breitengrad</label><input id="endLat" placeholder="wird per Klick/Suche gesetzt" step="any"></div>
+          <div><label>Längengrad</label><input id="endLon" placeholder="wird per Klick/Suche gesetzt" step="any"></div>
+        </div>
+
+        <div class="section-title">Optionen</div>
+        <div class="row2">
+          <div>
+            <label>Verkehrsmittel</label>
+            <select id="costing">
+              <option value="auto">Auto</option>
+              <option value="pedestrian">Zu Fuß</option>
+              <option value="bicycle">Fahrrad</option>
+              <option value="truck">LKW</option>
+            </select>
+          </div>
+          <div>
+            <label>Einheiten</label>
+            <select id="units">
+              <option value="km">km</option>
+              <option value="miles">Meilen</option>
+            </select>
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label style="display:flex;align-items:center;gap:0.35rem">
+              <input id="advanced-options-enabled" type="checkbox">
+              Erweiterte Angaben
+            </label>
+            <div class="hint" style="margin-top:0.25rem">Wenn deaktiviert, wirkt nur noch der Route-Tradeoff.</div>
+          </div>
+          <div></div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>Route-Tradeoff</label>
+            <input id="shortest" type="range" min="0" max="1" step="0.1" value="0.2">
+            <div class="hint" id="shortest-value" style="margin-top:0.25rem">0.2 (eher schnell; 0.0–0.4 = schnell, 0.5–1.0 = kurz)</div>
+          </div>
+          <div></div>
+        </div>
+        <div id="advanced-options" class="advanced-options">
+          <div class="row2">
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="toll_penalty_enabled">
+                <input id="toll_penalty_enabled" type="checkbox" data-target="toll_penalty">
+                Maut-Willigkeit (0–1)
+              </label>
+              <input id="toll_penalty" type="number" min="0" max="1" step="0.1" value="0.5" title="Gültige Werte: 0.0 bis 1.0; 0.0 = vermeiden, 1.0 = bevorzugen" disabled>
+            </div>
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="ferry_penalty_enabled">
+                <input id="ferry_penalty_enabled" type="checkbox" data-target="ferry_penalty">
+                Fähren-Willigkeit (0–1)
+              </label>
+              <input id="ferry_penalty" type="number" min="0" max="1" step="0.1" value="0.5" title="Gültige Werte: 0.0 bis 1.0; 0.0 = vermeiden, 1.0 = bevorzugen" disabled>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="tunnel_penalty_enabled">
+                <input id="tunnel_penalty_enabled" type="checkbox" data-target="tunnel_penalty">
+                Tunnel-Penalty
+              </label>
+              <input id="tunnel_penalty" type="number" min="0" step="1" value="0" title="Gültige Werte: 0 oder positive ganze Zahlen; höher = stärker vermeiden" disabled>
+            </div>
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="highway_penalty_enabled">
+                <input id="highway_penalty_enabled" type="checkbox" data-target="highway_penalty">
+                Autobahn-Willigkeit (0–1)
+              </label>
+              <input id="highway_penalty" type="number" min="0" max="1" step="0.1" value="0.5" title="Gültige Werte: 0.0 bis 1.0; 0.0 = vermeiden, 1.0 = bevorzugen" disabled>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="unpaved_penalty_enabled">
+                <input id="unpaved_penalty_enabled" type="checkbox" data-target="unpaved_penalty">
+                Unbefestigte Wege-Penalty
+              </label>
+              <input id="unpaved_penalty" type="number" min="0" step="1" value="0" title="Gültige Werte: 0 oder positive ganze Zahlen; höher = stärker vermeiden" disabled>
+            </div>
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="living_street_penalty_enabled">
+                <input id="living_street_penalty_enabled" type="checkbox" data-target="living_street_penalty">
+                Wohnstraßen-Willigkeit (0–1)
+              </label>
+              <input id="living_street_penalty" type="number" min="0" max="1" step="0.1" value="0.1" title="Gültige Werte: 0.0 bis 1.0; 0.0 = vermeiden, 1.0 = bevorzugen" disabled>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="primary_penalty_enabled">
+                <input id="primary_penalty_enabled" type="checkbox" data-target="primary_penalty">
+                Primärstraßen-Willigkeit (0–1)
+              </label>
+              <input id="primary_penalty" type="number" min="0" max="1" step="0.1" value="0.5" title="Gültige Werte: 0.0 bis 1.0; 0.0 = vermeiden, 1.0 = bevorzugen" disabled>
+            </div>
+            <div></div>
+          </div>
+          <div class="row2">
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="top_speed_enabled">
+                <input id="top_speed_enabled" type="checkbox" data-target="top_speed">
+                Max. Geschwindigkeit (km/h)
+              </label>
+              <input id="top_speed" type="number" min="1" step="1" value="120" disabled>
+            </div>
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="width_enabled">
+                <input id="width_enabled" type="checkbox" data-target="width">
+                Fahrzeugbreite (m)
+              </label>
+              <input id="width" type="number" min="0.1" step="0.1" value="2.0" disabled>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="height_enabled">
+                <input id="height_enabled" type="checkbox" data-target="height">
+                Fahrzeughöhe (m)
+              </label>
+              <input id="height" type="number" min="0.1" step="0.1" value="2.0" disabled>
+            </div>
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="length_enabled">
+                <input id="length_enabled" type="checkbox" data-target="length">
+                Fahrzeuglänge (m)
+              </label>
+              <input id="length" type="number" min="0.1" step="0.1" value="5.0" disabled>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="weight_enabled">
+                <input id="weight_enabled" type="checkbox" data-target="weight">
+                Fahrzeuggewicht (kg)
+              </label>
+              <input id="weight" type="number" min="100" step="100" value="1800" disabled>
+            </div>
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="axle_load_enabled">
+                <input id="axle_load_enabled" type="checkbox" data-target="axle_load">
+                Achslast (kg)
+              </label>
+              <input id="axle_load" type="number" min="100" step="100" value="1000" disabled>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="hazmat_enabled">
+                <input id="hazmat_enabled" type="checkbox" data-target="hazmat">
+                Gefährliche Stoffe
+              </label>
+              <select id="hazmat" disabled><option value="">Nein</option><option value="true">Ja</option></select>
+            </div>
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="use_service_enabled">
+                <input id="use_service_enabled" type="checkbox" data-target="use_service">
+                Service-Strecken
+              </label>
+              <select id="use_service" disabled><option value="true">Erlauben</option><option value="false">Vermeiden</option></select>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="use_trails_enabled">
+                <input id="use_trails_enabled" type="checkbox" data-target="use_trails">
+                Wegenetz: Pfade
+              </label>
+              <select id="use_trails" disabled><option value="true">Erlauben</option><option value="false" selected>Vermeiden</option></select>
+            </div>
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="use_tracks_enabled">
+                <input id="use_tracks_enabled" type="checkbox" data-target="use_tracks">
+                Wegenetz: Tracks
+              </label>
+              <select id="use_tracks" disabled><option value="true">Erlauben</option><option value="false" selected>Vermeiden</option></select>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="use_residential_enabled">
+                <input id="use_residential_enabled" type="checkbox" data-target="use_residential">
+                Wegenetz: Wohnstraßen
+              </label>
+              <select id="use_residential" disabled><option value="true">Erlauben</option><option value="false">Vermeiden</option></select>
+            </div>
+            <div class="advanced-param">
+              <label class="advanced-param-toggle" for="use_primary_enabled">
+                <input id="use_primary_enabled" type="checkbox" data-target="use_primary">
+                Wegenetz: Primär
+              </label>
+              <select id="use_primary" disabled><option value="true">Erlauben</option><option value="false">Vermeiden</option></select>
+            </div>
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label>Route-Anweisungen</label>
+            <select id="instruction-language">
+              <option value="de">Deutsch</option>
+              <option value="en">English</option>
+            </select>
+            <div class="hint">Sprache der Route-Anweisungen.</div>
+          </div>
+          <div></div>
+        </div>
+        <div class="row2">
+          <button class="btn btn-secondary" onclick="saveRouteDefaults()">⭐ Als Standard speichern</button>
+          <button class="btn btn-secondary" onclick="resetRouteDefaults()">↺ Standard zurücksetzen</button>
+        </div>
+        <button class="btn btn-primary" onclick="doRoute()">&#128205; Route berechnen</button>
+        <button class="btn btn-secondary" onclick="doDistance()">&#8596; Nur Distanz</button>
+        <p class="hint">Tipp: Klicke auf die Karte, um Start- (1. Klick) und Zielpunkt (2. Klick) zu setzen. Die erweiterten Optionen lassen sich als Browser-Standard speichern.</p>
+        <div id="result-box">Noch keine Anfrage.</div>
+        <div id="route-instructions" class="hint" style="margin-top:0.75rem"></div>
+        
+        <div class="section-title">Planet-Update</div>
+        <div id="planet-update-box">
+          <div id="pu-status-line" class="pu-status">Lade Status...</div>
+          <div id="pu-mtime-line" class="pu-status"></div>
+          <button class="btn btn-secondary" style="margin-top:0.5rem" onclick="triggerPlanetUpdate()">&#127758; Planet-Update jetzt starten</button>
+        </div>
+      </div>
+      <div id="map-container" style="flex:1;position:relative;">
+        <div id="map"></div>
+        <div id="zoom-display">Zoom: 9</div>
+      </div>
+    </div>
+
+    <script src="/static/maplibre-gl.js"></script>
+    <script id="service-targets-json" type="application/json">{{SERVICE_TARGETS_JSON}}</script>
+    <script>
+    var SERVICE_TARGETS = {};
+    try {
+      SERVICE_TARGETS = JSON.parse(document.getElementById('service-targets-json').textContent || '{}');
+    } catch (e) {}
+    function trimTrailingSlashes(value) {
+      var text = String(value || '');
+      while (text.endsWith('/')) text = text.slice(0, -1);
+      return text;
+    }
+    function resolveServiceTarget(key, fallbackBase) {
+      var configured = (SERVICE_TARGETS && SERVICE_TARGETS[key]) || '';
+      if (configured) return trimTrailingSlashes(configured);
+      return trimTrailingSlashes(fallbackBase);
+    }
+    function updateLinks() {
+      var baseUrl = location.protocol + '//' + location.hostname;
+      var statusUrl = resolveServiceTarget('status', baseUrl + ':30083');
+      var statusLink = document.getElementById('status-link');
+      if (statusLink) statusLink.href = statusUrl + '/';
+    }
+    updateLinks();
+
+    // ---- Planet-Update Panel ----
+    function loadPlanetUpdateStatus() {
+      fetch('/api/planet-update/status')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          var sl = document.getElementById('pu-status-line');
+          var ml = document.getElementById('pu-mtime-line');
+          if (d.error) { sl.innerHTML = "<span class='err'>Fehler: " + d.error + "</span>"; return; }
+          if (d.running) {
+            sl.innerHTML = '&#9203; Läuft gerade &hellip; (gestartet: ' + (d.last_run_at || '?') + ')';
+          } else if (d.last_success_at) {
+            sl.innerHTML = "<span class='ok'>&#10003; Letzter Erfolg:</span> " + d.last_success_at;
+          } else {
+            sl.innerHTML = 'Noch nie ausgeführt.';
+          }
+          if (d.last_error) {
+            sl.innerHTML += "<br><span class='err'>Fehler: " + d.last_error + "</span>";
+          }
+          ml.textContent = d.output_file_mtime ? 'Datenstand: ' + d.output_file_mtime : '';
+        })
+        .catch(function() {
+          document.getElementById('pu-status-line').innerHTML = "<span class='err'>Status nicht verfügbar.</span>";
+        });
+    }
+    function triggerPlanetUpdate() {
+      fetch('/api/planet-update/trigger', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'})
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (d.error) { alert('Fehler: ' + d.error); return; }
+          alert(d.message || 'Planet-Update angefordert.');
+          setTimeout(loadPlanetUpdateStatus, 1500);
+        })
+        .catch(function() { alert('Planet-Update konnte nicht angefordert werden.'); });
+    }
+    loadPlanetUpdateStatus();
+    setInterval(loadPlanetUpdateStatus, 30000);
+
+    var map = new maplibregl.Map({
+      container: 'map',
+      style: {
+        version: 8,
+        sources: {
+          openmaptiles: {
+            type: 'vector',
+            tiles: [location.protocol + '//' + location.host + '/tiles/{z}/{x}/{y}.pbf'],
+            minzoom: 0,
+            maxzoom: 16
+          }
+        },
+        glyphs: location.protocol + '//' + location.host + '/fonts/{fontstack}/{range}.pbf',
+        layers: [
+          {id:'background',type:'background',paint:{'background-color':'#f2efe9'}},
+          {id:'landcover-wood',type:'fill',source:'openmaptiles','source-layer':'landcover',filter:['in','class','wood','forest'],paint:{'fill-color':'#d0e8c0','fill-opacity':0.6}},
+          {id:'landcover-grass',type:'fill',source:'openmaptiles','source-layer':'landcover',filter:['in','class','grass','farmland','agriculture'],paint:{'fill-color':'#e8f0d0','fill-opacity':0.5}},
+          {id:'landuse-residential',type:'fill',source:'openmaptiles','source-layer':'landuse',filter:['in','class','residential','commercial','industrial'],paint:{'fill-color':'#e8e0d8','fill-opacity':0.5}},
+          {id:'landuse-green',type:'fill',source:'openmaptiles','source-layer':'landuse',filter:['in','class','grass','park','meadow','forest','wood','cemetery'],paint:{'fill-color':'#d0e8c0'}},
+          {id:'water',type:'fill',source:'openmaptiles','source-layer':'water',paint:{'fill-color':'#9cc0d4'}},
+          {id:'waterway',type:'line',source:'openmaptiles','source-layer':'waterway',paint:{'line-color':'#9cc0d4','line-width':1}},
+          {id:'boundary-country',type:'line',source:'openmaptiles','source-layer':'boundary',filter:['==','admin_level',2],paint:{'line-color':'#9e9cab','line-width':['interpolate',['linear'],['zoom'],2,0.5,6,1.5,10,2]}},
+          {id:'boundary-state',type:'line',source:'openmaptiles','source-layer':'boundary',filter:['==','admin_level',4],minzoom:4,paint:{'line-color':'#b0adb8','line-width':0.8,'line-dasharray':[3,2]}},
+          {id:'road',type:'line',source:'openmaptiles','source-layer':'transportation',filter:['in','class','minor','service','track','path'],minzoom:12,paint:{'line-color':'#d4cfc8','line-width':['interpolate',['linear'],['zoom'],12,0.5,14,1,16,3]}},
+          {id:'road-secondary',type:'line',source:'openmaptiles','source-layer':'transportation',filter:['in','class','secondary','tertiary'],minzoom:9,paint:{'line-color':'#c8c3ba','line-width':['interpolate',['linear'],['zoom'],9,0.5,12,1.5,14,3,16,5]}},
+          {id:'road-primary',type:'line',source:'openmaptiles','source-layer':'transportation',filter:['==','class','primary'],minzoom:7,paint:{'line-color':'#fcd354','line-width':['interpolate',['linear'],['zoom'],7,0.5,10,2,14,5,16,8]}},
+          {id:'road-major',type:'line',source:'openmaptiles','source-layer':'transportation',filter:['in','class','motorway','trunk'],paint:{'line-color':'#f9a825','line-width':['interpolate',['linear'],['zoom'],6,1,10,3,14,7,16,12]}},
+          {id:'building',type:'fill',source:'openmaptiles','source-layer':'building',minzoom:14,paint:{'fill-color':'#d9d0c9','fill-opacity':0.9}},
+          {id:'water-name',type:'symbol',source:'openmaptiles','source-layer':'water_name',layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'text-size':['interpolate',['linear'],['zoom'],4,10,10,14],'symbol-placement':'point'},paint:{'text-color':'#5b8db8','text-halo-color':'#fff','text-halo-width':1}},
+          {id:'road-label-minor',type:'symbol',source:'openmaptiles','source-layer':'transportation_name',filter:['in','class','minor','service','track'],minzoom:15,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'symbol-placement':'line','text-size':10,'text-max-angle':30,'text-padding':5},paint:{'text-color':'#555','text-halo-color':'#fff','text-halo-width':1.5}},
+          {id:'road-label-secondary',type:'symbol',source:'openmaptiles','source-layer':'transportation_name',filter:['in','class','secondary','tertiary'],minzoom:13,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'symbol-placement':'line','text-size':11,'text-max-angle':30},paint:{'text-color':'#555','text-halo-color':'#fff','text-halo-width':1.5}},
+          {id:'road-label-primary',type:'symbol',source:'openmaptiles','source-layer':'transportation_name',filter:['in','class','primary','trunk','motorway'],minzoom:10,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'symbol-placement':'line','text-size':12,'text-max-angle':30},paint:{'text-color':'#333','text-halo-color':'#fff','text-halo-width':1.5}},
+          {id:'place-country',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['==','class','country'],layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'text-size':['interpolate',['linear'],['zoom'],2,10,6,16,8,18]},paint:{'text-color':'#333','text-halo-color':'rgba(255,255,255,0.8)','text-halo-width':2}},
+          {id:'place-state',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['==','class','state'],minzoom:5,maxzoom:12,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'text-size':['interpolate',['linear'],['zoom'],5,10,10,14]},paint:{'text-color':'#555','text-halo-color':'rgba(255,255,255,0.8)','text-halo-width':1.5}},
+          {id:'place-city',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['in','class','city'],layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'text-size':['interpolate',['linear'],['zoom'],6,11,10,15,14,18]},paint:{'text-color':'#222','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':2}},
+          {id:'place-town',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['==','class','town'],minzoom:8,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'text-size':['interpolate',['linear'],['zoom'],8,10,12,14,16,17]},paint:{'text-color':'#333','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}},
+          {id:'place-village',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['==','class','village'],minzoom:10,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'text-size':['interpolate',['linear'],['zoom'],10,10,14,13]},paint:{'text-color':'#444','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}},
+          {id:'place-suburb',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['in','class','suburb','quarter','neighbourhood'],minzoom:12,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'text-size':11},paint:{'text-color':'#555','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}},
+          {id:'place-hamlet',type:'symbol',source:'openmaptiles','source-layer':'place',filter:['in','class','hamlet','isolated_dwelling'],minzoom:13,layout:{'text-field':['coalesce',['get','name:de'],['get','name:en'],['get','name']],'text-font':['KlokanTech Noto Sans Regular'],'text-size':10},paint:{'text-color':'#666','text-halo-color':'rgba(255,255,255,0.9)','text-halo-width':1.5}}
+        ]
+      },
+      center: [10, 50],
+      zoom: 2,
+      attributionControl: true
+    });
+
+    // Firefox sometimes computes a 0-size WebGL canvas when the map is created
+    // inside a flexbox layout before the surrounding layout has settled, leaving
+    // a blank map until the window is manually resized (Chromium/Edge are more
+    // forgiving here). Force a resize once the container has its final size,
+    // and keep the map in sync with later container size changes.
+    if (window.ResizeObserver) {
+      new ResizeObserver(function() { map.resize(); }).observe(document.getElementById('map-container'));
+    }
+    window.addEventListener('resize', function() { map.resize(); });
+
+    // The style embedded above is only a fallback so the map is usable
+    // immediately. Swap it for the style actually configured in TileServer-GL
+    // (e.g. via the Maputnik style editor) as soon as it is available, so the
+    // routing window shows the same style as the tile server.
+    fetch('/api/style').then(function(resp) {
+      if (!resp.ok) throw new Error('style fetch failed: ' + resp.status);
+      return resp.json();
+    }).then(function(styleJson) {
+      map.setStyle(styleJson);
+    }).catch(function(e) {
+      console.warn('Falling back to built-in style; failed to load configured TileServer-GL style:', e);
+    });
+
+    // The map is interactive (pan/zoom/click) from the moment it is created,
+    // even before any address has been searched -- users can already explore
+    // the imported area and click to set start/end points.
+    map.on('load', function() {
+      map.resize();
+      fitToDataBounds();
+    });
+
+    // Zoom/center on the actual extent of the imported map data instead of a
+    // hardcoded location, so e.g. an import that only contains Luxembourg
+    // opens centered on Luxembourg rather than on an unrelated default.
+    async function fitToDataBounds() {
+      try {
+        var resp = await fetch('/api/bounds');
+        var data = await resp.json();
+        var b = data.bounds;
+        if (Array.isArray(b) && b.length === 4 && b.every(function(v) { return typeof v === 'number' && isFinite(v); })) {
+          map.fitBounds([[b[0], b[1]], [b[2], b[3]]], {padding: 40, animate: false});
+        }
+      } catch (e) { /* keep the default world view if bounds are unavailable */ }
+    }
+
+    var markers = { start: null, end: null };
+    var clickState = 0; // 0=start, 1=end
+
+    function setMarker(which, lat, lon) {
+      var bg = which === 'start' ? '#2c7ab5' : '#c0392b';
+      var label = which === 'start' ? 'S' : 'Z';
+      var el = document.createElement('div');
+      el.style.cssText = 'background:' + bg + ';color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:bold;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)';
+      el.textContent = label;
+      if (markers[which]) markers[which].remove();
+      markers[which] = new maplibregl.Marker({element: el, anchor: 'center'})
+        .setLngLat([lon, lat])
+        .addTo(map);
+      document.getElementById(which + 'Lat').value = lat.toFixed(6);
+      document.getElementById(which + 'Lon').value = lon.toFixed(6);
+    }
+
+    map.on('click', function(e) {
+      var lat = e.lngLat.lat, lon = e.lngLat.lng;
+      if (clickState === 0) {
+        setMarker('start', lat, lon);
+        reverseGeocode('start', lat, lon);
+        clickState = 1;
+      } else {
+        setMarker('end', lat, lon);
+        reverseGeocode('end', lat, lon);
+        clickState = 0;
+        doRoute();
+      }
+    });
+
+    // Update zoom level display
+    function updateZoomDisplay() {
+      var zoomLevel = Math.round(map.getZoom() * 10) / 10;
+      document.getElementById('zoom-display').textContent = 'Zoom: ' + zoomLevel.toFixed(1);
+    }
+    map.on('zoom', updateZoomDisplay);
+    map.on('move', updateZoomDisplay);
+    updateZoomDisplay(); // Initialize on load
+
+    // Reverse geocode a coordinate and populate the address input
+    async function reverseGeocode(which, lat, lon) {
+      try {
+        var provider = document.getElementById('geocoder-provider').value || 'photon_nominatim';
+        var resp = await fetch('/api/reverse?provider=' + encodeURIComponent(provider) + '&lat=' + lat + '&lon=' + lon);
+        var data = await resp.json();
+        if (!data.error && data.display_name) {
+          document.getElementById(which + 'Addr').value = data.display_name;
+        }
+      } catch(e) { /* silently ignore */ }
+    }
+
+    // Valhalla uses 1e-6 precision polyline encoding
+    function decodePolyline(encoded) {
+      var coords = [], index = 0, lat = 0, lng = 0;
+      while (index < encoded.length) {
+        var b, shift = 0, result = 0;
+        do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+        lat += (result & 1) ? ~(result >> 1) : (result >> 1);
+        shift = 0; result = 0;
+        do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+        lng += (result & 1) ? ~(result >> 1) : (result >> 1);
+        coords.push([lat / 1e6, lng / 1e6]);
+      }
+      return coords;
+    }
+
+    function drawRoute(trip) {
+      var allCoords = [];
+      (trip.legs || []).forEach(function(leg) {
+        decodePolyline(leg.shape || '').forEach(function(c) {
+          allCoords.push([c[1], c[0]]); // MapLibre GL uses [lng, lat]
+        });
+      });
+      if (allCoords.length === 0) return;
+      var geojson = {type:'Feature',geometry:{type:'LineString',coordinates:allCoords}};
+      if (map.getSource('route')) {
+        map.getSource('route').setData(geojson);
+      } else {
+        map.addSource('route', {type:'geojson', data: geojson});
+        map.addLayer({id:'route-line',type:'line',source:'route',
+          paint:{'line-color':'#2c7ab5','line-width':5,'line-opacity':0.8}});
+      }
+      var bounds = allCoords.reduce(function(b, c) { return b.extend(c); },
+        new maplibregl.LngLatBounds(allCoords[0], allCoords[0]));
+      map.fitBounds(bounds, {padding: 30});
+    }
+
+    function fmtDuration(secs) {
+      if (secs < 60) return secs + ' s';
+      var m = Math.floor(secs / 60), s = secs % 60;
+      if (m < 60) return m + ' min ' + (s > 0 ? s + ' s' : '');
+      var h = Math.floor(m / 60); m = m % 60;
+      return h + ' h ' + (m > 0 ? m + ' min' : '');
+    }
+
+    function updateShortestLabel() {
+      var el = document.getElementById('shortest');
+      var valueEl = document.getElementById('shortest-value');
+      if (!el || !valueEl) return;
+      var value = parseFloat(el.value);
+      if (!isFinite(value)) value = 0.2;
+      var mode = value < 0.5 ? 'eher schnell' : 'eher kurz';
+      valueEl.textContent = value.toFixed(1) + ' (' + mode + '; 0.0–0.4 = schnell, 0.5–1.0 = kurz)';
+    }
+
+    function normalizeInstructionValue(value) {
+      if (typeof value === 'string') return value;
+      if (Array.isArray(value)) return value.join(', ');
+      if (value == null) return '';
+      return String(value);
+    }
+
+    function formatInstruction(maneuver, language) {
+      var lang = language === 'en' ? 'en' : 'de';
+      var type = normalizeInstructionValue(maneuver && maneuver.type).toLowerCase();
+      var modifier = normalizeInstructionValue(maneuver && maneuver.modifier).toLowerCase();
+      var streetNames = [];
+      if (Array.isArray(maneuver && maneuver.street_names)) streetNames = maneuver.street_names;
+      else if (Array.isArray(maneuver && maneuver.streets)) streetNames = maneuver.streets;
+      var streetText = streetNames.length ? (lang === 'en' ? ' onto ' + streetNames.join(', ') : ' auf ' + streetNames.join(', ')) : '';
+      switch (type) {
+        case 'depart':
+          return lang === 'en' ? 'Start' + streetText + '.' : 'Starten Sie' + streetText + '.';
+        case 'arrive':
+          return lang === 'en' ? 'Arrive at destination.' : 'Ziel erreicht.';
+        case 'turn':
+          if (modifier === 'right') return lang === 'en' ? 'Turn right' + streetText + '.' : 'Biegen Sie rechts ab' + streetText + '.';
+          if (modifier === 'left') return lang === 'en' ? 'Turn left' + streetText + '.' : 'Biegen Sie links ab' + streetText + '.';
+          if (modifier === 'slight right') return lang === 'en' ? 'Bear right' + streetText + '.' : 'Leicht rechts weiter' + streetText + '.';
+          if (modifier === 'slight left') return lang === 'en' ? 'Bear left' + streetText + '.' : 'Leicht links weiter' + streetText + '.';
+          if (modifier === 'u_turn') return lang === 'en' ? 'Make a U-turn' + streetText + '.' : 'Wenden Sie' + streetText + '.';
+          return lang === 'en' ? 'Turn' + streetText + '.' : 'Biegen Sie ab' + streetText + '.';
+        case 'continue':
+          return lang === 'en' ? 'Continue' + streetText + '.' : 'Weiterfahren' + streetText + '.';
+        case 'merge':
+          return lang === 'en' ? 'Merge onto' + streetText + '.' : 'Fahren Sie auf die Hauptstraße' + streetText + '.';
+        case 'roundabout':
+          return lang === 'en' ? 'Enter the roundabout and take the desired exit.' : 'Fahren Sie in den Kreisverkehr und verlassen Sie ihn an der gewünschten Ausfahrt.';
+        case 'exit roundabout':
+          return lang === 'en' ? 'Exit the roundabout' + streetText + '.' : 'Verlassen Sie den Kreisverkehr' + streetText + '.';
+        case 'fork':
+          return lang === 'en' ? 'At the fork, follow the direction' + streetText + '.' : 'An der Abzweigung halten Sie sich an die Richtung' + streetText + '.';
+        case 'ramp':
+          return lang === 'en' ? 'Take the ramp' + streetText + '.' : 'Fahren Sie auf die Auffahrt' + streetText + '.';
+        case 'use lane':
+          return lang === 'en' ? 'Use the appropriate lane' + streetText + '.' : 'Nutzen Sie die passende Spur' + streetText + '.';
+        case 'destination':
+          return lang === 'en' ? 'Arrive at destination' + streetText + '.' : 'Ziel erreichen' + streetText + '.';
+        default:
+          return maneuver && maneuver.instruction ? maneuver.instruction : (lang === 'en' ? 'Continue.' : 'Weiterfahren.');
+      }
+    }
+
+    function buildRouteInstructions(trip, language) {
+      var instructions = [];
+      var instructionCounter = 0;
+      (trip && trip.legs || []).forEach(function(leg) {
+        (leg.maneuvers || []).forEach(function(maneuver) {
+          var text = formatInstruction(maneuver, language);
+          if (text) {
+            instructionCounter += 1;
+            instructions.push(instructionCounter + '. ' + text);
+          }
+        });
+      });
+      return instructions;
+    }
+
+    function getInstructionLanguage() {
+      var el = document.getElementById('instruction-language');
+      return el && el.value === 'en' ? 'en' : 'de';
+    }
+
+    function renderRouteInstructions(trip) {
+      var container = document.getElementById('route-instructions');
+      if (!container) return;
+      var instructions = buildRouteInstructions(trip, getInstructionLanguage());
+      if (!instructions.length) {
+        container.innerHTML = '';
+        return;
+      }
+      container.innerHTML = '<div class="section-title">Route-Anweisungen</div><ol style="margin:0.25rem 0 0 1rem;padding:0;display:grid;gap:0.35rem">' + instructions.map(function(text) { return '<li>' + esc(text) + '</li>'; }).join('') + '</ol>';
+    }
+
+    var ROUTE_DEFAULTS_KEY = 'localosm.routing.defaults';
+
+    function getRouteDefaults() {
+      try {
+        var stored = localStorage.getItem(ROUTE_DEFAULTS_KEY);
+        return stored ? JSON.parse(stored) : {};
+      } catch (e) {
+        return {};
+      }
+    }
+
+    function setFieldValue(id, value) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      if (el.type === 'checkbox') {
+        el.checked = !!value;
+      } else if (el.tagName === 'SELECT') {
+        el.value = value || el.options[0].value;
+      } else {
+        el.value = value == null ? '' : value;
+      }
+    }
+
+    function isAdvancedOptionsEnabled() {
+      var el = document.getElementById('advanced-options-enabled');
+      return !!(el && el.checked);
+    }
+
+    function setAdvancedOptionsVisibility() {
+      var container = document.getElementById('advanced-options');
+      var toggle = document.getElementById('advanced-options-enabled');
+      if (!container || !toggle) return;
+      container.classList.toggle('visible', toggle.checked);
+      syncAdvancedInputStates();
+    }
+
+    function syncAdvancedInputStates() {
+      var advancedEnabled = isAdvancedOptionsEnabled();
+      var toggles = document.querySelectorAll('#advanced-options input[type="checkbox"][data-target]');
+      Array.prototype.forEach.call(toggles, function(toggle) {
+        var targetId = toggle.getAttribute('data-target');
+        var target = document.getElementById(targetId);
+        toggle.disabled = !advancedEnabled;
+        if (target) {
+          target.disabled = !advancedEnabled || !toggle.checked;
+        }
+      });
+    }
+
+    function applyRouteDefaults() {
+      var defaults = getRouteDefaults();
+      var shortestValue = defaults.shortest;
+      if (typeof shortestValue === 'boolean') {
+        shortestValue = shortestValue ? 1 : 0;
+      } else if (typeof shortestValue !== 'number' || !isFinite(shortestValue)) {
+        shortestValue = 0.2;
+      }
+      var advancedOptionsEnabled = defaults.advanced_options_enabled === true;
+      var tollValue = defaults.use_tolls != null ? defaults.use_tolls : (defaults.toll_penalty != null ? defaults.toll_penalty : 0.5);
+      var ferryValue = defaults.use_ferry != null ? defaults.use_ferry : (defaults.ferry_penalty != null ? defaults.ferry_penalty : 0.5);
+      var highwayValue = defaults.use_highways != null ? defaults.use_highways : (defaults.highway_penalty != null ? defaults.highway_penalty : 0.5);
+      var livingStreetValue = defaults.use_living_streets != null ? defaults.use_living_streets : (defaults.living_street_penalty != null ? defaults.living_street_penalty : 0.1);
+      var primaryValue = defaults.use_primary != null ? defaults.use_primary : (defaults.primary_penalty != null ? defaults.primary_penalty : 0.5);
+      var entries = [
+        ['costing', defaults.costing || 'auto'],
+        ['units', defaults.units || 'km'],
+        ['instruction-language', defaults.instruction_language || 'de'],
+        ['toll_penalty', tollValue],
+        ['ferry_penalty', ferryValue],
+        ['tunnel_penalty', defaults.tunnel_penalty == null ? 0 : defaults.tunnel_penalty],
+        ['highway_penalty', highwayValue],
+        ['unpaved_penalty', defaults.unpaved_penalty == null ? 0 : defaults.unpaved_penalty],
+        ['living_street_penalty', livingStreetValue],
+        ['primary_penalty', primaryValue],
+        ['shortest', shortestValue],
+        ['top_speed', defaults.top_speed == null ? 120 : defaults.top_speed],
+        ['width', defaults.width == null ? 2.0 : defaults.width],
+        ['height', defaults.height == null ? 2.0 : defaults.height],
+        ['length', defaults.length == null ? 5.0 : defaults.length],
+        ['weight', defaults.weight == null ? 1800 : defaults.weight],
+        ['axle_load', defaults.axle_load == null ? 1000 : defaults.axle_load],
+        ['hazmat', defaults.hazmat ? 'true' : ''],
+        ['use_service', defaults.use_service === false ? 'false' : 'true'],
+        ['use_trails', defaults.use_trails === true ? 'true' : 'false'],
+        ['use_tracks', defaults.use_tracks === true ? 'true' : 'false'],
+        ['use_residential', defaults.use_residential === false ? 'false' : 'true'],
+        ['use_primary', defaults.use_primary === false ? 'false' : 'true'],
+        ['advanced-options-enabled', advancedOptionsEnabled]
+      ];
+      entries.forEach(function(item) {
+        setFieldValue(item[0], item[1]);
+      });
+      var toggleEntries = [
+        ['toll_penalty_enabled', defaults.use_tolls_enabled === true || defaults.toll_penalty_enabled === true],
+        ['ferry_penalty_enabled', defaults.use_ferry_enabled === true || defaults.ferry_penalty_enabled === true],
+        ['tunnel_penalty_enabled', defaults.tunnel_penalty_enabled === true],
+        ['highway_penalty_enabled', defaults.use_highways_enabled === true || defaults.highway_penalty_enabled === true],
+        ['unpaved_penalty_enabled', defaults.unpaved_penalty_enabled === true],
+        ['living_street_penalty_enabled', defaults.use_living_streets_enabled === true || defaults.living_street_penalty_enabled === true],
+        ['primary_penalty_enabled', defaults.use_primary_enabled === true || defaults.primary_penalty_enabled === true],
+        ['use_primary_enabled', defaults.use_primary_select_enabled != null ? defaults.use_primary_select_enabled : (defaults.use_primary_enabled === true || defaults.primary_penalty_enabled === true)],
+        ['top_speed_enabled', defaults.top_speed_enabled === true],
+        ['width_enabled', defaults.width_enabled === true],
+        ['height_enabled', defaults.height_enabled === true],
+        ['length_enabled', defaults.length_enabled === true],
+        ['weight_enabled', defaults.weight_enabled === true],
+        ['axle_load_enabled', defaults.axle_load_enabled === true],
+        ['hazmat_enabled', defaults.hazmat_enabled === true],
+        ['use_service_enabled', defaults.use_service_enabled === true],
+        ['use_trails_enabled', defaults.use_trails_enabled === true],
+        ['use_tracks_enabled', defaults.use_tracks_enabled === true],
+        ['use_residential_enabled', defaults.use_residential_enabled === true]
+      ];
+      toggleEntries.forEach(function(item) {
+        setFieldValue(item[0], item[1]);
+      });
+      setAdvancedOptionsVisibility();
+      updateShortestLabel();
+    }
+
+    function saveRouteDefaults() {
+      var payload = getPayload();
+      try {
+        localStorage.setItem(ROUTE_DEFAULTS_KEY, JSON.stringify(payload));
+        alert('Routing-Standards gespeichert.');
+      } catch (e) {
+        alert('Standards konnten nicht gespeichert werden.');
+      }
+    }
+
+    function resetRouteDefaults() {
+      try {
+        localStorage.removeItem(ROUTE_DEFAULTS_KEY);
+      } catch (e) {}
+      applyRouteDefaults();
+      alert('Routing-Standards zurückgesetzt.');
+    }
+
+    function getPayload() {
+      var shortestRaw = document.getElementById('shortest').value;
+      var shortestValue = parseFloat(shortestRaw);
+      if (!isFinite(shortestValue)) shortestValue = 0.2;
+      var advancedOptionsEnabled = isAdvancedOptionsEnabled();
+      var payload = {
+        start: { lat: parseFloat(document.getElementById('startLat').value),
+                 lon: parseFloat(document.getElementById('startLon').value) },
+        end:   { lat: parseFloat(document.getElementById('endLat').value),
+                 lon: parseFloat(document.getElementById('endLon').value) },
+        costing: document.getElementById('costing').value,
+        units:   document.getElementById('units').value,
+        instruction_language: document.getElementById('instruction-language').value,
+        shortest: shortestValue,
+        advanced_options_enabled: advancedOptionsEnabled
+      };
+      if (advancedOptionsEnabled) {
+        payload.use_tolls_enabled = document.getElementById('toll_penalty_enabled').checked;
+        payload.use_ferry_enabled = document.getElementById('ferry_penalty_enabled').checked;
+        payload.tunnel_penalty_enabled = document.getElementById('tunnel_penalty_enabled').checked;
+        payload.use_highways_enabled = document.getElementById('highway_penalty_enabled').checked;
+        payload.unpaved_penalty_enabled = document.getElementById('unpaved_penalty_enabled').checked;
+        payload.use_living_streets_enabled = document.getElementById('living_street_penalty_enabled').checked;
+        payload.use_primary_enabled = document.getElementById('primary_penalty_enabled').checked;
+        payload.use_primary_select_enabled = document.getElementById('use_primary_enabled').checked;
+        payload.top_speed_enabled = document.getElementById('top_speed_enabled').checked;
+        payload.width_enabled = document.getElementById('width_enabled').checked;
+        payload.height_enabled = document.getElementById('height_enabled').checked;
+        payload.length_enabled = document.getElementById('length_enabled').checked;
+        payload.weight_enabled = document.getElementById('weight_enabled').checked;
+        payload.axle_load_enabled = document.getElementById('axle_load_enabled').checked;
+        payload.hazmat_enabled = document.getElementById('hazmat_enabled').checked;
+        payload.use_service_enabled = document.getElementById('use_service_enabled').checked;
+        payload.use_trails_enabled = document.getElementById('use_trails_enabled').checked;
+        payload.use_tracks_enabled = document.getElementById('use_tracks_enabled').checked;
+        payload.use_residential_enabled = document.getElementById('use_residential_enabled').checked;
+        if (payload.use_tolls_enabled) payload.use_tolls = parseFloat(document.getElementById('toll_penalty').value);
+        if (payload.use_ferry_enabled) payload.use_ferry = parseFloat(document.getElementById('ferry_penalty').value);
+        if (payload.tunnel_penalty_enabled) payload.tunnel_penalty = parseFloat(document.getElementById('tunnel_penalty').value);
+        if (payload.use_highways_enabled) payload.use_highways = parseFloat(document.getElementById('highway_penalty').value);
+        if (payload.unpaved_penalty_enabled) payload.unpaved_penalty = parseFloat(document.getElementById('unpaved_penalty').value);
+        if (payload.use_living_streets_enabled) payload.use_living_streets = parseFloat(document.getElementById('living_street_penalty').value);
+        if (payload.use_primary_enabled) {
+          payload.use_primary = parseFloat(document.getElementById('primary_penalty').value);
+        } else if (document.getElementById('use_primary_enabled').checked) {
+          payload.use_primary = document.getElementById('use_primary').value === 'true' ? 1.0 : 0.0;
+        }
+        if (payload.top_speed_enabled) payload.top_speed = parseFloat(document.getElementById('top_speed').value);
+        if (payload.width_enabled) payload.width = parseFloat(document.getElementById('width').value);
+        if (payload.height_enabled) payload.height = parseFloat(document.getElementById('height').value);
+        if (payload.length_enabled) payload.length = parseFloat(document.getElementById('length').value);
+        if (payload.weight_enabled) payload.weight = parseFloat(document.getElementById('weight').value);
+        if (payload.axle_load_enabled) payload.axle_load = parseFloat(document.getElementById('axle_load').value);
+        if (payload.hazmat_enabled) payload.hazmat = document.getElementById('hazmat').value === 'true';
+        if (payload.use_service_enabled) payload.use_service = document.getElementById('use_service').value === 'true';
+        if (payload.use_trails_enabled) payload.use_trails = document.getElementById('use_trails').value === 'true';
+        if (payload.use_tracks_enabled) payload.use_tracks = document.getElementById('use_tracks').value === 'true';
+        if (payload.use_residential_enabled) payload.use_residential = document.getElementById('use_residential').value === 'true';
+      }
+      return payload;
+    }
+
+    function hasValidPoints(payload) {
+      return isFinite(payload.start.lat) && isFinite(payload.start.lon) &&
+             isFinite(payload.end.lat) && isFinite(payload.end.lon);
+    }
+
+    var shortestInput = document.getElementById('shortest');
+    if (shortestInput) {
+      shortestInput.addEventListener('input', updateShortestLabel);
+      shortestInput.addEventListener('change', updateShortestLabel);
+    }
+    var advancedToggle = document.getElementById('advanced-options-enabled');
+    if (advancedToggle) {
+      advancedToggle.addEventListener('change', setAdvancedOptionsVisibility);
+    }
+    var advancedOptionToggles = document.querySelectorAll('#advanced-options input[type="checkbox"][data-target]');
+    Array.prototype.forEach.call(advancedOptionToggles, function(toggle) {
+      toggle.addEventListener('change', syncAdvancedInputStates);
+    });
+    applyRouteDefaults();
+
+    async function doRoute() {
+      var box = document.getElementById('result-box');
+      var payload = getPayload();
+      if (!hasValidPoints(payload)) {
+        box.innerHTML = '<span class="err">Bitte Start und Ziel setzen (Adresse suchen oder auf die Karte klicken).</span>';
+        return;
+      }
+      box.innerHTML = '&#8987; Route wird berechnet ...';
+      try {
+        var resp = await fetch('/api/route', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        var data = await resp.json();
+        if (data.error) {
+          box.innerHTML = '<span class="err">Fehler: ' + data.error + '</span>';
+          return;
+        }
+        var units = data.units || 'km';
+        var dist = data.distance != null ? data.distance.toFixed(2) + ' ' + units : '?';
+        var time = data.time_seconds != null ? fmtDuration(Math.round(data.time_seconds)) : '?';
+        box.innerHTML = '<span class="ok">&#10003; Route gefunden</span><br>' +
+          'Distanz: <b>' + dist + '</b><br>Fahrzeit: <b>' + time + '</b>';
+        if (data.trip) {
+          drawRoute(data.trip);
+          renderRouteInstructions(data.trip);
+        } else {
+          renderRouteInstructions(null);
+        }
+        setMarker('start', payload.start.lat, payload.start.lon);
+        setMarker('end', payload.end.lat, payload.end.lon);
+      } catch(err) {
+        box.innerHTML = '<span class="err">Netzwerkfehler: ' + err + '</span>';
+      }
+    }
+
+    async function doDistance() {
+      var box = document.getElementById('result-box');
+      var payload = getPayload();
+      if (!hasValidPoints(payload)) {
+        box.innerHTML = '<span class="err">Bitte Start und Ziel setzen (Adresse suchen oder auf die Karte klicken).</span>';
+        return;
+      }
+      box.innerHTML = '&#8987; Distanz wird berechnet ...';
+      try {
+        var resp = await fetch('/api/distance', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        var data = await resp.json();
+        if (data.error) {
+          box.innerHTML = '<span class="err">Fehler: ' + data.error + '</span>';
+          return;
+        }
+        var units = document.getElementById('units').value;
+        var dist = data.distance != null ? data.distance.toFixed(2) + ' ' + units : '?';
+        var time = data.time_seconds != null ? fmtDuration(Math.round(data.time_seconds)) : '?';
+        box.innerHTML = '<span class="ok">&#10003; Distanz ermittelt</span><br>' +
+          'Distanz: <b>' + dist + '</b><br>Fahrzeit: <b>' + time + '</b>';
+      } catch(err) {
+        box.innerHTML = '<span class="err">Netzwerkfehler: ' + err + '</span>';
+      }
+    }
+
+    async function geocode(which) {
+      var addrInput = document.getElementById(which + 'Addr').value.trim();
+      if (!addrInput) return;
+      var provider = document.getElementById('geocoder-provider').value || 'photon_nominatim';
+      var box = document.getElementById('result-box');
+      box.innerHTML = '&#128269; Suche: ' + addrInput + ' ...';
+      try {
+        var resp = await fetch('/api/geocode?provider=' + encodeURIComponent(provider) + '&q=' + encodeURIComponent(addrInput));
+        var data = await resp.json();
+        if (data.error) { box.innerHTML = '<span class="err">Geocoding-Fehler: ' + data.error + '</span>'; return; }
+        var results = data.results || [];
+        if (results.length === 0) { box.innerHTML = '<span class="err">Keine Treffer fuer: ' + addrInput + '</span>'; return; }
+        var r = results[0];
+        setMarker(which, parseFloat(r.lat), parseFloat(r.lon));
+        map.flyTo({center: [parseFloat(r.lon), parseFloat(r.lat)], zoom: 15});
+        var providerLabel = provider === 'pelias' ? 'Pelias' : 'Photon+Nominatim';
+        box.innerHTML = '<span class="ok">&#10003; ' + (which === 'start' ? 'Start' : 'Ziel') + ' gesetzt (' + providerLabel + ')</span><br>' + (r.display_name || '');
+      } catch(err) {
+        box.innerHTML = '<span class="err">Geocoding-Fehler: ' + err + '</span>';
+      }
+    }
+
+    function updateGeocoderUi() {
+      var provider = document.getElementById('geocoder-provider').value || 'photon_nominatim';
+      var photonOnly = provider !== 'pelias';
+      var peliasOnly = provider === 'pelias';
+      document.querySelectorAll('.provider-photon-only').forEach(function(el) {
+        el.classList.toggle('hidden', !photonOnly);
+      });
+      document.querySelectorAll('.provider-pelias-only').forEach(function(el) {
+        el.classList.toggle('hidden', !peliasOnly);
+      });
+      if (!photonOnly) {
+        closePhotonResults('start');
+        closePhotonResults('end');
+      }
+      if (!peliasOnly) {
+        closePeliasResults('start');
+        closePeliasResults('end');
+      }
+    }
+
+    // --- Photon full-text search-as-you-type ---------------------------------
+    // Extra fields (startPhoton/endPhoton) query Photon (a full search engine
+    // on top of the OSM data) starting at the 3rd typed character and show a
+    // suggestion dropdown. Picking a suggestion resolves its OSM id/type via
+    // Nominatim's /lookup so the normal address/lat/lon fields end up filled
+    // exactly like a manual Nominatim search would ("Alternativ geocoding
+    // direkt ueber Photon"): if the Nominatim lookup fails, Photon's own
+    // coordinates/name are used directly as a fallback so the search still
+    // succeeds.
+    var photonState = {
+      start: { timer: null, requestId: 0, items: [], active: -1 },
+      end: { timer: null, requestId: 0, items: [], active: -1 }
+    };
+
+    function closePhotonResults(which) {
+      var box = document.getElementById(which + 'PhotonResults');
+      box.style.display = 'none';
+      box.innerHTML = '';
+      photonState[which].items = [];
+      photonState[which].active = -1;
+    }
+
+    function onPhotonInput(which) {
+      var state = photonState[which];
+      var query = document.getElementById(which + 'Photon').value.trim();
+      clearTimeout(state.timer);
+      if (query.length < 3) {
+        closePhotonResults(which);
+        return;
+      }
+      // Small debounce so we do not fire a request on every single keystroke.
+      state.timer = setTimeout(function() { runPhotonSearch(which, query); }, 250);
+    }
+
+    async function runPhotonSearch(which, query) {
+      var state = photonState[which];
+      var myRequestId = ++state.requestId;
+      try {
+        var resp = await fetch('/api/photon-search?q=' + encodeURIComponent(query) + '&limit=10');
+        var data = await resp.json();
+        // Ignore stale responses from a previous, slower request.
+        if (myRequestId !== state.requestId) return;
+        var features = (data.features || []);
+        state.items = features;
+        renderPhotonResults(which, features);
+      } catch (e) {
+        if (myRequestId !== state.requestId) return;
+        closePhotonResults(which);
+      }
+    }
+
+    function photonLabel(props) {
+      props = props || {};
+      var parts = [props.name, props.street, props.city, props.state, props.country].filter(function(p) { return !!p; });
+      return parts.join(', ') || 'Unbenannt';
+    }
+
+    function renderPhotonResults(which, features) {
+      var box = document.getElementById(which + 'PhotonResults');
+      var state = photonState[which];
+      state.active = -1;
+      if (!features.length) {
+        box.innerHTML = '<div>Keine Treffer</div>';
+        box.style.display = 'block';
+        return;
+      }
+      box.innerHTML = '';
+      features.forEach(function(feature, idx) {
+        var entry = document.createElement('div');
+        entry.textContent = photonLabel(feature.properties);
+        entry.dataset.index = idx;
+        entry.onclick = function() { selectPhotonResult(which, idx); };
+        box.appendChild(entry);
+      });
+      box.style.display = 'block';
+    }
+
+    function onPhotonKeydown(event, which) {
+      var state = photonState[which];
+      if (!state.items.length) return;
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        state.active = Math.min(state.active + 1, state.items.length - 1);
+        highlightPhotonResult(which);
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        state.active = Math.max(state.active - 1, 0);
+        highlightPhotonResult(which);
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        if (state.active >= 0) selectPhotonResult(which, state.active);
+      } else if (event.key === 'Escape') {
+        closePhotonResults(which);
+      }
+    }
+
+    function highlightPhotonResult(which) {
+      var box = document.getElementById(which + 'PhotonResults');
+      var state = photonState[which];
+      Array.prototype.forEach.call(box.children, function(child, idx) {
+        child.classList.toggle('active', idx === state.active);
+      });
+    }
+
+    // Selecting a suggestion takes over its OSM id/type and looks it up in
+    // Nominatim to populate the normal address field the same way the
+    // "Adresse suchen" button does. If that lookup does not succeed (e.g.
+    // Nominatim does not carry the object for some reason), Photon's own
+    // coordinates/name are used as a direct-geocoding fallback.
+    async function selectPhotonResult(which, idx) {
+      var state = photonState[which];
+      var feature = state.items[idx];
+      closePhotonResults(which);
+      document.getElementById(which + 'Photon').value = photonLabel(feature.properties);
+      var box = document.getElementById('result-box');
+      var props = feature.properties || {};
+      var coords = (feature.geometry && feature.geometry.coordinates) || null;
+      box.innerHTML = '&#128269; Löse Photon-Treffer über Nominatim auf ...';
+      try {
+        if (!props.osm_type || !props.osm_id) throw new Error('kein osm_id/osm_type in Photon-Ergebnis');
+        var resp = await fetch('/api/nominatim-lookup?osm_type=' + encodeURIComponent(props.osm_type) + '&osm_id=' + encodeURIComponent(props.osm_id));
+        var data = await resp.json();
+        if (data.error || !data.result) throw new Error(data.error || 'keine Nominatim-Entsprechung gefunden');
+        var r = data.result;
+        document.getElementById(which + 'Addr').value = r.display_name || photonLabel(props);
+        setMarker(which, parseFloat(r.lat), parseFloat(r.lon));
+        map.flyTo({center: [parseFloat(r.lon), parseFloat(r.lat)], zoom: 15});
+        box.innerHTML = '<span class="ok">&#10003; ' + (which === 'start' ? 'Start' : 'Ziel') + ' via Photon+Nominatim gesetzt</span><br>' + (r.display_name || '');
+      } catch (err) {
+        // Alternative geocoding directly via Photon's own result/coordinates.
+        if (coords && coords.length === 2) {
+          document.getElementById(which + 'Addr').value = photonLabel(props);
+          setMarker(which, coords[1], coords[0]);
+          map.flyTo({center: [coords[0], coords[1]], zoom: 15});
+          box.innerHTML = '<span class="ok">&#10003; ' + (which === 'start' ? 'Start' : 'Ziel') + ' direkt via Photon gesetzt</span><br>' + photonLabel(props) +
+            '<div class="hint">Nominatim-Abgleich nicht möglich (' + esc(String(err)) + '), Photon-Koordinaten direkt übernommen.</div>';
+        } else {
+          box.innerHTML = '<span class="err">Photon-Auswahl konnte nicht übernommen werden: ' + esc(String(err)) + '</span>';
+        }
+      }
+    }
+
+    document.addEventListener('click', function(event) {
+      ['start', 'end'].forEach(function(which) {
+        var wrap = document.getElementById(which + 'Photon').closest('.photon-search');
+        if (wrap && !wrap.contains(event.target)) closePhotonResults(which);
+        var wrapP = document.getElementById(which + 'Pelias') && document.getElementById(which + 'Pelias').closest('.pelias-search');
+        if (wrapP && !wrapP.contains(event.target)) closePeliasResults(which);
+      });
+    });
+    // --- Pelias full-text search-as-you-type ---------------------------------
+    var peliasState = {
+      start: { timer: null, requestId: 0, items: [], active: -1 },
+      end:   { timer: null, requestId: 0, items: [], active: -1 }
+    };
+
+    function closePeliasResults(which) {
+      var box = document.getElementById(which + 'PeliasResults');
+      if (!box) return;
+      box.style.display = 'none';
+      box.innerHTML = '';
+      peliasState[which].items = [];
+      peliasState[which].active = -1;
+    }
+
+    function onPeliasInput(which) {
+      var state = peliasState[which];
+      var query = document.getElementById(which + 'Pelias').value.trim();
+      clearTimeout(state.timer);
+      if (query.length < 3) {
+        closePeliasResults(which);
+        return;
+      }
+      state.timer = setTimeout(function() { runPeliasSearch(which, query); }, 250);
+    }
+
+    async function runPeliasSearch(which, query) {
+      var state = peliasState[which];
+      var myRequestId = ++state.requestId;
+      try {
+        var resp = await fetch('/api/pelias-search?q=' + encodeURIComponent(query) + '&limit=10');
+        var data = await resp.json();
+        if (myRequestId !== state.requestId) return;
+        var items = (data.results || []);
+        state.items = items;
+        renderPeliasResults(which, items);
+      } catch (e) {
+        if (myRequestId !== state.requestId) return;
+        closePeliasResults(which);
+      }
+    }
+
+    function renderPeliasResults(which, items) {
+      var box = document.getElementById(which + 'PeliasResults');
+      var state = peliasState[which];
+      state.active = -1;
+      if (!items.length) {
+        box.innerHTML = '<div>Keine Treffer</div>';
+        box.style.display = 'block';
+        return;
+      }
+      box.innerHTML = '';
+      items.forEach(function(item, idx) {
+        var entry = document.createElement('div');
+        entry.textContent = item.display_name || 'Unbenannt';
+        entry.dataset.index = idx;
+        entry.onclick = function() { selectPeliasResult(which, idx); };
+        box.appendChild(entry);
+      });
+      box.style.display = 'block';
+    }
+
+    function onPeliasKeydown(event, which) {
+      var state = peliasState[which];
+      if (!state.items.length) return;
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        state.active = Math.min(state.active + 1, state.items.length - 1);
+        highlightPeliasResult(which);
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        state.active = Math.max(state.active - 1, 0);
+        highlightPeliasResult(which);
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        if (state.active >= 0) selectPeliasResult(which, state.active);
+      } else if (event.key === 'Escape') {
+        closePeliasResults(which);
+      }
+    }
+
+    function highlightPeliasResult(which) {
+      var box = document.getElementById(which + 'PeliasResults');
+      var state = peliasState[which];
+      Array.prototype.forEach.call(box.children, function(child, idx) {
+        child.classList.toggle('active', idx === state.active);
+      });
+    }
+
+    function selectPeliasResult(which, idx) {
+      var state = peliasState[which];
+      var item = state.items[idx];
+      closePeliasResults(which);
+      document.getElementById(which + 'Pelias').value = item.display_name || '';
+      document.getElementById(which + 'Addr').value = item.display_name || '';
+      setMarker(which, parseFloat(item.lat), parseFloat(item.lon));
+      map.flyTo({center: [parseFloat(item.lon), parseFloat(item.lat)], zoom: 15});
+      var box = document.getElementById('result-box');
+      box.innerHTML = '<span class="ok">&#10003; ' + (which === 'start' ? 'Start' : 'Ziel') + ' via Pelias gesetzt</span><br>' + esc(item.display_name || '');
+    }
+
+    function esc(value) {
+      return String(value).replace(/[&<>"']/g, function(c) {
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+      });
+    }
+
+    updateGeocoderUi();
+    </script>
+    </body>
+    </html>
+    """
+
+    class Handler(BaseHTTPRequestHandler):
+        def _send_json(self, payload, status=200):
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
+
+        @staticmethod
+        def _friendly_error(exc, service_name):
+            msg = str(exc)
+            if "111" in msg or "Connection refused" in msg or "ConnectionRefused" in msg:
+                return (
+                    f"{service_name} ist noch nicht erreichbar (startet noch oder importiert Daten). "
+                    "Bitte warten und den Status im Dashboard prüfen."
+                )
+            if "timed out" in msg.lower() or "timeout" in msg.lower():
+                return (
+                    f"{service_name} antwortet nicht (Timeout). "
+                    "Möglicherweise läuft noch ein Daten-Import."
+                )
+            return msg
+
+        def do_GET(self):
+            if self.path in {"/", "/index.html"}:
+                html = INDEX_HTML
+                if STATUS_URL:
+                    html = html.replace("http://NODEIP:30083/", STATUS_URL.rstrip("/") + "/")
+                body = html.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
+            if self.path == "/favicon.ico":
+                self.send_response(200)
+                self.send_header("Content-Type", "image/gif")
+                self.send_header("Content-Length", str(len(FAVICON_GIF)))
+                self.end_headers()
+                self.wfile.write(FAVICON_GIF)
+                return
+
+            if self.path == "/healthz":
+                self._send_json({"status": "ok"})
+                return
+
+            if self.path.startswith("/fonts/"):
+                # Proxy MapLibre GL glyph PBF requests to TileServer-GL.
+                # TileServer-GL generates PBF files from TTF/OTF sources on demand.
+                # This avoids cross-origin requests to TileServer-GL (port 30085).
+                font_url = TILESERVER_URL + "/fonts" + self.path[len("/fonts"):]
+                try:
+                    req = urllib.request.Request(font_url, headers={
+                        "User-Agent": "localosm-web/1.0",
+                        "Accept-Encoding": "gzip"
+                    })
+                    with urllib.request.urlopen(req, timeout=10) as response:
+                        http_status = response.status
+                        body = response.read()
+                        content_type = response.headers.get("Content-Type", "application/x-protobuf")
+                        content_encoding = response.headers.get("Content-Encoding", "").lower()
+                    
+                    # Handle gzip decompression (same as tile proxy).
+                    is_gzip_header = content_encoding == "gzip"
+                    is_gzip_magic = len(body) >= 2 and body[0:2] == b'\x1f\x8b'
+                    
+                    if is_gzip_header or is_gzip_magic:
+                        try:
+                            body = gzip.decompress(body)
+                        except Exception:
+                            pass  # Not valid gzip; send as-is
+                    
+                    self.send_response(http_status)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(body)
+                except urllib.error.HTTPError as e:
+                    self.send_response(e.code)
+                    self.end_headers()
+                except Exception:
+                    self.send_response(502)
+                    self.end_headers()
+                return
+
+            if self.path == "/api/style":
+                # Serve the style actually configured in TileServer-GL (e.g. via the
+                # Maputnik style editor / status dashboard "/api/style"), so the
+                # routing window's map matches what is configured there instead of
+                # a hardcoded style baked into this page.
+                try:
+                    req = urllib.request.Request(
+                        f"{TILESERVER_URL}/styles/osm/style.json",
+                        headers={"User-Agent": "localosm-web/1.0"}
+                    )
+                    with urllib.request.urlopen(req, timeout=10) as response:
+                        text = response.read().decode("utf-8")
+                    # TileServer-GL rewrites relative source/glyphs/sprite URLs to
+                    # absolute URLs based on the Host header of this request (i.e.
+                    # its own internal cluster address). Strip those absolute
+                    # prefixes so the browser fetches tiles/fonts/sprites from this
+                    # same origin (via the existing /tiles, /fonts and /styles
+                    # proxies below), avoiding CORS/network-policy issues.
+                    text = re.sub(r'https?://[^"]*?/data/v3', '/tiles', text)
+                    text = re.sub(r'https?://[^"]*?/fonts', '/fonts', text)
+                    text = re.sub(r'https?://[^"]*?/styles', '/styles', text)
+                    style = json.loads(text)
+                    self._send_json(style)
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": self._friendly_error(exc, "TileServer GL")}, 502)
+                return
+
+            if self.path.startswith("/styles/"):
+                # Proxy style-relative assets (e.g. sprite.json/sprite.png) that a
+                # configured style may reference, from the same origin as /api/style.
+                asset_url = TILESERVER_URL + self.path
+                try:
+                    req = urllib.request.Request(asset_url, headers={
+                        "User-Agent": "localosm-web/1.0",
+                        "Accept-Encoding": "gzip"
+                    })
+                    with urllib.request.urlopen(req, timeout=10) as response:
+                        http_status = response.status
+                        body = response.read()
+                        content_type = response.headers.get("Content-Type", "application/octet-stream")
+                        content_encoding = response.headers.get("Content-Encoding", "").lower()
+
+                    is_gzip_header = content_encoding == "gzip"
+                    is_gzip_magic = len(body) >= 2 and body[0:2] == b'\x1f\x8b'
+                    if is_gzip_header or is_gzip_magic:
+                        try:
+                            body = gzip.decompress(body)
+                        except Exception:
+                            pass
+
+                    self.send_response(http_status)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(body)
+                except urllib.error.HTTPError as e:
+                    self.send_response(e.code)
+                    self.end_headers()
+                except Exception:
+                    self.send_response(502)
+                    self.end_headers()
+                return
+
+            if self.path == "/tiles.json":
+                # TileServer-GL's style.json advertises its vector source via a
+                # "url" field pointing at its own TileJSON endpoint (.../data/v3.json).
+                # The /api/style rewriting above turns that absolute URL into
+                # "/tiles.json" on this origin (mirroring the /tiles/{z}/{x}/{y}.pbf
+                # rewrite used for inline "tiles" arrays), so MapLibre GL requests
+                # it here. Proxy TileServer-GL's TileJSON and rewrite its "tiles"
+                # array to point back at the /tiles/{z}/{x}/{y}.pbf proxy above,
+                # instead of TileServer-GL's own (internal, CORS-blocked) URLs.
+                try:
+                    req = urllib.request.Request(
+                        f"{TILESERVER_URL}/data/v3.json",
+                        headers={"User-Agent": "localosm-web/1.0"}
+                    )
+                    with urllib.request.urlopen(req, timeout=10) as response:
+                        tilejson = json.loads(response.read().decode("utf-8"))
+                    # MapLibre GL fetches TileJSON "tiles" entries from a worker
+                    # context that has no document/page base URL, so (unlike the
+                    # "tiles"/"glyphs" fields embedded directly in a style.json,
+                    # which MapLibre resolves against the page origin) a leading-
+                    # slash relative URL here is rejected with "not a valid URL".
+                    # Build an absolute URL instead, using this same request's own
+                    # Host header (this deployment is plain HTTP only, no TLS
+                    # termination anywhere in front of it, see k8s/web.yaml) so the
+                    # tiles are always fetched from this same origin/proxy. Validate
+                    # the header against a strict hostname[:port]/IPv4[:port]/
+                    # [IPv6][:port] pattern first so a malformed/spoofed Host
+                    # header can't inject an arbitrary scheme or extra URL parts
+                    # into the response; fall back to the Server header default.
+                    host = self.headers.get("Host", "")
+                    # Validate as: "[" IPv6 "]" | hostname-label(.hostname-label)*
+                    # each followed by an optional ":port". Labels can't start/end
+                    # with "-" and consecutive/leading/trailing "." are rejected,
+                    # matching standard hostname syntax rules. This deliberately
+                    # doesn't fully validate IPv6 grouping/segment-count (accepting
+                    # e.g. "[::::]") or reject the syntactically-valid-looking
+                    # port "99999" via regex alone (checked numerically below
+                    # instead) -- this value is only ever placed into a JSON
+                    # string field for the browser's own same-origin tile fetch,
+                    # never parsed/executed server-side, so a merely malformed
+                    # (as opposed to injected) address/port cannot cause harm
+                    # beyond that one client's own tile requests failing.
+                    ipv6_part = r"\[[0-9A-Fa-f:]+\]"
+                    label_part = r"[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?"
+                    hostname_part = rf"{label_part}(\.{label_part})*"
+                    port_part = r"(:(?P<port>\d{1,5}))?"
+                    host_re = rf"({ipv6_part}|{hostname_part}){port_part}"
+                    match = re.fullmatch(host_re, host)
+                    port = match.group("port") if match else None
+                    if not match or (port is not None and int(port) > 65535):
+                        # Malformed/spoofed Host header: fall back to this
+                        # HTTPServer's own bind address/port (set at startup,
+                        # not client-controlled), so the URL still points back
+                        # at this same origin/proxy.
+                        host = f"{self.server.server_name}:{self.server.server_port}"
+                    tilejson["tiles"] = [f"http://{host}/tiles/{{z}}/{{x}}/{{y}}.pbf"]
+                    self._send_json(tilejson)
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": self._friendly_error(exc, "TileServer GL")}, 502)
+                return
+
+            if self.path.startswith("/tiles/"):
+                # Proxy vector tile requests to TileServer-GL via the internal K8s service.
+                # This serves tiles from the same origin as the web page, avoiding CORS issues.
+                z_x_y = self.path[len("/tiles"):]  # e.g. /14/8845/6436.pbf
+                tile_url = TILESERVER_URL + "/data/v3" + z_x_y
+                try:
+                    # Request gzip encoding to reduce network transfer; will conditionally decompress here
+                    # based on Content-Encoding header and gzip magic bytes detection.
+                    req = urllib.request.Request(tile_url, headers={
+                        "User-Agent": "localosm-web/1.0",
+                        "Accept-Encoding": "gzip"
+                    })
+                    with urllib.request.urlopen(req, timeout=10) as response:
+                        http_status = response.status
+                        body = response.read()
+                        content_type = response.headers.get("Content-Type", "application/x-protobuf")
+                        content_encoding = response.headers.get("Content-Encoding", "").lower()
+                    
+                    # Handle gzip decompression. Check both Content-Encoding header and gzip magic bytes.
+                    # TileServer-GL may omit the header but still send gzip data.
+                    is_gzip_header = content_encoding == "gzip"
+                    is_gzip_magic = len(body) >= 2 and body[0:2] == b'\x1f\x8b'
+                    
+                    if is_gzip_header or is_gzip_magic:
+                        try:
+                            body = gzip.decompress(body)
+                            if is_gzip_magic and not is_gzip_header:
+                                print(f"debug: Detected gzip by magic bytes (no Content-Encoding header) for {tile_url}", flush=True)
+                        except (gzip.BadGzipFile, OSError) as e:
+                            print(f"error: Gzip decompression failed (body size {len(body)}, header={is_gzip_header}, magic={is_gzip_magic}): {e}", flush=True)
+                            # Log additional context when header indicated gzip but decompression failed
+                            if is_gzip_header:
+                                print(f"error: Content-Encoding header claimed gzip but decompression failed for {tile_url}", flush=True)
+                            else:
+                                print(f"warning: Malformed gzip data detected for {tile_url}, forwarding as-is", flush=True)
+                    
+                    if len(body) == 0:
+                        print(f"debug: Empty tile response (status={http_status}) from {tile_url}", flush=True)
+                    
+                    # Forward the upstream HTTP status code (e.g., 204 No Content) instead of always 200.
+                    # This allows clients to handle empty/non-existent tiles correctly.
+                    try:
+                        self.send_response(http_status)
+                        self.send_header("Content-Type", content_type)
+                        self.send_header("Content-Length", str(len(body)))
+                        self.send_header("Cache-Control", "max-age=86400")
+                        self.end_headers()
+                        if len(body) > 0:
+                            self.wfile.write(body)
+                    except BrokenPipeError:
+                        print(f"debug: Client disconnected while sending tile {z_x_y}", flush=True)
+                except urllib.error.HTTPError as e:
+                    try:
+                        self.send_response(e.code)
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                    except BrokenPipeError:
+                        print(f"debug: Client disconnected during error response for {tile_url}", flush=True)
+                except Exception as exc:
+                    error_msg = f"Tile proxy error: {type(exc).__name__}: {str(exc)}"
+                    print(error_msg, flush=True)
+                    try:
+                        self.send_response(502)
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                    except BrokenPipeError:
+                        print(f"debug: Client disconnected during error response for {tile_url}", flush=True)
+                return
+
+            if self.path.startswith("/static/"):
+                filename = self.path[len("/static/"):]
+                allowed = {"maplibre-gl.js": "application/javascript", "maplibre-gl.css": "text/css"}
+                if filename not in allowed:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                filepath = os.path.join("/data/static", filename)
+                try:
+                    with open(filepath, "rb") as f:
+                        body = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", allowed[filename])
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                except FileNotFoundError:
+                    self.send_response(503)
+                    self.end_headers()
+                return
+
+            if self.path == "/api/status":
+                self._send_json({"status": "ok", "valhalla": VALHALLA_URL, "nominatim": NOMINATIM_URL, "photon": PHOTON_URL, "pelias": PELIAS_URL})
+                return
+
+            if self.path == "/api/bounds":
+                # Report the actual extent of the imported map data (from TileServer-GL's
+                # TileJSON) so the client can zoom/center on the real data instead of a
+                # hardcoded location that may not match what was imported (e.g. Luxembourg).
+                try:
+                    req = urllib.request.Request(
+                        f"{TILESERVER_URL}/data/v3.json",
+                        headers={"User-Agent": "localosm-web/1.0"}
+                    )
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        data = json.loads(response.read().decode("utf-8"))
+                    bounds = data.get("bounds")
+                    if not (isinstance(bounds, list) and len(bounds) == 4):
+                        self._send_json({"bounds": None})
+                        return
+                    self._send_json({"bounds": bounds})
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"bounds": None, "error": self._friendly_error(exc, "TileServer GL")})
+                return
+
+            if self.path.startswith("/api/geocode"):
+                query = self.path.split("?", 1)[1] if "?" in self.path else ""
+                params = urllib.parse.parse_qs(query)
+                provider = params.get("provider", ["photon_nominatim"])[0].strip().lower()
+                if provider not in {"pelias", "photon_nominatim"}:
+                    self._send_json({"error": "invalid provider (allowed: pelias, photon_nominatim)"}, 400)
+                    return
+                q = params.get("q", [""])[0]
+                if not q:
+                    self._send_json({"error": "missing query parameter q"}, 400)
+                    return
+                try:
+                    if provider == "pelias":
+                        req = urllib.request.Request(
+                            f"{PELIAS_URL}/v1/search?text={urllib.parse.quote(q)}&size=10",
+                            headers={"User-Agent": "localosm-web/1.0"}
+                        )
+                        with urllib.request.urlopen(req, timeout=5) as response:
+                            data = json.loads(response.read().decode("utf-8"))
+                        features = data.get("features", []) if isinstance(data, dict) else []
+                        mapped = []
+                        for feature in features:
+                            coords = ((feature or {}).get("geometry") or {}).get("coordinates") or []
+                            props = (feature or {}).get("properties") or {}
+                            if not isinstance(coords, list) or len(coords) != 2:
+                                continue
+                            mapped.append({
+                                "lat": coords[1],
+                                "lon": coords[0],
+                                "display_name": props.get("label") or props.get("name") or q,
+                            })
+                        self._send_json({"results": mapped})
+                    else:
+                        req = urllib.request.Request(
+                            f"{NOMINATIM_URL}/search?q={urllib.parse.quote(q)}&format=jsonv2&limit=1",
+                            headers={"User-Agent": "localosm-web/1.0"}
+                        )
+                        with urllib.request.urlopen(req, timeout=5) as response:
+                            data = json.loads(response.read().decode("utf-8"))
+                        self._send_json({"results": data})
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": self._friendly_error(exc, "Pelias" if provider == "pelias" else "Nominatim (Geocoding)")}, 502)
+                return
+
+            if self.path.startswith("/api/reverse"):
+                query = self.path.split("?", 1)[1] if "?" in self.path else ""
+                params = urllib.parse.parse_qs(query)
+                provider = params.get("provider", ["photon_nominatim"])[0].strip().lower()
+                if provider not in {"pelias", "photon_nominatim"}:
+                    self._send_json({"error": "invalid provider (allowed: pelias, photon_nominatim)"}, 400)
+                    return
+                lat = params.get("lat", [""])[0]
+                lon = params.get("lon", [""])[0]
+                if not lat or not lon:
+                    self._send_json({"error": "missing lat/lon parameters"}, 400)
+                    return
+                try:
+                    if provider == "pelias":
+                        req = urllib.request.Request(
+                            f"{PELIAS_URL}/v1/reverse?point.lat={urllib.parse.quote(lat)}&point.lon={urllib.parse.quote(lon)}&size=1",
+                            headers={"User-Agent": "localosm-web/1.0"}
+                        )
+                        with urllib.request.urlopen(req, timeout=5) as response:
+                            data = json.loads(response.read().decode("utf-8"))
+                        features = data.get("features", []) if isinstance(data, dict) else []
+                        first = features[0] if features else {}
+                        props = (first or {}).get("properties") or {}
+                        self._send_json({"display_name": props.get("label") or props.get("name") or ""})
+                    else:
+                        req = urllib.request.Request(
+                            f"{NOMINATIM_URL}/reverse?lat={urllib.parse.quote(lat)}&lon={urllib.parse.quote(lon)}&format=jsonv2",
+                            headers={"User-Agent": "localosm-web/1.0"}
+                        )
+                        with urllib.request.urlopen(req, timeout=5) as response:
+                            data = json.loads(response.read().decode("utf-8"))
+                        self._send_json({"display_name": data.get("display_name", "")})
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": self._friendly_error(exc, "Pelias" if provider == "pelias" else "Nominatim (Reverse Geocoding)")}, 502)
+                return
+
+            if self.path.startswith("/api/photon-search"):
+                # Search-as-you-type suggestions for the extra Photon fields;
+                # Photon is a dedicated full-text search engine on top of the
+                # imported OSM data (separate from Nominatim's own geocoder).
+                query = self.path.split("?", 1)[1] if "?" in self.path else ""
+                params = urllib.parse.parse_qs(query)
+                q = params.get("q", [""])[0]
+                if not q or len(q) < 3:
+                    self._send_json({"error": "query parameter q must be at least 3 characters"}, 400)
+                    return
+                limit = params.get("limit", ["10"])[0]
+                try:
+                    req = urllib.request.Request(
+                        f"{PHOTON_URL}/api?q={urllib.parse.quote(q)}&limit={urllib.parse.quote(limit)}&lang=de",
+                        headers={"User-Agent": "localosm-web/1.0"}
+                    )
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        data = json.loads(response.read().decode("utf-8"))
+                    self._send_json({"features": data.get("features", [])})
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": self._friendly_error(exc, "Photon (Volltextsuche)")}, 502)
+                return
+
+            if self.path.startswith("/api/pelias-search"):
+                # Search-as-you-type suggestions for the Pelias fields; queries
+                # Pelias' autocomplete endpoint directly and returns up to 10
+                # results.
+                query = self.path.split("?", 1)[1] if "?" in self.path else ""
+                params = urllib.parse.parse_qs(query)
+                q = params.get("q", [""])[0]
+                if not q or len(q) < 3:
+                    self._send_json({"error": "query parameter q must be at least 3 characters"}, 400)
+                    return
+                limit = params.get("limit", ["10"])[0]
+                try:
+                    req = urllib.request.Request(
+                        f"{PELIAS_URL}/v1/autocomplete?text={urllib.parse.quote(q)}&size={urllib.parse.quote(limit)}",
+                        headers={"User-Agent": "localosm-web/1.0"}
+                    )
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        data = json.loads(response.read().decode("utf-8"))
+                    features = data.get("features", []) if isinstance(data, dict) else []
+                    mapped = []
+                    for feature in features:
+                        coords = ((feature or {}).get("geometry") or {}).get("coordinates") or []
+                        props = (feature or {}).get("properties") or {}
+                        if not isinstance(coords, list) or len(coords) != 2:
+                            continue
+                        mapped.append({
+                            "lat": coords[1],
+                            "lon": coords[0],
+                            "display_name": props.get("label") or props.get("name") or q,
+                        })
+                    self._send_json({"results": mapped})
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": self._friendly_error(exc, "Pelias (Volltextsuche)")}, 502)
+                return
+
+
+            if self.path.startswith("/api/nominatim-lookup"):
+                # Resolves a Photon result's OSM id/type via Nominatim's
+                # /lookup so the normal address/lat/lon fields end up with the
+                # same data a manual Nominatim search would have produced.
+                query = self.path.split("?", 1)[1] if "?" in self.path else ""
+                params = urllib.parse.parse_qs(query)
+                osm_type = params.get("osm_type", [""])[0].strip().upper()
+                osm_id = params.get("osm_id", [""])[0].strip()
+                if osm_type not in {"N", "W", "R"} or not osm_id:
+                    self._send_json({"error": "osm_type (N/W/R) and osm_id are required"}, 400)
+                    return
+                try:
+                    req = urllib.request.Request(
+                        f"{NOMINATIM_URL}/lookup?osm_ids={osm_type}{urllib.parse.quote(osm_id)}&format=jsonv2",
+                        headers={"User-Agent": "localosm-web/1.0"}
+                    )
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        data = json.loads(response.read().decode("utf-8"))
+                    if not data:
+                        self._send_json({"error": "no matching Nominatim object found", "result": None})
+                        return
+                    self._send_json({"result": data[0]})
+                except Exception as exc:  # noqa: BLE001
+                    self._send_json({"error": self._friendly_error(exc, "Nominatim (Lookup)")}, 502)
+                return
+
+            if self.path == "/api/planet-update/status":
+                try:
+                    with open(PLANET_UPDATE_STATUS_FILE, "r", encoding="utf-8") as fh:
+                        data = json.load(fh)
+                    self._send_json(data)
+                except FileNotFoundError:
+                    self._send_json({"running": False, "last_success_at": "", "last_error": "", "output_file_mtime": ""})
+                except Exception as exc:
+                    self._send_json({"error": str(exc)}, 500)
+                return
+
+            self._send_json({"error": "not found"}, 404)
+
+        def do_POST(self):
+            content_length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(content_length) if content_length else b"{}"
+            try:
+                payload = json.loads(body.decode("utf-8"))
+            except Exception:
+                self._send_json({"error": "invalid json"}, 400)
+                return
+
+            if self.path == "/api/route":
+                self._forward_route(payload)
+                return
+
+            if self.path == "/api/distance":
+                self._forward_distance(payload)
+                return
+
+            if self.path == "/api/planet-update/trigger":
+                try:
+                    # Check if a job is already running
+                    try:
+                        with open(PLANET_UPDATE_STATUS_FILE, "r", encoding="utf-8") as fh:
+                            status_data = json.load(fh)
+                        if status_data.get("running"):
+                            self._send_json({"error": "Planet-Update läuft bereits. Bitte warten.", "running": True}, 409)
+                            return
+                    except FileNotFoundError:
+                        pass
+                    # Write the trigger flag file
+                    import os as _os
+                    _os.makedirs(_os.path.dirname(PLANET_UPDATE_REQUEST_FILE), exist_ok=True)
+                    with open(PLANET_UPDATE_REQUEST_FILE, "w", encoding="utf-8") as fh:
+                        import datetime as _dt
+                        fh.write(_dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"))
+                    self._send_json({"message": "Planet-Update angefordert. Der Job wird in Kürze gestartet."})
+                except Exception as exc:
+                    self._send_json({"error": str(exc)}, 500)
+                return
+
+            self._send_json({"error": "not found"}, 404)
+
+        def _build_valhalla_request(self, payload):
+            start = payload.get("start", {})
+            end = payload.get("end", {})
+            costing = payload.get("costing", "auto")
+
+            request = {
+                "locations": [
+                    {"lat": start.get("lat"), "lon": start.get("lon")},
+                    {"lat": end.get("lat"), "lon": end.get("lon")},
+                ],
+                "costing": costing,
+                "units": payload.get("units", "km"),
+                "language": payload.get("instruction_language", "de"),
+            }
+
+            request["costing_options"] = {}
+            request["costing_options"][costing] = {}
+            options = request["costing_options"][costing]
+
+            advanced_enabled = payload.get("advanced_options_enabled", True)
+            if advanced_enabled:
+                for payload_key, option_key in [
+                    ("use_tolls", "use_tolls"),
+                    ("toll_penalty", "use_tolls"),
+                    ("use_ferry", "use_ferry"),
+                    ("ferry_penalty", "use_ferry"),
+                    ("use_highways", "use_highways"),
+                    ("highway_penalty", "use_highways"),
+                    ("use_living_streets", "use_living_streets"),
+                    ("living_street_penalty", "use_living_streets"),
+                    ("use_primary", "use_primary"),
+                    ("primary_penalty", "use_primary"),
+                ]:
+                    if payload_key not in payload:
+                        continue
+                    value = payload.get(payload_key)
+                    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)):
+                        numeric_value = float(value)
+                        if 0.0 <= numeric_value <= 1.0:
+                            options[option_key] = numeric_value
+
+                for key in ["use_service", "use_trails", "use_tracks", "use_residential"]:
+                    if key in payload:
+                        options[key] = bool(payload.get(key, False))
+                if payload.get("hazmat") is not None:
+                    options["hazmat"] = bool(payload.get("hazmat", False))
+
+                for key in ["top_speed", "width", "height", "length", "weight", "axle_load", "tunnel_penalty", "unpaved_penalty"]:
+                    value = payload.get(key)
+                    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)):
+                        options[key] = value
+
+            if "shortest" in payload:
+                shortest_value = payload.get("shortest")
+                if isinstance(shortest_value, (int, float)) and not isinstance(shortest_value, bool) and math.isfinite(float(shortest_value)):
+                    options["shortest"] = float(shortest_value) >= 0.5
+                else:
+                    options["shortest"] = bool(shortest_value)
+
+            return request
+
+        def _call_valhalla(self, endpoint, valhalla_payload):
+            req = urllib.request.Request(
+                f"{VALHALLA_URL}/{endpoint}",
+                data=json.dumps(valhalla_payload).encode("utf-8"),
+                headers={"Content-Type": "application/json", "User-Agent": "localosm-web/1.0"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=15) as response:
+                return json.loads(response.read().decode("utf-8"))
+
+        def _forward_route(self, payload):
+            try:
+                data = self._call_valhalla("route", self._build_valhalla_request(payload))
+                summary = data.get("trip", {}).get("summary", {})
+                self._send_json({
+                    "status": "ok",
+                    "costing": payload.get("costing", "auto"),
+                    "units": payload.get("units", "km"),
+                    "distance": summary.get("length"),
+                    "time_seconds": summary.get("time"),
+                    "trip": data.get("trip"),
+                })
+            except Exception as exc:  # noqa: BLE001
+                self._send_json({"error": self._friendly_error(exc, "Valhalla (Routing)")}, 502)
+
+        def _forward_distance(self, payload):
+            try:
+                data = self._call_valhalla("route", self._build_valhalla_request(payload))
+                summary = data.get("trip", {}).get("summary", {})
+                self._send_json({
+                    "status": "ok",
+                    "distance": summary.get("length"),
+                    "time_seconds": summary.get("time"),
+                    "units": payload.get("units", "km"),
+                })
+            except Exception as exc:  # noqa: BLE001
+                self._send_json({"error": self._friendly_error(exc, "Valhalla (Routing)")}, 502)
+
+        def log_message(self, format, *args):
+            return
+
+    if __name__ == "__main__":
+        server = ThreadingHTTPServer((HOST, PORT), Handler)
+        print(f"OSM web server listening on {HOST}:{PORT}")
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.server_close()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: osm
+  labels:
+    app: web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      nodeSelector:
+        osm: "true"
+      initContainers:
+      - name: ca-injector
+        image: alpine:3.20
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: CA_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: osm-ca-bundle
+              key: ca-enabled
+        - name: CA_CRT
+          valueFrom:
+            configMapKeyRef:
+              name: osm-ca-bundle
+              key: ca.crt
+        command:
+        - /bin/sh
+        - -c
+        args:
+        - |
+          set -eu
+          # Install system CA bundle (may be a no-op if already present).
+          apk add --no-cache ca-certificates >/dev/null 2>&1 || true
+          # Seed /ca-certs/ca.crt with the system bundle so env vars always point
+          # to a valid file, even when the custom CA is disabled.
+          if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+            cp /etc/ssl/certs/ca-certificates.crt /ca-certs/ca.crt
+          else
+            touch /ca-certs/ca.crt
+          fi
+          if [ "${CA_ENABLED}" = "true" ] && [ -n "${CA_CRT}" ]; then
+            # Append the custom Root CA to the bundle so public CAs stay trusted too.
+            printf '\n%s\n' "${CA_CRT}" >> /ca-certs/ca.crt
+            touch /ca-certs/ca-enabled
+            echo "[ca-injector] Custom CA appended to bundle at /ca-certs/ca.crt"
+          else
+            echo "[ca-injector] CA injection disabled; system bundle at /ca-certs/ca.crt"
+          fi
+        resources:
+          requests:
+            memory: 16Mi
+            cpu: 10m
+          limits:
+            memory: 64Mi
+            cpu: 50m
+        volumeMounts:
+        - name: ca-certs
+          mountPath: /ca-certs
+      - name: fetch-static
+        image: alpine:3.20
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          MLGL_VERSION="4.7.1"
+          mkdir -p /data/static
+          if [ ! -f /data/static/maplibre-gl.js ]; then
+            echo "Downloading maplibre-gl.js v${MLGL_VERSION} (one-time setup)..."
+            wget -q -O /data/static/maplibre-gl.js \
+              "https://unpkg.com/maplibre-gl@${MLGL_VERSION}/dist/maplibre-gl.js" \
+              || { rm -f /data/static/maplibre-gl.js; echo "ERROR: maplibre-gl.js download failed"; exit 1; }
+          fi
+          if [ ! -f /data/static/maplibre-gl.css ]; then
+            echo "Downloading maplibre-gl.css v${MLGL_VERSION} (one-time setup)..."
+            wget -q -O /data/static/maplibre-gl.css \
+              "https://unpkg.com/maplibre-gl@${MLGL_VERSION}/dist/maplibre-gl.css" \
+              || { rm -f /data/static/maplibre-gl.css; echo "ERROR: maplibre-gl.css download failed"; exit 1; }
+          fi
+          echo "Static assets ready."
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "200m"
+            memory: "128Mi"
+        volumeMounts:
+        - name: web-static
+          mountPath: /data/static
+        - &id005
+          name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
+        env:
+        - &id001
+          name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - &id002
+          name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - &id003
+          name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - &id004
+          name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
+      containers:
+      - name: web
+        image: python:3.12-alpine
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          cp /config/app.py /tmp/app.py
+          python /tmp/app.py
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "300m"
+            memory: "256Mi"
+        env:
+        - name: WEB_HOST
+          value: "0.0.0.0"
+        - name: WEB_PORT
+          value: "8080"
+        - name: VALHALLA_URL
+          value: "http://valhalla.osm.svc.cluster.local:8002"
+        - name: NOMINATIM_URL
+          value: "http://nominatim.osm.svc.cluster.local:8080"
+        - name: PHOTON_URL
+          value: "http://photon.osm.svc.cluster.local:2322"
+        - name: PELIAS_URL
+          value: "http://pelias.osm.svc.cluster.local:4000"
+        - name: TILESERVER_URL
+          value: "http://tileserver-gl.osm.svc.cluster.local"
+        - name: STATUS_URL
+          value: ""
+        - name: SERVICE_TARGETS_JSON
+          valueFrom:
+            configMapKeyRef:
+              name: osm-service-targets
+              key: service-targets.json
+        - name: PLANET_UPDATE_REQUEST_FILE
+          value: "/state/planet-update-request.flag"
+        - name: PLANET_UPDATE_STATUS_FILE
+          value: "/status/planet-update.json"
+        - *id001
+        - *id002
+        - *id003
+        - *id004
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: app-code
+          mountPath: /config
+        - name: web-static
+          mountPath: /data/static
+        - name: state
+          mountPath: /state
+        - name: planet-status
+          mountPath: /status
+        - *id005
+      volumes:
+      - name: app-code
+        configMap:
+          name: osm-web-app
+      - name: web-static
+        hostPath:
+          path: /mnt/OSM/web-static
+          type: DirectoryOrCreate
+      - name: state
+        hostPath:
+          path: /mnt/OSM/status
+          type: DirectoryOrCreate
+      - name: planet-status
+        hostPath:
+          path: /mnt/OSM/status
+          type: DirectoryOrCreate
+      - name: ca-certs
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: osm
+spec:
+  type: NodePort
+  selector:
+    app: web
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    nodePort: 30084

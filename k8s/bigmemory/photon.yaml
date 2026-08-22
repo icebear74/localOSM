@@ -1,0 +1,267 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: photon
+  namespace: osm
+  labels:
+    app: photon
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: photon
+  template:
+    metadata:
+      labels:
+        app: photon
+    spec:
+      nodeSelector:
+        osm: "true"
+      initContainers:
+      - name: ca-injector
+        image: alpine:3.20
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: CA_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: osm-ca-bundle
+              key: ca-enabled
+        - name: CA_CRT
+          valueFrom:
+            configMapKeyRef:
+              name: osm-ca-bundle
+              key: ca.crt
+        command:
+        - /bin/sh
+        - -c
+        args:
+        - |
+          set -eu
+          # Install system CA bundle (may be a no-op if already present).
+          apk add --no-cache ca-certificates >/dev/null 2>&1 || true
+          # Seed /ca-certs/ca.crt with the system bundle so env vars always point
+          # to a valid file, even when the custom CA is disabled.
+          if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+            cp /etc/ssl/certs/ca-certificates.crt /ca-certs/ca.crt
+          else
+            touch /ca-certs/ca.crt
+          fi
+          if [ "${CA_ENABLED}" = "true" ] && [ -n "${CA_CRT}" ]; then
+            # Append the custom Root CA to the bundle so public CAs stay trusted too.
+            printf '\n%s\n' "${CA_CRT}" >> /ca-certs/ca.crt
+            touch /ca-certs/ca-enabled
+            echo "[ca-injector] Custom CA appended to bundle at /ca-certs/ca.crt"
+          else
+            echo "[ca-injector] CA injection disabled; system bundle at /ca-certs/ca.crt"
+          fi
+        resources:
+          requests:
+            memory: 16Mi
+            cpu: 10m
+          limits:
+            memory: 64Mi
+            cpu: 50m
+        volumeMounts:
+        - &id001
+          name: ca-certs
+          mountPath: /ca-certs
+      - name: java-ca-injector
+        image: eclipse-temurin:22-jdk
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: CA_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: osm-ca-bundle
+              key: ca-enabled
+        command:
+        - /bin/sh
+        - -c
+        args:
+        - |
+          set -eu
+          # Locate the JVM's default truststore.
+          JAVA_CACERTS=""
+          for p in \
+            "${JAVA_HOME:-/opt/java/openjdk}/lib/security/cacerts" \
+            "/usr/local/openjdk-22/lib/security/cacerts" \
+            "/usr/local/openjdk-21/lib/security/cacerts" \
+            "/etc/ssl/certs/java/cacerts"; do
+            if [ -f "${p}" ]; then JAVA_CACERTS="${p}"; break; fi
+          done
+          if [ -z "${JAVA_CACERTS}" ]; then
+            JAVA_CACERTS=$(find / -path /proc -prune -o -name cacerts -type f -print 2>/dev/null | head -1)
+          fi
+          if [ -z "${JAVA_CACERTS}" ]; then
+            echo "[java-ca-injector] No system cacerts found; skipping."
+            exit 0
+          fi
+          # Copy system truststore so JAVA_TOOL_OPTIONS always points to a valid file.
+          cp "${JAVA_CACERTS}" /ca-certs/cacerts
+          if [ "${CA_ENABLED}" = "true" ] && [ -f /ca-certs/ca-enabled ]; then
+            keytool -noprompt -importcert -alias osm-root-ca \
+              -file /ca-certs/ca.crt \
+              -keystore /ca-certs/cacerts \
+              -storepass changeit \
+              -trustcacerts 2>&1 || true
+            echo "[java-ca-injector] Custom CA imported into /ca-certs/cacerts"
+          else
+            echo "[java-ca-injector] CA disabled; system cacerts at /ca-certs/cacerts"
+          fi
+        resources:
+          requests:
+            memory: 128Mi
+            cpu: 50m
+          limits:
+            memory: 512Mi
+            cpu: 200m
+        volumeMounts:
+        - *id001
+      - name: fetch-photon-jar
+        image: curlimages/curl:8.10.1
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+        env:
+        - name: PHOTON_VERSION
+          valueFrom:
+            configMapKeyRef:
+              name: osm-photon-config
+              key: photon_version
+        - &id003
+          name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - &id004
+          name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - &id005
+          name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - &id006
+          name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -e
+          mkdir -p /photon-store/bin
+          JAR="/photon-store/bin/photon-${PHOTON_VERSION}.jar"
+          if [ -s "${JAR}" ]; then
+            echo "Photon ${PHOTON_VERSION} jar already present at ${JAR}."
+          else
+            echo "Downloading Photon ${PHOTON_VERSION} release jar ..."
+            curl -fsSL -o "${JAR}.part" "https://github.com/komoot/photon/releases/download/${PHOTON_VERSION}/photon-${PHOTON_VERSION}.jar"
+            mv "${JAR}.part" "${JAR}"
+            echo "Downloaded Photon ${PHOTON_VERSION}."
+          fi
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+        volumeMounts:
+        - name: photon-storage
+          mountPath: /photon-store
+        - &id002
+          name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
+      - name: wait-for-data
+        image: busybox:1.36
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          until [ -d /photon-store/active/photon_data ]; do
+            echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Waiting for the Photon search index at /photon-store/active/photon_data ..."
+            sleep 30
+          done
+          echo "Photon search index found — starting Photon service."
+        resources:
+          requests:
+            cpu: "10m"
+            memory: "16Mi"
+          limits:
+            cpu: "50m"
+            memory: "64Mi"
+        volumeMounts:
+        - name: photon-storage
+          mountPath: /photon-store
+        - *id002
+        env:
+        - *id003
+        - *id004
+        - *id005
+        - *id006
+      containers:
+      - name: photon
+        image: eclipse-temurin:21-jre
+        env:
+        - name: PHOTON_VERSION
+          valueFrom:
+            configMapKeyRef:
+              name: osm-photon-config
+              key: photon_version
+        - *id003
+        - *id004
+        - *id005
+        - *id006
+        - name: JAVA_TOOL_OPTIONS
+          value: -Djavax.net.ssl.trustStore=/ca-certs/cacerts -Djavax.net.ssl.trustStoreType=JKS -Djavax.net.ssl.trustStorePassword=changeit
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -e
+          exec java -jar "/photon-store/bin/photon-${PHOTON_VERSION}.jar" serve \
+            -listen-ip 0.0.0.0 -listen-port 2322 -cors-any -data-dir /photon-store/active
+        ports:
+        - containerPort: 2322
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1"
+          limits:
+            memory: "6Gi"
+            cpu: "4"
+        readinessProbe:
+          httpGet:
+            path: /status
+            port: 2322
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 30
+          timeoutSeconds: 5
+        startupProbe:
+          httpGet:
+            path: /status
+            port: 2322
+          periodSeconds: 10
+          failureThreshold: 60
+          timeoutSeconds: 5
+        volumeMounts:
+        - name: photon-storage
+          mountPath: /photon-store
+        - *id002
+      volumes:
+      - name: photon-storage
+        persistentVolumeClaim:
+          claimName: photon
+      - name: ca-certs
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: photon
+  namespace: osm
+spec:
+  type: NodePort
+  selector:
+    app: photon
+  ports:
+  - name: http
+    port: 2322
+    targetPort: 2322
+    nodePort: 30087
