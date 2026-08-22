@@ -92,17 +92,13 @@ spec:
         env:
         - name: PGDATA
           value: /nominatim-data/current
-        - &id001
-          name: SSL_CERT_FILE
+        - name: SSL_CERT_FILE
           value: /ca-certs/ca.crt
-        - &id002
-          name: CURL_CA_BUNDLE
+        - name: CURL_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id003
-          name: REQUESTS_CA_BUNDLE
+        - name: REQUESTS_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id004
-          name: NODE_EXTRA_CA_CERTS
+        - name: NODE_EXTRA_CA_CERTS
           value: /ca-certs/ca.crt
         command: ["/bin/sh", "-c"]
         args:
@@ -158,8 +154,7 @@ spec:
         - name: nominatim-data
           mountPath: /nominatim-data
           readOnly: true
-        - &id005
-          name: ca-certs
+        - name: ca-certs
           mountPath: /ca-certs
           readOnly: true
       containers:
@@ -206,10 +201,14 @@ spec:
             # stay below terminationGracePeriodSeconds above.
         - name: PGCTLTIMEOUT
           value: "3600"
-        - *id001
-        - *id002
-        - *id003
-        - *id004
+        - name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
         command: ["/bin/bash", "-c"]
         args:
         - |
@@ -369,7 +368,9 @@ spec:
           mountPath: /etc/postgresql/16/main/conf.d/zz-tuning.conf
           subPath: runtime-tuning.conf
           readOnly: true
-        - *id005
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
       volumes:
       - name: nominatim-data
         persistentVolumeClaim:

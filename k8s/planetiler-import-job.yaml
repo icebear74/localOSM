@@ -68,8 +68,7 @@ spec:
             memory: 64Mi
             cpu: 50m
         volumeMounts:
-        - &id001
-          name: ca-certs
+        - name: ca-certs
           mountPath: /ca-certs
       - name: java-ca-injector
         image: eclipse-temurin:22-jdk
@@ -122,7 +121,8 @@ spec:
             memory: 512Mi
             cpu: 200m
         volumeMounts:
-        - *id001
+        - name: ca-certs
+          mountPath: /ca-certs
       - name: preflight
         image: busybox:1.36
         command: ["/bin/sh", "-c"]
@@ -150,22 +150,17 @@ spec:
           mountPath: /tools
         - name: osm-status
           mountPath: /osm-status
-        - &id002
-          name: ca-certs
+        - name: ca-certs
           mountPath: /ca-certs
           readOnly: true
         env:
-        - &id003
-          name: SSL_CERT_FILE
+        - name: SSL_CERT_FILE
           value: /ca-certs/ca.crt
-        - &id004
-          name: CURL_CA_BUNDLE
+        - name: CURL_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id005
-          name: REQUESTS_CA_BUNDLE
+        - name: REQUESTS_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id006
-          name: NODE_EXTRA_CA_CERTS
+        - name: NODE_EXTRA_CA_CERTS
           value: /ca-certs/ca.crt
       - name: fetch-tools
         image: curlimages/curl:8.10.1
@@ -194,12 +189,18 @@ spec:
         volumeMounts:
         - name: tools
           mountPath: /tools
-        - *id002
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
         env:
-        - *id003
-        - *id004
-        - *id005
-        - *id006
+        - name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
       - name: fetch-sources
         image: alpine:3.20
         command: ["/bin/sh", "-c"]
@@ -226,12 +227,18 @@ spec:
         volumeMounts:
         - name: osm-temp
           mountPath: /osm-temp
-        - *id002
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
         env:
-        - *id003
-        - *id004
-        - *id005
-        - *id006
+        - name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
       containers:
       - name: tileserver-import
         image: eclipse-temurin:22-jdk
@@ -396,12 +403,18 @@ spec:
         - name: planetiler-profile-config
           mountPath: /config
           readOnly: true
-        - *id002
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
         env:
-        - *id003
-        - *id004
-        - *id005
-        - *id006
+        - name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
         - name: JAVA_TOOL_OPTIONS
           value: -Djavax.net.ssl.trustStore=/ca-certs/cacerts -Djavax.net.ssl.trustStoreType=JKS -Djavax.net.ssl.trustStorePassword=changeit
       volumes:
