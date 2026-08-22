@@ -1495,7 +1495,7 @@ data:
                 return
 
             if self.path == "/api/status":
-                self._send_json({"status": "ok", "valhalla": VALHALLA_URL, "nominatim": NOMINATIM_URL, "photon": PHOTON_URL)
+                self._send_json({"status": "ok", "valhalla": VALHALLA_URL, "nominatim": NOMINATIM_URL, "photon": PHOTON_URL})
                 return
 
             if self.path == "/api/bounds":
