@@ -141,7 +141,7 @@ spec:
             memory: "8Gi"
         env:
         - name: PORT
-          value: "80"
+          value: "8080"
         - name: SSL_CERT_FILE
           value: /ca-certs/ca.crt
         - name: CURL_CA_BUNDLE
@@ -151,7 +151,7 @@ spec:
         - name: NODE_EXTRA_CA_CERTS
           value: /ca-certs/ca.crt
         ports:
-        - containerPort: 80
+        - containerPort: 8080
         volumeMounts:
         - name: tileserver-data
           mountPath: /data
@@ -193,5 +193,5 @@ spec:
   ports:
   - name: http
     port: 80
-    targetPort: 80
+    targetPort: 8080
     nodePort: 30085
