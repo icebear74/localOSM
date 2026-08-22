@@ -8,7 +8,7 @@ metadata:
     osm-job-type: tileserver-import
 spec:
   backoffLimit: 1
-  ttlSecondsAfterFinished: 3600
+  ttlSecondsAfterFinished: 259200
   template:
     metadata:
       labels:

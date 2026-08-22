@@ -5,7 +5,7 @@ metadata:
   namespace: osm
 spec:
   backoffLimit: 1
-  ttlSecondsAfterFinished: 3600
+  ttlSecondsAfterFinished: 259200
   template:
     spec:
       serviceAccountName: planetiler-import

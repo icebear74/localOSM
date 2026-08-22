@@ -8,7 +8,7 @@ metadata:
     osm-job-type: planet-update
 spec:
   backoffLimit: 0
-  ttlSecondsAfterFinished: 86400
+  ttlSecondsAfterFinished: 259200
   template:
     metadata:
       labels:
@@ -186,7 +186,7 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 0
-      ttlSecondsAfterFinished: 86400
+      ttlSecondsAfterFinished: 259200
       template:
         metadata:
           labels:

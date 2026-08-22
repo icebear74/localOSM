@@ -7,6 +7,7 @@ TEMP_DIR="${OSM_TEMP_DIR:-/mnt/OSM/TempDir}"
 MANIFEST_DIR="${OSM_MANIFEST_DIR:-/manifests}"
 STATE_DIR="${OSM_STATE_DIR:-/state}"
 CONFIG_DIR="${OSM_CONFIG_DIR:-/config}"
+JOB_TTL_SECONDS="${OSM_JOB_TTL_SECONDS:-86400}"
 LOG_FILE="${STATE_DIR}/import-orchestrator.log"
 STATE_FILE="${STATE_DIR}/import-orchestrator.json"
 HASH_FILE="${STATE_DIR}/import-orchestrator.hash"
@@ -353,7 +354,7 @@ metadata:
   namespace: ${NAMESPACE}
 spec:
   backoffLimit: 1
-  ttlSecondsAfterFinished: 3600
+  ttlSecondsAfterFinished: ${JOB_TTL_SECONDS}
   template:
     spec:
       restartPolicy: Never
