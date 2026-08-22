@@ -91,22 +91,17 @@ spec:
           readOnly: true
         - name: status-data
           mountPath: /status
-        - &id005
-          name: ca-certs
+        - name: ca-certs
           mountPath: /ca-certs
           readOnly: true
         env:
-        - &id001
-          name: SSL_CERT_FILE
+        - name: SSL_CERT_FILE
           value: /ca-certs/ca.crt
-        - &id002
-          name: CURL_CA_BUNDLE
+        - name: CURL_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id003
-          name: REQUESTS_CA_BUNDLE
+        - name: REQUESTS_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id004
-          name: NODE_EXTRA_CA_CERTS
+        - name: NODE_EXTRA_CA_CERTS
           value: /ca-certs/ca.crt
       containers:
       - name: status
@@ -145,10 +140,14 @@ spec:
             configMapKeyRef:
               name: osm-service-targets
               key: service-targets.json
-        - *id001
-        - *id002
-        - *id003
-        - *id004
+        - name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
         resources:
           requests:
             cpu: "100m"
@@ -173,7 +172,9 @@ spec:
           mountPath: __OSM_TEMP_DIR__
         - name: tileserver-active
           mountPath: /mnt/OSM/tileserver/active
-        - *id005
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
       volumes:
       - name: status-config
         configMap:

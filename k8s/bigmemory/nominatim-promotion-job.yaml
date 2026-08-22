@@ -5,7 +5,7 @@ metadata:
   namespace: osm
 spec:
   backoffLimit: 0
-  ttlSecondsAfterFinished: 3600
+  ttlSecondsAfterFinished: 259200
   template:
     spec:
       nodeSelector:

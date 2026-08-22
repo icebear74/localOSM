@@ -41,7 +41,6 @@ data:
     VALHALLA_URL = os.environ.get("VALHALLA_URL", "http://valhalla.osm.svc.cluster.local:8002")
     NOMINATIM_URL = os.environ.get("NOMINATIM_URL", "http://nominatim.osm.svc.cluster.local:8080")
     PHOTON_URL = os.environ.get("PHOTON_URL", "http://photon.osm.svc.cluster.local:2322")
-    PELIAS_URL = os.environ.get("PELIAS_URL", "http://pelias.osm.svc.cluster.local:4000")
     TILESERVER_URL = os.environ.get("TILESERVER_URL", "http://tileserver-gl.osm.svc.cluster.local")
     STATUS_URL = os.environ.get("STATUS_URL", "")
     PLANET_UPDATE_REQUEST_FILE = os.environ.get("PLANET_UPDATE_REQUEST_FILE", "/state/planet-update-request.flag")
@@ -92,14 +91,11 @@ data:
         .geocode-row button { white-space: nowrap; padding: 0 0.6rem; border: 1px solid #ccc; border-radius: 4px; background: #e9ecef; cursor: pointer; font-size: 0.8rem; }
         .photon-search { position: relative; }
         .photon-search input { border-color: #2c7ab5; }
-        .pelias-search { position: relative; }
-        .pelias-search input { border-color: #b55a2c; }
-        .photon-results, .pelias-results { position: absolute; z-index: 20; left: 0; right: 0; top: 100%; background: #fff; border: 1px solid #ccc;
+        .photon-results { position: absolute; z-index: 20; left: 0; right: 0; top: 100%; background: #fff; border: 1px solid #ccc;
                           border-top: none; border-radius: 0 0 4px 4px; max-height: 220px; overflow-y: auto; box-shadow: 0 4px 8px rgba(0,0,0,.15); display: none; }
-        .photon-results div, .pelias-results div { padding: 0.4rem 0.5rem; font-size: 0.8rem; cursor: pointer; border-bottom: 1px solid #eee; }
-        .photon-results div:last-child, .pelias-results div:last-child { border-bottom: none; }
-        .photon-results div:hover, .photon-results div.active,
-        .pelias-results div:hover, .pelias-results div.active { background: #eaf2f8; }
+        .photon-results div { padding: 0.4rem 0.5rem; font-size: 0.8rem; cursor: pointer; border-bottom: 1px solid #eee; }
+        .photon-results div:last-child { border-bottom: none; }
+        .photon-results div:hover, .photon-results div.active { background: #eaf2f8; }
         .hidden { display: none !important; }
         .advanced-options { display: none; }
         .advanced-options.visible { display: block; }
@@ -120,7 +116,6 @@ data:
         <label>Suchdienst</label>
         <select id="geocoder-provider" onchange="updateGeocoderUi()">
           <option value="photon_nominatim">Photon + Nominatim</option>
-          <option value="pelias">Pelias</option>
         </select>
         </div>
       <div class="section-title">Start</div>
@@ -129,12 +124,6 @@ data:
         <input id="startPhoton" placeholder="Ab 3 Zeichen tippen ..." autocomplete="off"
                oninput="onPhotonInput('start')" onkeydown="onPhotonKeydown(event, 'start')">
         <div id="startPhotonResults" class="photon-results"></div>
-      </div>
-      <div class="pelias-search provider-pelias-only">
-        <label>Volltextsuche (Pelias)</label>
-        <input id="startPelias" placeholder="Ab 3 Zeichen tippen ..." autocomplete="off"
-               oninput="onPeliasInput('start')" onkeydown="onPeliasKeydown(event, 'start')">
-        <div id="startPeliasResults" class="pelias-results"></div>
       </div>
         <div>
           <label>Adresse suchen</label>
@@ -154,12 +143,6 @@ data:
           <input id="endPhoton" placeholder="Ab 3 Zeichen tippen ..." autocomplete="off"
                  oninput="onPhotonInput('end')" onkeydown="onPhotonKeydown(event, 'end')">
           <div id="endPhotonResults" class="photon-results"></div>
-        </div>
-        <div class="pelias-search provider-pelias-only">
-          <label>Volltextsuche (Pelias)</label>
-          <input id="endPelias" placeholder="Ab 3 Zeichen tippen ..." autocomplete="off"
-                 oninput="onPeliasInput('end')" onkeydown="onPeliasKeydown(event, 'end')">
-          <div id="endPeliasResults" class="pelias-results"></div>
         </div>
         <div>
           <label>Adresse suchen</label>
@@ -1037,31 +1020,13 @@ data:
         var r = results[0];
         setMarker(which, parseFloat(r.lat), parseFloat(r.lon));
         map.flyTo({center: [parseFloat(r.lon), parseFloat(r.lat)], zoom: 15});
-        var providerLabel = provider === 'pelias' ? 'Pelias' : 'Photon+Nominatim';
-        box.innerHTML = '<span class="ok">&#10003; ' + (which === 'start' ? 'Start' : 'Ziel') + ' gesetzt (' + providerLabel + ')</span><br>' + (r.display_name || '');
+        box.innerHTML = '<span class="ok">&#10003; ' + (which === 'start' ? 'Start' : 'Ziel') + ' gesetzt (Photon+Nominatim)</span><br>' + (r.display_name || '');
       } catch(err) {
         box.innerHTML = '<span class="err">Geocoding-Fehler: ' + err + '</span>';
       }
     }
 
     function updateGeocoderUi() {
-      var provider = document.getElementById('geocoder-provider').value || 'photon_nominatim';
-      var photonOnly = provider !== 'pelias';
-      var peliasOnly = provider === 'pelias';
-      document.querySelectorAll('.provider-photon-only').forEach(function(el) {
-        el.classList.toggle('hidden', !photonOnly);
-      });
-      document.querySelectorAll('.provider-pelias-only').forEach(function(el) {
-        el.classList.toggle('hidden', !peliasOnly);
-      });
-      if (!photonOnly) {
-        closePhotonResults('start');
-        closePhotonResults('end');
-      }
-      if (!peliasOnly) {
-        closePeliasResults('start');
-        closePeliasResults('end');
-      }
     }
 
     // --- Photon full-text search-as-you-type ---------------------------------
@@ -1210,111 +1175,8 @@ data:
       ['start', 'end'].forEach(function(which) {
         var wrap = document.getElementById(which + 'Photon').closest('.photon-search');
         if (wrap && !wrap.contains(event.target)) closePhotonResults(which);
-        var wrapP = document.getElementById(which + 'Pelias') && document.getElementById(which + 'Pelias').closest('.pelias-search');
-        if (wrapP && !wrapP.contains(event.target)) closePeliasResults(which);
       });
     });
-    // --- Pelias full-text search-as-you-type ---------------------------------
-    var peliasState = {
-      start: { timer: null, requestId: 0, items: [], active: -1 },
-      end:   { timer: null, requestId: 0, items: [], active: -1 }
-    };
-
-    function closePeliasResults(which) {
-      var box = document.getElementById(which + 'PeliasResults');
-      if (!box) return;
-      box.style.display = 'none';
-      box.innerHTML = '';
-      peliasState[which].items = [];
-      peliasState[which].active = -1;
-    }
-
-    function onPeliasInput(which) {
-      var state = peliasState[which];
-      var query = document.getElementById(which + 'Pelias').value.trim();
-      clearTimeout(state.timer);
-      if (query.length < 3) {
-        closePeliasResults(which);
-        return;
-      }
-      state.timer = setTimeout(function() { runPeliasSearch(which, query); }, 250);
-    }
-
-    async function runPeliasSearch(which, query) {
-      var state = peliasState[which];
-      var myRequestId = ++state.requestId;
-      try {
-        var resp = await fetch('/api/pelias-search?q=' + encodeURIComponent(query) + '&limit=10');
-        var data = await resp.json();
-        if (myRequestId !== state.requestId) return;
-        var items = (data.results || []);
-        state.items = items;
-        renderPeliasResults(which, items);
-      } catch (e) {
-        if (myRequestId !== state.requestId) return;
-        closePeliasResults(which);
-      }
-    }
-
-    function renderPeliasResults(which, items) {
-      var box = document.getElementById(which + 'PeliasResults');
-      var state = peliasState[which];
-      state.active = -1;
-      if (!items.length) {
-        box.innerHTML = '<div>Keine Treffer</div>';
-        box.style.display = 'block';
-        return;
-      }
-      box.innerHTML = '';
-      items.forEach(function(item, idx) {
-        var entry = document.createElement('div');
-        entry.textContent = item.display_name || 'Unbenannt';
-        entry.dataset.index = idx;
-        entry.onclick = function() { selectPeliasResult(which, idx); };
-        box.appendChild(entry);
-      });
-      box.style.display = 'block';
-    }
-
-    function onPeliasKeydown(event, which) {
-      var state = peliasState[which];
-      if (!state.items.length) return;
-      if (event.key === 'ArrowDown') {
-        event.preventDefault();
-        state.active = Math.min(state.active + 1, state.items.length - 1);
-        highlightPeliasResult(which);
-      } else if (event.key === 'ArrowUp') {
-        event.preventDefault();
-        state.active = Math.max(state.active - 1, 0);
-        highlightPeliasResult(which);
-      } else if (event.key === 'Enter') {
-        event.preventDefault();
-        if (state.active >= 0) selectPeliasResult(which, state.active);
-      } else if (event.key === 'Escape') {
-        closePeliasResults(which);
-      }
-    }
-
-    function highlightPeliasResult(which) {
-      var box = document.getElementById(which + 'PeliasResults');
-      var state = peliasState[which];
-      Array.prototype.forEach.call(box.children, function(child, idx) {
-        child.classList.toggle('active', idx === state.active);
-      });
-    }
-
-    function selectPeliasResult(which, idx) {
-      var state = peliasState[which];
-      var item = state.items[idx];
-      closePeliasResults(which);
-      document.getElementById(which + 'Pelias').value = item.display_name || '';
-      document.getElementById(which + 'Addr').value = item.display_name || '';
-      setMarker(which, parseFloat(item.lat), parseFloat(item.lon));
-      map.flyTo({center: [parseFloat(item.lon), parseFloat(item.lat)], zoom: 15});
-      var box = document.getElementById('result-box');
-      box.innerHTML = '<span class="ok">&#10003; ' + (which === 'start' ? 'Start' : 'Ziel') + ' via Pelias gesetzt</span><br>' + esc(item.display_name || '');
-    }
-
     function esc(value) {
       return String(value).replace(/[&<>"']/g, function(c) {
         return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
@@ -1633,7 +1495,7 @@ data:
                 return
 
             if self.path == "/api/status":
-                self._send_json({"status": "ok", "valhalla": VALHALLA_URL, "nominatim": NOMINATIM_URL, "photon": PHOTON_URL, "pelias": PELIAS_URL})
+                self._send_json({"status": "ok", "valhalla": VALHALLA_URL, "nominatim": NOMINATIM_URL, "photon": PHOTON_URL})
                 return
 
             if self.path == "/api/bounds":
@@ -1660,52 +1522,31 @@ data:
                 query = self.path.split("?", 1)[1] if "?" in self.path else ""
                 params = urllib.parse.parse_qs(query)
                 provider = params.get("provider", ["photon_nominatim"])[0].strip().lower()
-                if provider not in {"pelias", "photon_nominatim"}:
-                    self._send_json({"error": "invalid provider (allowed: pelias, photon_nominatim)"}, 400)
+                if provider not in {"photon_nominatim"}:
+                    self._send_json({"error": "invalid provider (allowed: photon_nominatim)"}, 400)
                     return
                 q = params.get("q", [""])[0]
                 if not q:
                     self._send_json({"error": "missing query parameter q"}, 400)
                     return
                 try:
-                    if provider == "pelias":
-                        req = urllib.request.Request(
-                            f"{PELIAS_URL}/v1/search?text={urllib.parse.quote(q)}&size=10",
-                            headers={"User-Agent": "localosm-web/1.0"}
-                        )
-                        with urllib.request.urlopen(req, timeout=5) as response:
-                            data = json.loads(response.read().decode("utf-8"))
-                        features = data.get("features", []) if isinstance(data, dict) else []
-                        mapped = []
-                        for feature in features:
-                            coords = ((feature or {}).get("geometry") or {}).get("coordinates") or []
-                            props = (feature or {}).get("properties") or {}
-                            if not isinstance(coords, list) or len(coords) != 2:
-                                continue
-                            mapped.append({
-                                "lat": coords[1],
-                                "lon": coords[0],
-                                "display_name": props.get("label") or props.get("name") or q,
-                            })
-                        self._send_json({"results": mapped})
-                    else:
-                        req = urllib.request.Request(
-                            f"{NOMINATIM_URL}/search?q={urllib.parse.quote(q)}&format=jsonv2&limit=1",
-                            headers={"User-Agent": "localosm-web/1.0"}
-                        )
-                        with urllib.request.urlopen(req, timeout=5) as response:
-                            data = json.loads(response.read().decode("utf-8"))
-                        self._send_json({"results": data})
+                    req = urllib.request.Request(
+                        f"{NOMINATIM_URL}/search?q={urllib.parse.quote(q)}&format=jsonv2&limit=1",
+                        headers={"User-Agent": "localosm-web/1.0"}
+                    )
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        data = json.loads(response.read().decode("utf-8"))
+                    self._send_json({"results": data})
                 except Exception as exc:  # noqa: BLE001
-                    self._send_json({"error": self._friendly_error(exc, "Pelias" if provider == "pelias" else "Nominatim (Geocoding)")}, 502)
+                    self._send_json({"error": self._friendly_error(exc, "Nominatim (Geocoding)")}, 502)
                 return
 
             if self.path.startswith("/api/reverse"):
                 query = self.path.split("?", 1)[1] if "?" in self.path else ""
                 params = urllib.parse.parse_qs(query)
                 provider = params.get("provider", ["photon_nominatim"])[0].strip().lower()
-                if provider not in {"pelias", "photon_nominatim"}:
-                    self._send_json({"error": "invalid provider (allowed: pelias, photon_nominatim)"}, 400)
+                if provider not in {"photon_nominatim"}:
+                    self._send_json({"error": "invalid provider (allowed: photon_nominatim)"}, 400)
                     return
                 lat = params.get("lat", [""])[0]
                 lon = params.get("lon", [""])[0]
@@ -1713,27 +1554,15 @@ data:
                     self._send_json({"error": "missing lat/lon parameters"}, 400)
                     return
                 try:
-                    if provider == "pelias":
-                        req = urllib.request.Request(
-                            f"{PELIAS_URL}/v1/reverse?point.lat={urllib.parse.quote(lat)}&point.lon={urllib.parse.quote(lon)}&size=1",
-                            headers={"User-Agent": "localosm-web/1.0"}
-                        )
-                        with urllib.request.urlopen(req, timeout=5) as response:
-                            data = json.loads(response.read().decode("utf-8"))
-                        features = data.get("features", []) if isinstance(data, dict) else []
-                        first = features[0] if features else {}
-                        props = (first or {}).get("properties") or {}
-                        self._send_json({"display_name": props.get("label") or props.get("name") or ""})
-                    else:
-                        req = urllib.request.Request(
-                            f"{NOMINATIM_URL}/reverse?lat={urllib.parse.quote(lat)}&lon={urllib.parse.quote(lon)}&format=jsonv2",
-                            headers={"User-Agent": "localosm-web/1.0"}
-                        )
-                        with urllib.request.urlopen(req, timeout=5) as response:
-                            data = json.loads(response.read().decode("utf-8"))
-                        self._send_json({"display_name": data.get("display_name", "")})
+                    req = urllib.request.Request(
+                        f"{NOMINATIM_URL}/reverse?lat={urllib.parse.quote(lat)}&lon={urllib.parse.quote(lon)}&format=jsonv2",
+                        headers={"User-Agent": "localosm-web/1.0"}
+                    )
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        data = json.loads(response.read().decode("utf-8"))
+                    self._send_json({"display_name": data.get("display_name", "")})
                 except Exception as exc:  # noqa: BLE001
-                    self._send_json({"error": self._friendly_error(exc, "Pelias" if provider == "pelias" else "Nominatim (Reverse Geocoding)")}, 502)
+                    self._send_json({"error": self._friendly_error(exc, "Nominatim (Reverse Geocoding)")}, 502)
                 return
 
             if self.path.startswith("/api/photon-search"):
@@ -1758,42 +1587,6 @@ data:
                 except Exception as exc:  # noqa: BLE001
                     self._send_json({"error": self._friendly_error(exc, "Photon (Volltextsuche)")}, 502)
                 return
-
-            if self.path.startswith("/api/pelias-search"):
-                # Search-as-you-type suggestions for the Pelias fields; queries
-                # Pelias' autocomplete endpoint directly and returns up to 10
-                # results.
-                query = self.path.split("?", 1)[1] if "?" in self.path else ""
-                params = urllib.parse.parse_qs(query)
-                q = params.get("q", [""])[0]
-                if not q or len(q) < 3:
-                    self._send_json({"error": "query parameter q must be at least 3 characters"}, 400)
-                    return
-                limit = params.get("limit", ["10"])[0]
-                try:
-                    req = urllib.request.Request(
-                        f"{PELIAS_URL}/v1/autocomplete?text={urllib.parse.quote(q)}&size={urllib.parse.quote(limit)}",
-                        headers={"User-Agent": "localosm-web/1.0"}
-                    )
-                    with urllib.request.urlopen(req, timeout=5) as response:
-                        data = json.loads(response.read().decode("utf-8"))
-                    features = data.get("features", []) if isinstance(data, dict) else []
-                    mapped = []
-                    for feature in features:
-                        coords = ((feature or {}).get("geometry") or {}).get("coordinates") or []
-                        props = (feature or {}).get("properties") or {}
-                        if not isinstance(coords, list) or len(coords) != 2:
-                            continue
-                        mapped.append({
-                            "lat": coords[1],
-                            "lon": coords[0],
-                            "display_name": props.get("label") or props.get("name") or q,
-                        })
-                    self._send_json({"results": mapped})
-                except Exception as exc:  # noqa: BLE001
-                    self._send_json({"error": self._friendly_error(exc, "Pelias (Volltextsuche)")}, 502)
-                return
-
 
             if self.path.startswith("/api/nominatim-lookup"):
                 # Resolves a Photon result's OSM id/type via Nominatim's
@@ -2084,22 +1877,17 @@ spec:
         volumeMounts:
         - name: web-static
           mountPath: /data/static
-        - &id005
-          name: ca-certs
+        - name: ca-certs
           mountPath: /ca-certs
           readOnly: true
         env:
-        - &id001
-          name: SSL_CERT_FILE
+        - name: SSL_CERT_FILE
           value: /ca-certs/ca.crt
-        - &id002
-          name: CURL_CA_BUNDLE
+        - name: CURL_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id003
-          name: REQUESTS_CA_BUNDLE
+        - name: REQUESTS_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id004
-          name: NODE_EXTRA_CA_CERTS
+        - name: NODE_EXTRA_CA_CERTS
           value: /ca-certs/ca.crt
       containers:
       - name: web
@@ -2128,8 +1916,6 @@ spec:
           value: "http://nominatim.osm.svc.cluster.local:8080"
         - name: PHOTON_URL
           value: "http://photon.osm.svc.cluster.local:2322"
-        - name: PELIAS_URL
-          value: "http://pelias.osm.svc.cluster.local:4000"
         - name: TILESERVER_URL
           value: "http://tileserver-gl.osm.svc.cluster.local"
         - name: STATUS_URL
@@ -2143,10 +1929,14 @@ spec:
           value: "/state/planet-update-request.flag"
         - name: PLANET_UPDATE_STATUS_FILE
           value: "/status/planet-update.json"
-        - *id001
-        - *id002
-        - *id003
-        - *id004
+        - name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
         ports:
         - containerPort: 8080
         volumeMounts:
@@ -2158,7 +1948,9 @@ spec:
           mountPath: /state
         - name: planet-status
           mountPath: /status
-        - *id005
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
       volumes:
       - name: app-code
         configMap:

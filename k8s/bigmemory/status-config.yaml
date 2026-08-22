@@ -38,7 +38,6 @@ data:
       "nominatim": "http://192.168.188.8:30081",
       "valhalla": "http://192.168.188.8:30082",
       "photon": "http://192.168.188.8:30087",
-      "pelias": "http://192.168.188.8:30088",
       "web": "http://192.168.188.8:30084",
       "status": "http://status.osm.svc.cluster.local:8080"
     }

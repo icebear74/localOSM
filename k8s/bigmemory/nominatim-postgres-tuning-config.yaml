@@ -4,16 +4,17 @@ metadata:
   name: nominatim-postgres-tuning
   namespace: osm
 data:
-  # Applied by nominatim-import-job.yaml. The import job requests 14Gi/8 CPUs
-  # (limit 24Gi/14 CPUs, see k8s/nominatim-import-job.yaml), so these mirror
-  # the main Postgres' import-time tuning at that scale.
+  # Applied by nominatim-import-job.yaml. The import job requests 48Gi/8 CPUs
+  # and limits at 200Gi/50 CPUs (see k8s/bigmemory/nominatim-import-job.yaml).
+  # Values below are constrained so Postgres stays within the import pod memory
+  # budget even with parallel workers active.
   import-tuning.conf: |
     # SPEICHER
-    shared_buffers = 100GB
-    maintenance_work_mem = 64GB          # Sehr wichtig für die Index-Erstellung
-    work_mem = 256MB
+    shared_buffers = 48GB
+    maintenance_work_mem = 8GB           # pro Maintenance-Worker, daher bewusst konservativ
+    work_mem = 96MB
     wal_buffers = 64MB
-    effective_cache_size = 130GB          # Signalisiert Postgres den freien Page Cache
+    effective_cache_size = 96GB          # nur Planner-Hinweis, keine echte Reservierung
     # EXTREME IMPORT-SPEEDUPS (Nur für Erstimport!)
     fsync = off                          # Schaltet Synchrongarantie ab -> riesiger Boost
     full_page_writes = off
@@ -32,10 +33,10 @@ data:
     # PARALLELISIERUNG & I/O
     random_page_cost = 1.1
     effective_io_concurrency = 200       # Perfekt für NVMe/SSD
-    max_worker_processes = 10
-    max_parallel_workers = 10
-    max_parallel_workers_per_gather = 5
-    max_parallel_maintenance_workers = 5 # Beschleunigt INDEX-Erstellung massiv
+    max_worker_processes = 12
+    max_parallel_workers = 12
+    max_parallel_workers_per_gather = 6
+    max_parallel_maintenance_workers = 6
     default_toast_compression = lz4
     
   # Applied by nominatim.yaml (the running Nominatim service). This deployment

@@ -5,7 +5,7 @@ metadata:
   namespace: osm
 spec:
   backoffLimit: 1
-  ttlSecondsAfterFinished: 3600
+  ttlSecondsAfterFinished: 86400
   template:
     spec:
       serviceAccountName: planetiler-import
@@ -84,22 +84,17 @@ spec:
         volumeMounts:
         - name: tools
           mountPath: /tools
-        - &id005
-          name: ca-certs
+        - name: ca-certs
           mountPath: /ca-certs
           readOnly: true
         env:
-        - &id001
-          name: SSL_CERT_FILE
+        - name: SSL_CERT_FILE
           value: /ca-certs/ca.crt
-        - &id002
-          name: CURL_CA_BUNDLE
+        - name: CURL_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id003
-          name: REQUESTS_CA_BUNDLE
+        - name: REQUESTS_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id004
-          name: NODE_EXTRA_CA_CERTS
+        - name: NODE_EXTRA_CA_CERTS
           value: /ca-certs/ca.crt
       containers:
       - name: valhalla-import
@@ -119,10 +114,14 @@ spec:
           value: "True"
         - name: build_tar
           value: "True"
-        - *id001
-        - *id002
-        - *id003
-        - *id004
+        - name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
         resources:
           requests:
             memory: "18Gi"
@@ -254,7 +253,9 @@ spec:
           mountPath: /tools
         - name: planet
           mountPath: /planet
-        - *id005
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
       volumes:
       - name: osm-temp
         persistentVolumeClaim:

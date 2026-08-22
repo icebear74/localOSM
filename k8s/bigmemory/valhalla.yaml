@@ -82,22 +82,17 @@ spec:
         volumeMounts:
         - name: valhalla-data
           mountPath: /service-data
-        - &id001
-          name: ca-certs
+        - name: ca-certs
           mountPath: /ca-certs
           readOnly: true
         env:
-        - &id002
-          name: SSL_CERT_FILE
+        - name: SSL_CERT_FILE
           value: /ca-certs/ca.crt
-        - &id003
-          name: CURL_CA_BUNDLE
+        - name: CURL_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id004
-          name: REQUESTS_CA_BUNDLE
+        - name: REQUESTS_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id005
-          name: NODE_EXTRA_CA_CERTS
+        - name: NODE_EXTRA_CA_CERTS
           value: /ca-certs/ca.crt
       - name: wait-for-tiles
         image: busybox:1.36
@@ -119,12 +114,18 @@ spec:
         volumeMounts:
         - name: valhalla-data
           mountPath: /service-data
-        - *id001
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
         env:
-        - *id002
-        - *id003
-        - *id004
-        - *id005
+        - name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
       containers:
       - name: valhalla
         image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
@@ -139,10 +140,14 @@ spec:
           value: "False"
         - name: server_threads
           value: "6"
-        - *id002
-        - *id003
-        - *id004
-        - *id005
+        - name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
         resources:
           requests:
             memory: "4Gi"
@@ -156,7 +161,9 @@ spec:
         - name: valhalla-data
           mountPath: /custom_files
           subPath: active
-        - *id001
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
       volumes:
       - name: valhalla-data
         persistentVolumeClaim:
