@@ -4,8 +4,10 @@ metadata:
   name: osm-web
   namespace: osm
   annotations:
-    # kubernetes.io/ingress.class: haproxy
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
 spec:
+  ingressClassName: haproxy
   rules:
     - host: web.localosm.example
       http:
@@ -17,15 +19,18 @@ spec:
                 name: web
                 port:
                   number: 8080
+  tls:
+    - hosts:
+        - web.localosm.example
+      secretName: optadata.io.secret
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: osm-status
   namespace: osm
-  annotations:
-    # kubernetes.io/ingress.class: haproxy
 spec:
+  ingressClassName: haproxy
   rules:
     - host: status.localosm.example
       http:
@@ -37,3 +42,126 @@ spec:
                 name: status
                 port:
                   number: 8080
+  tls:
+    - hosts:
+        - status.localosm.example
+      secretName: optadata.io.secret
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: osm-routing-api
+  namespace: osm
+spec:
+  ingressClassName: haproxy
+  rules:
+    - host: routing.localosm.example
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: valhalla
+                port:
+                  number: 8002
+  tls:
+    - hosts:
+        - routing.localosm.example
+      secretName: optadata.io.secret
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: osm-nominatim
+  namespace: osm
+spec:
+  ingressClassName: haproxy
+  rules:
+    - host: nominatim.localosm.example
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nominatim
+                port:
+                  number: 8080
+  tls:
+    - hosts:
+        - nominatim.localosm.example
+      secretName: optadata.io.secret
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: osm-photon
+  namespace: osm
+spec:
+  ingressClassName: haproxy
+  rules:
+    - host: photon.localosm.example
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: photon
+                port:
+                  number: 2322
+  tls:
+    - hosts:
+        - photon.localosm.example
+      secretName: optadata.io.secret
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: osm-tileserver
+  namespace: osm
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+spec:
+  ingressClassName: haproxy
+  rules:
+    - host: tiles.localosm.example
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tileserver-gl
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - tiles.localosm.example
+      secretName: optadata.io.secret
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: osm-style-editor
+  namespace: osm
+spec:
+  ingressClassName: haproxy
+  rules:
+    - host: styles.localosm.example
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: style-editor
+                port:
+                  number: 8888
+  tls:
+    - hosts:
+        - styles.localosm.example
+      secretName: optadata.io.secret
+
