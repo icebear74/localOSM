@@ -262,8 +262,8 @@ spec:
             memory: "30Gi"
             cpu: "5"
           limits:
-            memory: "165Gi"
-            cpu: "20"
+            memory: "180Gi"
+            cpu: "40"
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -340,10 +340,9 @@ spec:
               --output="${OUTPUT_NEW}" \
               --force \
               --download=true \
-              --fetch-wikidata \
               --nodemap-type=sparsearray \
               --nodemap-storage=ram \
-              --threads=18 \
+              --threads=36 \
               --arguments=journal_mode=WAL,synchronous=OFF,mmap_size=268435456 \
               --lake_centerlines_path="${TEMP_SOURCES}/lake_centerline.shp.zip" \
               --water_polygons_path="${TEMP_SOURCES}/water-polygons-split-3857.zip" \
@@ -358,10 +357,9 @@ spec:
               --output="${OUTPUT_NEW}" \
               --force \
               --download=true \
-              --fetch-wikidata \
               --nodemap-type=sparsearray \
               --nodemap-storage=ram \
-              --threads=18 \
+              --threads=36 \
               --arguments=journal_mode=WAL,synchronous=OFF,mmap_size=268435456 \
               --lake_centerlines_path="${TEMP_SOURCES}/lake_centerline.shp.zip" \
               --water_polygons_path="${TEMP_SOURCES}/water-polygons-split-3857.zip" \

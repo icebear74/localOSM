@@ -258,8 +258,9 @@ spec:
           readOnly: true
       volumes:
       - name: osm-temp
-        persistentVolumeClaim:
-          claimName: osm-temp
+        hostPath:
+          path: /mnt/osm-temp
+          type: DirectoryOrCreate
       - name: valhalla-root
         persistentVolumeClaim:
           claimName: valhalla
