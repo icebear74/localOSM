@@ -62,3 +62,9 @@ data:
     # connections from other pods too. Access itself is still restricted by
     # pg_hba.conf (see the photon role/host rule appended in nominatim.yaml).
     listen_addresses = '*'
+    # pg_prewarm: automatically save the shared-buffer state to disk on
+    # shutdown and restore it on the next startup, so warm-up after a pod
+    # restart is nearly instant instead of taking tens of minutes.
+    shared_preload_libraries = 'pg_prewarm'
+    pg_prewarm.autoprewarm = on
+    pg_prewarm.autoprewarm_interval = 300s
