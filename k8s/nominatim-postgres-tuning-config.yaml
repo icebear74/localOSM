@@ -37,6 +37,7 @@ data:
     max_parallel_workers = 8
     max_parallel_workers_per_gather = 4
     max_parallel_maintenance_workers = 4
+    default_toast_compression = lz4
 
   # Applied by nominatim.yaml (the running Nominatim service). This deployment
   # requests 2Gi/2 CPUs (limit 8Gi/8 CPUs, see k8s/nominatim.yaml), so these
@@ -52,6 +53,7 @@ data:
     max_parallel_workers = 4
     max_parallel_workers_per_gather = 3
     autovacuum_max_workers = 4
+    default_toast_compression = lz4
     # Nominatim's embedded Postgres only listens on localhost by default.
     # The Photon import job (k8s/photon-import-job.yaml) builds its search
     # index straight from this running instance over the network (via the
