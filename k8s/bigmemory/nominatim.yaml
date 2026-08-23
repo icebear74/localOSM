@@ -358,15 +358,7 @@ spec:
           # nominatim binary as a wrapper that silently skips "admin --warm".
           REAL_NOMINATIM=$(command -v nominatim)
           mkdir -p /usr/local/sbin
-          cat > /usr/local/sbin/nominatim <<'WRAPPER'
-#!/bin/bash
-# Skip the cache warm-up step; pg_prewarm handles cache restoration.
-if [ "$1" = "admin" ] && [ "$2" = "--warm" ]; then
-  echo "[startup] Skipping nominatim admin --warm (pg_prewarm handles cache restoration)"
-  exit 0
-fi
-exec /usr/local/bin/nominatim "$@"
-WRAPPER
+          printf '#!/bin/bash\n# Skip the cache warm-up step; pg_prewarm handles cache restoration.\nif [ "$1" = "admin" ] && [ "$2" = "--warm" ]; then\n  echo "[startup] Skipping nominatim admin --warm (pg_prewarm handles cache restoration)"\n  exit 0\nfi\nexec /usr/local/bin/nominatim "$@"\n' > /usr/local/sbin/nominatim
           chmod +x /usr/local/sbin/nominatim
           export PATH="/usr/local/sbin:${PATH}"
           exec /app/start.sh
