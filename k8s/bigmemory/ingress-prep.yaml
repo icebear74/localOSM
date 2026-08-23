@@ -6,7 +6,7 @@ metadata:
 spec:
   ingressClassName: haproxy
   rules:
-    - host: web.optadata.io
+    - host: routing.optadata.io
       http:
         paths:
           - path: /
@@ -18,7 +18,7 @@ spec:
                   number: 8080
   tls:
     - hosts:
-        - web.optadata.io
+        - routing.optadata.io
       secretName: optadata.io.secret
 ---
 apiVersion: networking.k8s.io/v1
@@ -52,7 +52,7 @@ metadata:
 spec:
   ingressClassName: haproxy
   rules:
-    - host: routing.optadata.io
+    - host: valhalla.optadata.io
       http:
         paths:
           - path: /
@@ -64,7 +64,7 @@ spec:
                   number: 8002
   tls:
     - hosts:
-        - routing.optadata.io
+        - valhalla.optadata.io
       secretName: optadata.io.secret
 ---
 apiVersion: networking.k8s.io/v1
@@ -121,7 +121,7 @@ metadata:
 spec:
   ingressClassName: haproxy
   rules:
-    - host: tiles.optadata.io
+    - host: tileserver.optadata.io
       http:
         paths:
           - path: /
@@ -133,7 +133,7 @@ spec:
                   number: 80
   tls:
     - hosts:
-        - tiles.optadata.io
+        - tileserver.optadata.io
       secretName: optadata.io.secret
 ---
 apiVersion: networking.k8s.io/v1

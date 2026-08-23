@@ -34,10 +34,10 @@ metadata:
 data:
   service-targets.json: |
     {
-      "tileserver": "https://tiles.optadata.io",
+      "tileserver": "https://tileserver.optadata.io",
       "nominatim": "https://nominatim.optadata.io",
-      "valhalla": "https://routing.optadata.io",
+      "valhalla": "https://valhalla.optadata.io",
       "photon": "https://photon.optadata.io",
-      "web": "https://web.optadata.io",
+      "web": "https://routing.optadata.io",
       "status": "https://status.optadata.io"
     }
