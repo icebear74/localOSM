@@ -201,6 +201,18 @@ spec:
             # stay below terminationGracePeriodSeconds above.
         - name: PGCTLTIMEOUT
           value: "3600"
+            # Nominatim's cache warm-up runs search queries through the same
+            # asyncio timeout machinery as normal API requests. On a cold
+            # planet-scale database these warm-up queries can take many minutes
+            # — far longer than Nominatim's default QUERY_TIMEOUT (10 s) —
+            # causing an asyncio.CancelledError that exits the process and
+            # crash-loops the container. Disable the query timeout entirely so
+            # warm-up (and long geocoding queries) are never cancelled by the
+            # application layer; Postgres-level statement_timeout in
+            # nominatim-postgres-tuning-config.yaml still provides a safety net
+            # for runaway queries during normal operation.
+        - name: NOMINATIM_QUERY_TIMEOUT
+          value: "0"
         - name: SSL_CERT_FILE
           value: /ca-certs/ca.crt
         - name: CURL_CA_BUNDLE
