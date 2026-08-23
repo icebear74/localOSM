@@ -3,13 +3,10 @@ kind: Ingress
 metadata:
   name: osm-web
   namespace: osm
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
 spec:
   ingressClassName: haproxy
   rules:
-    - host: web.localosm.example
+    - host: web.optadata.io
       http:
         paths:
           - path: /
@@ -21,7 +18,7 @@ spec:
                   number: 8080
   tls:
     - hosts:
-        - web.localosm.example
+        - web.optadata.io
       secretName: optadata.io.secret
 ---
 apiVersion: networking.k8s.io/v1
@@ -32,7 +29,7 @@ metadata:
 spec:
   ingressClassName: haproxy
   rules:
-    - host: status.localosm.example
+    - host: status.optadata.io
       http:
         paths:
           - path: /
@@ -44,7 +41,7 @@ spec:
                   number: 8080
   tls:
     - hosts:
-        - status.localosm.example
+        - status.optadata.io
       secretName: optadata.io.secret
 ---
 apiVersion: networking.k8s.io/v1
@@ -55,7 +52,7 @@ metadata:
 spec:
   ingressClassName: haproxy
   rules:
-    - host: routing.localosm.example
+    - host: routing.optadata.io
       http:
         paths:
           - path: /
@@ -67,7 +64,7 @@ spec:
                   number: 8002
   tls:
     - hosts:
-        - routing.localosm.example
+        - routing.optadata.io
       secretName: optadata.io.secret
 ---
 apiVersion: networking.k8s.io/v1
@@ -78,7 +75,7 @@ metadata:
 spec:
   ingressClassName: haproxy
   rules:
-    - host: nominatim.localosm.example
+    - host: nominatim.optadata.io
       http:
         paths:
           - path: /
@@ -90,7 +87,7 @@ spec:
                   number: 8080
   tls:
     - hosts:
-        - nominatim.localosm.example
+        - nominatim.optadata.io
       secretName: optadata.io.secret
 ---
 apiVersion: networking.k8s.io/v1
@@ -101,7 +98,7 @@ metadata:
 spec:
   ingressClassName: haproxy
   rules:
-    - host: photon.localosm.example
+    - host: photon.optadata.io
       http:
         paths:
           - path: /
@@ -113,7 +110,7 @@ spec:
                   number: 2322
   tls:
     - hosts:
-        - photon.localosm.example
+        - photon.optadata.io
       secretName: optadata.io.secret
 ---
 apiVersion: networking.k8s.io/v1
@@ -121,13 +118,10 @@ kind: Ingress
 metadata:
   name: osm-tileserver
   namespace: osm
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
 spec:
   ingressClassName: haproxy
   rules:
-    - host: tiles.localosm.example
+    - host: tiles.optadata.io
       http:
         paths:
           - path: /
@@ -139,7 +133,7 @@ spec:
                   number: 80
   tls:
     - hosts:
-        - tiles.localosm.example
+        - tiles.optadata.io
       secretName: optadata.io.secret
 ---
 apiVersion: networking.k8s.io/v1
@@ -150,7 +144,7 @@ metadata:
 spec:
   ingressClassName: haproxy
   rules:
-    - host: styles.localosm.example
+    - host: styles.optadata.io
       http:
         paths:
           - path: /
@@ -162,6 +156,7 @@ spec:
                   number: 8888
   tls:
     - hosts:
-        - styles.localosm.example
+        - styles.optadata.io
       secretName: optadata.io.secret
+
 
