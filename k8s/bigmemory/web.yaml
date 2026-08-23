@@ -1298,7 +1298,10 @@ data:
                     # browser fetches tiles without going through this proxy.
                     # Fonts and sprite assets remain proxied (same-origin).
                     _ts_cfg = SERVICE_TARGETS.get("tileserver", "").rstrip("/")
-                    _ts_host = (self.headers.get("Host", "") or "").split(":")[0] or self.server.server_name
+                    # Derive hostname from Host header; strip port and sanitize to
+                    # valid hostname/IPv4 characters to avoid injection into URLs.
+                    _ts_raw_host = (self.headers.get("Host", "") or "").split(":")[0]
+                    _ts_host = re.sub(r'[^A-Za-z0-9.\-]', '', _ts_raw_host) or self.server.server_name
                     _ts_browser_url = _ts_cfg if _ts_cfg else f"http://{_ts_host}:30085"
                     text = re.sub(r'https?://[^"]*?/data/v3', _ts_browser_url + '/data/v3', text)
                     text = re.sub(r'https?://[^"]*?/fonts', '/fonts', text)
@@ -1365,7 +1368,8 @@ data:
                     # Build the browser-facing tileserver URL from SERVICE_TARGETS or
                     # from the request's Host header hostname with the tileserver NodePort.
                     _ts_cfg = SERVICE_TARGETS.get("tileserver", "").rstrip("/")
-                    _ts_hostname = (self.headers.get("Host", "") or "").split(":")[0] or self.server.server_name
+                    _ts_raw_hostname = (self.headers.get("Host", "") or "").split(":")[0]
+                    _ts_hostname = re.sub(r'[^A-Za-z0-9.\-]', '', _ts_raw_hostname) or self.server.server_name
                     _ts_browser_url = _ts_cfg if _ts_cfg else f"http://{_ts_hostname}:30085"
                     tilejson["tiles"] = [f"{_ts_browser_url}/data/v3/{{z}}/{{x}}/{{y}}.pbf"]
                     self._send_json(tilejson)
