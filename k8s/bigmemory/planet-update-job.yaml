@@ -8,7 +8,7 @@ metadata:
     osm-job-type: planet-update
 spec:
   backoffLimit: 0
-  ttlSecondsAfterFinished: 86400
+  ttlSecondsAfterFinished: 259200
   template:
     metadata:
       labels:
@@ -98,22 +98,17 @@ spec:
             cpu: "200m"
             memory: "128Mi"
         volumeMounts:
-        - &id005
-          name: ca-certs
+        - name: ca-certs
           mountPath: /ca-certs
           readOnly: true
         env:
-        - &id001
-          name: SSL_CERT_FILE
+        - name: SSL_CERT_FILE
           value: /ca-certs/ca.crt
-        - &id002
-          name: CURL_CA_BUNDLE
+        - name: CURL_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id003
-          name: REQUESTS_CA_BUNDLE
+        - name: REQUESTS_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id004
-          name: NODE_EXTRA_CA_CERTS
+        - name: NODE_EXTRA_CA_CERTS
           value: /ca-certs/ca.crt
       containers:
       - name: planet-update
@@ -132,10 +127,10 @@ spec:
           value: https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf
         resources:
           requests:
-            memory: "8Gi"
+            memory: "14Gi"
             cpu: "4"
           limits:
-            memory: "32Gi"
+            memory: "55Gi"
             cpu: "16"
         volumeMounts:
         - name: planet-work
@@ -158,7 +153,9 @@ spec:
           readOnly: true
         - name: status
           mountPath: /status
-        - *id005
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
       volumes:
       - name: planet-work
         persistentVolumeClaim:
@@ -189,7 +186,7 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 0
-      ttlSecondsAfterFinished: 86400
+      ttlSecondsAfterFinished: 259200
       template:
         metadata:
           labels:
@@ -228,10 +225,10 @@ spec:
               value: /ca-certs/ca.crt
             resources:
               requests:
-                memory: "8Gi"
+                memory: "14Gi"
                 cpu: "4"
               limits:
-                memory: "32Gi"
+                memory: "55Gi"
                 cpu: "16"
             volumeMounts:
             - name: planet-work

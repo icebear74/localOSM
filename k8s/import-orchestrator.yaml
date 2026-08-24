@@ -76,6 +76,8 @@ spec:
           value: /mnt/OSM
         - name: OSM_TEMP_DIR
           value: __OSM_TEMP_DIR__
+        - name: OSM_JOB_TTL_SECONDS
+          value: "86400"
         - name: SSL_CERT_FILE
           value: /ca-certs/ca.crt
         - name: CURL_CA_BUNDLE

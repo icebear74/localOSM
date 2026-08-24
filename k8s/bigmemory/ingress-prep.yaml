@@ -3,11 +3,10 @@ kind: Ingress
 metadata:
   name: osm-web
   namespace: osm
-  annotations:
-    # kubernetes.io/ingress.class: haproxy
 spec:
+  ingressClassName: haproxy
   rules:
-    - host: web.localosm.example
+    - host: routing.optadata.io
       http:
         paths:
           - path: /
@@ -17,17 +16,20 @@ spec:
                 name: web
                 port:
                   number: 8080
+  tls:
+    - hosts:
+        - routing.optadata.io
+      secretName: optadata.io.secret
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: osm-status
   namespace: osm
-  annotations:
-    # kubernetes.io/ingress.class: haproxy
 spec:
+  ingressClassName: haproxy
   rules:
-    - host: status.localosm.example
+    - host: status.optadata.io
       http:
         paths:
           - path: /
@@ -37,3 +39,124 @@ spec:
                 name: status
                 port:
                   number: 8080
+  tls:
+    - hosts:
+        - status.optadata.io
+      secretName: optadata.io.secret
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: osm-routing-api
+  namespace: osm
+spec:
+  ingressClassName: haproxy
+  rules:
+    - host: valhalla.optadata.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: valhalla
+                port:
+                  number: 8002
+  tls:
+    - hosts:
+        - valhalla.optadata.io
+      secretName: optadata.io.secret
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: osm-nominatim
+  namespace: osm
+spec:
+  ingressClassName: haproxy
+  rules:
+    - host: nominatim.optadata.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nominatim
+                port:
+                  number: 8080
+  tls:
+    - hosts:
+        - nominatim.optadata.io
+      secretName: optadata.io.secret
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: osm-photon
+  namespace: osm
+spec:
+  ingressClassName: haproxy
+  rules:
+    - host: photon.optadata.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: photon
+                port:
+                  number: 2322
+  tls:
+    - hosts:
+        - photon.optadata.io
+      secretName: optadata.io.secret
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: osm-tileserver
+  namespace: osm
+spec:
+  ingressClassName: haproxy
+  rules:
+    - host: tileserver.optadata.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tileserver-gl
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - tileserver.optadata.io
+      secretName: optadata.io.secret
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: osm-style-editor
+  namespace: osm
+spec:
+  ingressClassName: haproxy
+  rules:
+    - host: styles.optadata.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: style-editor
+                port:
+                  number: 8888
+  tls:
+    - hosts:
+        - styles.optadata.io
+      secretName: optadata.io.secret
+
+

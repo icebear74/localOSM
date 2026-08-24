@@ -6,7 +6,7 @@ metadata:
   labels:
     app: style-editor
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: style-editor
@@ -17,6 +17,15 @@ spec:
     spec:
       nodeSelector:
         osm: "true"
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: style-editor
+              topologyKey: topology.kubernetes.io/zone
       containers:
       - name: maputnik
         image: maputnik/editor:latest

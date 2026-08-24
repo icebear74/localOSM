@@ -115,22 +115,17 @@ spec:
         - name: tileserver-style
           mountPath: /style-source
           readOnly: true
-        - &id005
-          name: ca-certs
+        - name: ca-certs
           mountPath: /ca-certs
           readOnly: true
         env:
-        - &id001
-          name: SSL_CERT_FILE
+        - name: SSL_CERT_FILE
           value: /ca-certs/ca.crt
-        - &id002
-          name: CURL_CA_BUNDLE
+        - name: CURL_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id003
-          name: REQUESTS_CA_BUNDLE
+        - name: REQUESTS_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id004
-          name: NODE_EXTRA_CA_CERTS
+        - name: NODE_EXTRA_CA_CERTS
           value: /ca-certs/ca.crt
       containers:
       - name: tileserver-gl
@@ -146,19 +141,25 @@ spec:
             memory: "8Gi"
         env:
         - name: PORT
-          value: "80"
-        - *id001
-        - *id002
-        - *id003
-        - *id004
+          value: "8080"
+        - name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
         ports:
-        - containerPort: 80
+        - containerPort: 8080
         volumeMounts:
         - name: tileserver-data
           mountPath: /data
         - name: dshm
           mountPath: /dev/shm
-        - *id005
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
       volumes:
       - name: tileserver-data
         persistentVolumeClaim:
@@ -192,5 +193,5 @@ spec:
   ports:
   - name: http
     port: 80
-    targetPort: 80
+    targetPort: 8080
     nodePort: 30085

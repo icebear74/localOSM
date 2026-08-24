@@ -6,7 +6,7 @@ metadata:
   labels:
     app: valhalla
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: valhalla
@@ -17,6 +17,15 @@ spec:
     spec:
       nodeSelector:
         osm: "true"
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: valhalla
+              topologyKey: topology.kubernetes.io/zone
       initContainers:
       - name: ca-injector
         image: alpine:3.20
@@ -82,22 +91,17 @@ spec:
         volumeMounts:
         - name: valhalla-data
           mountPath: /service-data
-        - &id001
-          name: ca-certs
+        - name: ca-certs
           mountPath: /ca-certs
           readOnly: true
         env:
-        - &id002
-          name: SSL_CERT_FILE
+        - name: SSL_CERT_FILE
           value: /ca-certs/ca.crt
-        - &id003
-          name: CURL_CA_BUNDLE
+        - name: CURL_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id004
-          name: REQUESTS_CA_BUNDLE
+        - name: REQUESTS_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id005
-          name: NODE_EXTRA_CA_CERTS
+        - name: NODE_EXTRA_CA_CERTS
           value: /ca-certs/ca.crt
       - name: wait-for-tiles
         image: busybox:1.36
@@ -119,12 +123,70 @@ spec:
         volumeMounts:
         - name: valhalla-data
           mountPath: /service-data
-        - *id001
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
         env:
-        - *id002
-        - *id003
-        - *id004
-        - *id005
+        - name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
+      - name: prepare-runtime-files
+        image: busybox:1.36
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -eu
+          mkdir -p /runtime
+          find /runtime -mindepth 1 -maxdepth 1 -exec rm -rf {} \;
+          if [ -f /service-data/active/valhalla.json ]; then
+            cp /service-data/active/valhalla.json /runtime/valhalla.json
+          else
+            cp /config/valhalla.json /runtime/valhalla.json
+          fi
+          if [ -f /service-data/active/.file_hashes.txt ]; then
+            cp /service-data/active/.file_hashes.txt /runtime/.file_hashes.txt
+          else
+            : > /runtime/.file_hashes.txt
+          fi
+          find /service-data/active -mindepth 1 -maxdepth 1 | while read -r src; do
+            name="$(basename "${src}")"
+            case "${name}" in
+              valhalla.json|.file_hashes.txt) continue ;;
+            esac
+            ln -s "/shared-data/active/${name}" "/runtime/${name}"
+          done
+        resources:
+          requests:
+            cpu: "10m"
+            memory: "16Mi"
+          limits:
+            cpu: "50m"
+            memory: "64Mi"
+        volumeMounts:
+        - name: valhalla-data
+          mountPath: /service-data
+        - name: valhalla-runtime
+          mountPath: /runtime
+        - name: valhalla-config
+          mountPath: /config
+          readOnly: true
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
+        env:
+        - name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
       containers:
       - name: valhalla
         image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
@@ -139,10 +201,14 @@ spec:
           value: "False"
         - name: server_threads
           value: "6"
-        - *id002
-        - *id003
-        - *id004
-        - *id005
+        - name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
         resources:
           requests:
             memory: "4Gi"
@@ -153,14 +219,23 @@ spec:
         ports:
         - containerPort: 8002
         volumeMounts:
-        - name: valhalla-data
+        - name: valhalla-runtime
           mountPath: /custom_files
-          subPath: active
-        - *id001
+        - name: valhalla-data
+          mountPath: /shared-data
+          readOnly: true
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
       volumes:
       - name: valhalla-data
         persistentVolumeClaim:
           claimName: valhalla
+      - name: valhalla-runtime
+        emptyDir: {}
+      - name: valhalla-config
+        configMap:
+          name: osm-valhalla-config
       - name: ca-certs
         emptyDir: {}
 ---

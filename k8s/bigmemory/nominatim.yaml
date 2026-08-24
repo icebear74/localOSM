@@ -92,17 +92,13 @@ spec:
         env:
         - name: PGDATA
           value: /nominatim-data/current
-        - &id001
-          name: SSL_CERT_FILE
+        - name: SSL_CERT_FILE
           value: /ca-certs/ca.crt
-        - &id002
-          name: CURL_CA_BUNDLE
+        - name: CURL_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id003
-          name: REQUESTS_CA_BUNDLE
+        - name: REQUESTS_CA_BUNDLE
           value: /ca-certs/ca.crt
-        - &id004
-          name: NODE_EXTRA_CA_CERTS
+        - name: NODE_EXTRA_CA_CERTS
           value: /ca-certs/ca.crt
         command: ["/bin/sh", "-c"]
         args:
@@ -158,8 +154,7 @@ spec:
         - name: nominatim-data
           mountPath: /nominatim-data
           readOnly: true
-        - &id005
-          name: ca-certs
+        - name: ca-certs
           mountPath: /ca-certs
           readOnly: true
       containers:
@@ -206,10 +201,26 @@ spec:
             # stay below terminationGracePeriodSeconds above.
         - name: PGCTLTIMEOUT
           value: "3600"
-        - *id001
-        - *id002
-        - *id003
-        - *id004
+            # Nominatim's cache warm-up runs search queries through the same
+            # asyncio timeout machinery as normal API requests. On a cold
+            # planet-scale database these warm-up queries can take many minutes
+            # — far longer than Nominatim's default QUERY_TIMEOUT (10 s) —
+            # causing an asyncio.CancelledError that exits the process and
+            # crash-loops the container. Disable the query timeout entirely so
+            # warm-up (and long geocoding queries) are never cancelled by the
+            # application layer; Postgres-level statement_timeout in
+            # nominatim-postgres-tuning-config.yaml still provides a safety net
+            # for runaway queries during normal operation.
+        - name: NOMINATIM_QUERY_TIMEOUT
+          value: "0"
+        - name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
         command: ["/bin/bash", "-c"]
         args:
         - |
@@ -321,6 +332,35 @@ spec:
           SQL
             ) || echo "WARNING: could not provision Photon Postgres role (Photon import may fail until this is fixed): ${PSQL_OUTPUT}"
           ) &
+          # Replace the stock start.sh with a custom startup that:
+          #  1. Skips `nominatim admin --warm` (the cache warm-up that can stall
+          #     for 10–45 minutes on a cold planet-scale database). On the first
+          #     ever start the first few geocoding requests will be somewhat
+          #     slower while Postgres loads pages on demand, but the API is
+          #     immediately available. On subsequent restarts pg_prewarm
+          #     (configured in nominatim-postgres-tuning-config.yaml) reloads
+          #     the previous buffer state in the background, so the warm-up
+          #     penalty disappears after the first restart.
+          #  2. Creates the pg_prewarm extension in the nominatim database so
+          #     that the autoprewarm background worker (enabled by
+          #     shared_preload_libraries above) has something to work with.
+          (
+            for _ in $(seq 1 120); do
+              if pg_isready -q 2>/dev/null; then
+                break
+              fi
+              sleep 5
+            done
+            sudo -u postgres psql -d nominatim -c "CREATE EXTENSION IF NOT EXISTS pg_prewarm;" \
+              2>&1 || echo "[startup] pg_prewarm extension already exists or unavailable; continuing"
+          ) &
+          # Run start.sh but intercept the warm step by pre-defining the
+          # nominatim binary as a wrapper that silently skips "admin --warm".
+          REAL_NOMINATIM=$(command -v nominatim)
+          mkdir -p /usr/local/sbin
+          printf '#!/bin/bash\n# Skip the cache warm-up step; pg_prewarm handles cache restoration.\nif [ "$1" = "admin" ] && [ "$2" = "--warm" ]; then\n  echo "[startup] Skipping nominatim admin --warm (pg_prewarm handles cache restoration)"\n  exit 0\nfi\nexec /usr/local/bin/nominatim "$@"\n' > /usr/local/sbin/nominatim
+          chmod +x /usr/local/sbin/nominatim
+          export PATH="/usr/local/sbin:${PATH}"
           exec /app/start.sh
         ports:
         - containerPort: 8080
@@ -369,7 +409,9 @@ spec:
           mountPath: /etc/postgresql/16/main/conf.d/zz-tuning.conf
           subPath: runtime-tuning.conf
           readOnly: true
-        - *id005
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
       volumes:
       - name: nominatim-data
         persistentVolumeClaim:
