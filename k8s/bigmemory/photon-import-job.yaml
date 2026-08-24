@@ -136,16 +136,35 @@ spec:
         command: ["/bin/sh", "-c"]
         args:
         - |
-          set -e
+          set -eu
           mkdir -p /service-data/bin
           JAR="/service-data/bin/photon-${PHOTON_VERSION}.jar"
+          LOCK_DIR="${JAR}.lock"
+          TMP_JAR="${JAR}.part.$$"
+          cleanup() {
+            rm -f "${TMP_JAR}"
+            rmdir "${LOCK_DIR}" 2>/dev/null || true
+          }
+          trap cleanup EXIT
           if [ -s "${JAR}" ]; then
             echo "Photon ${PHOTON_VERSION} jar already present at ${JAR}."
           else
-            echo "Downloading Photon ${PHOTON_VERSION} release jar ..."
-            curl -fsSL -o "${JAR}.part" "https://github.com/komoot/photon/releases/download/${PHOTON_VERSION}/photon-${PHOTON_VERSION}.jar"
-            mv "${JAR}.part" "${JAR}"
-            echo "Downloaded Photon ${PHOTON_VERSION}."
+            until mkdir "${LOCK_DIR}" 2>/dev/null; do
+              if [ -s "${JAR}" ]; then
+                echo "Photon ${PHOTON_VERSION} jar was downloaded by another pod."
+                exit 0
+              fi
+              echo "Waiting for Photon ${PHOTON_VERSION} jar bootstrap lock ..."
+              sleep 2
+            done
+            if [ -s "${JAR}" ]; then
+              echo "Photon ${PHOTON_VERSION} jar was downloaded by another pod."
+            else
+              echo "Downloading Photon ${PHOTON_VERSION} release jar ..."
+              curl -fsSL -o "${TMP_JAR}" "https://github.com/komoot/photon/releases/download/${PHOTON_VERSION}/photon-${PHOTON_VERSION}.jar"
+              mv "${TMP_JAR}" "${JAR}"
+              echo "Downloaded Photon ${PHOTON_VERSION}."
+            fi
           fi
         resources:
           requests:

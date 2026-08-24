@@ -141,16 +141,35 @@ spec:
         command: ["/bin/sh", "-c"]
         args:
         - |
-          set -e
+          set -eu
           mkdir -p /photon-store/bin
           JAR="/photon-store/bin/photon-${PHOTON_VERSION}.jar"
+          LOCK_DIR="${JAR}.lock"
+          TMP_JAR="${JAR}.part.$$"
+          cleanup() {
+            rm -f "${TMP_JAR}"
+            rmdir "${LOCK_DIR}" 2>/dev/null || true
+          }
+          trap cleanup EXIT
           if [ -s "${JAR}" ]; then
             echo "Photon ${PHOTON_VERSION} jar already present at ${JAR}."
           else
-            echo "Downloading Photon ${PHOTON_VERSION} release jar ..."
-            curl -fsSL -o "${JAR}.part" "https://github.com/komoot/photon/releases/download/${PHOTON_VERSION}/photon-${PHOTON_VERSION}.jar"
-            mv "${JAR}.part" "${JAR}"
-            echo "Downloaded Photon ${PHOTON_VERSION}."
+            until mkdir "${LOCK_DIR}" 2>/dev/null; do
+              if [ -s "${JAR}" ]; then
+                echo "Photon ${PHOTON_VERSION} jar was downloaded by another pod."
+                exit 0
+              fi
+              echo "Waiting for Photon ${PHOTON_VERSION} jar bootstrap lock ..."
+              sleep 2
+            done
+            if [ -s "${JAR}" ]; then
+              echo "Photon ${PHOTON_VERSION} jar was downloaded by another pod."
+            else
+              echo "Downloading Photon ${PHOTON_VERSION} release jar ..."
+              curl -fsSL -o "${TMP_JAR}" "https://github.com/komoot/photon/releases/download/${PHOTON_VERSION}/photon-${PHOTON_VERSION}.jar"
+              mv "${TMP_JAR}" "${JAR}"
+              echo "Downloaded Photon ${PHOTON_VERSION}."
+            fi
           fi
         resources:
           requests:
@@ -197,6 +216,51 @@ spec:
           value: /ca-certs/ca.crt
         - name: NODE_EXTRA_CA_CERTS
           value: /ca-certs/ca.crt
+      - name: prepare-runtime-files
+        image: busybox:1.36
+        env:
+        - name: PHOTON_VERSION
+          valueFrom:
+            configMapKeyRef:
+              name: osm-photon-config
+              key: photon_version
+        - name: SSL_CERT_FILE
+          value: /ca-certs/ca.crt
+        - name: CURL_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: REQUESTS_CA_BUNDLE
+          value: /ca-certs/ca.crt
+        - name: NODE_EXTRA_CA_CERTS
+          value: /ca-certs/ca.crt
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -eu
+          JAR="/photon-store/bin/photon-${PHOTON_VERSION}.jar"
+          test -s "${JAR}" || { echo "ERROR: ${JAR} missing"; exit 1; }
+          mkdir -p /runtime/bin /runtime/active
+          find /runtime/bin -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          find /runtime/active -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          ln -s "/shared-store/bin/photon-${PHOTON_VERSION}.jar" "/runtime/bin/photon-${PHOTON_VERSION}.jar"
+          find /photon-store/active -mindepth 1 -maxdepth 1 | while read -r src; do
+            name="$(basename "${src}")"
+            ln -s "/shared-store/active/${name}" "/runtime/active/${name}"
+          done
+        resources:
+          requests:
+            cpu: "10m"
+            memory: "16Mi"
+          limits:
+            cpu: "50m"
+            memory: "64Mi"
+        volumeMounts:
+        - name: photon-storage
+          mountPath: /photon-store
+        - name: photon-runtime
+          mountPath: /runtime
+        - name: ca-certs
+          mountPath: /ca-certs
+          readOnly: true
       containers:
       - name: photon
         image: eclipse-temurin:21-jre
@@ -247,8 +311,11 @@ spec:
           failureThreshold: 60
           timeoutSeconds: 5
         volumeMounts:
-        - name: photon-storage
+        - name: photon-runtime
           mountPath: /photon-store
+        - name: photon-storage
+          mountPath: /shared-store
+          readOnly: true
         - name: ca-certs
           mountPath: /ca-certs
           readOnly: true
@@ -256,6 +323,8 @@ spec:
       - name: photon-storage
         persistentVolumeClaim:
           claimName: photon
+      - name: photon-runtime
+        emptyDir: {}
       - name: ca-certs
         emptyDir: {}
 ---
