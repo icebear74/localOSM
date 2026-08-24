@@ -298,11 +298,12 @@ def _expand_range(value: Any) -> List[Any]:
         start = float(value["from"])
         stop = float(value["to"])
         step = float(value.get("step", 0.1))
-        result: List[float] = []
-        current = start
-        while current <= stop + 1e-9:
-            result.append(round(current, 10))
-            current += step
+        if step <= 0:
+            return [start]
+        steps = int((stop - start) / step) + 1
+        result: List[float] = [round(start + i * step, 10) for i in range(max(steps, 0))]
+        if result and result[-1] < stop - 1e-9:
+            result.append(round(stop, 10))
         return result
     return [value]
 
@@ -414,7 +415,7 @@ def process_row(
     d_lon, d_lat, geo_d_t, geocoder_name_d = geocode(dest_addr, config)
     timing_totals[geocoder_name_d] = timing_totals.get(geocoder_name_d, 0.0) + geo_d_t
 
-    if o_lon is None or d_lon is None:
+    if o_lon is None or o_lat is None or d_lon is None or d_lat is None:
         return {
             "id": row.get("id", ""),
             "origin_address": origin_addr,
@@ -529,7 +530,7 @@ def process_global_optimization(
         row_meters: Dict[int, Optional[float]] = {}
 
         for row_idx, p in enumerate(prepared_rows, start=1):
-            if p["o_lon"] is None or p["d_lon"] is None:
+            if p["o_lon"] is None or p["o_lat"] is None or p["d_lon"] is None or p["d_lat"] is None:
                 geocode_failed += 1
                 row_meters[row_idx - 1] = None
                 continue
@@ -596,7 +597,7 @@ def process_global_optimization(
     for row_idx, p in enumerate(prepared_rows):
         best_meters = best_combo_row_meters.get(row_idx)
         error = ""
-        if p["o_lon"] is None or p["d_lon"] is None:
+        if p["o_lon"] is None or p["o_lat"] is None or p["d_lon"] is None or p["d_lat"] is None:
             error = "geocoding failed"
         elif best_meters is None:
             error = "routing failed"
