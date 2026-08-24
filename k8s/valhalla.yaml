@@ -133,7 +133,7 @@ spec:
         - |
           set -eu
           mkdir -p /runtime
-          find /runtime -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          find /runtime -mindepth 1 -maxdepth 1 -exec rm -rf {} \;
           if [ -f /service-data/active/valhalla.json ]; then
             cp /service-data/active/valhalla.json /runtime/valhalla.json
           else
