@@ -34,7 +34,9 @@
       "costing_options_variants entries may use range dicts:",
       "  { 'auto': { 'use_highways': { 'from': 0.0, 'to': 1.0, 'step': 0.5 } } }",
       "This generates 3 combinations (0.0, 0.5, 1.0) crossed with other variants.",
-      "Tip: start with a small range / large step to keep run time reasonable."
+      "Tip: start with a small range / large step to keep run time reasonable.",
+      "Example: sweep use_distance from 0 (fastest) to 1 (shortest distance):",
+      "  { 'auto': { 'use_distance': { 'from': 0.0, 'to': 1.0, 'step': 0.5 } } }"
     ],
 
     "enabled": true,
@@ -69,6 +71,7 @@
     "auto": {
       "_routing_preference": [
         "Use 'use_highways' + 'use_tolls' + 'use_ferry' to trade off speed vs. cost.",
+        "'use_distance' (0=time-only .. 1=distance-only) shifts route costs between shortest time and shortest distance.",
         "'maneuver_penalty' and 'country_crossing_penalty' affect turn-by-turn cost."
       ],
 
@@ -90,6 +93,7 @@
 
       "top_speed":      130,
       "shortest":       false,
+      "use_distance":   0.0,
 
       "_height_weight_note": "truck-relevant, ignored for auto",
       "height": 4.11,
