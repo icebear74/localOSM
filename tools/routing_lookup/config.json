@@ -1,0 +1,41 @@
+{
+  "photon_base_url": "https://photon.optadata.io",
+  "nominatim_base_url": "https://nominatim.optadata.io",
+  "valhalla_base_url": "https://valhalla.optadata.io",
+
+  "geocoder": "photon",
+
+  "photon": {
+    "limit": 1,
+    "lang": "de"
+  },
+
+  "nominatim": {
+    "format": "json",
+    "limit": 1,
+    "countrycodes": "de",
+    "addressdetails": 0
+  },
+
+  "valhalla": {
+    "costing": "auto",
+    "costing_options": {},
+    "directions_type": "none",
+    "units": "km"
+  },
+
+  "optimize": {
+    "enabled": true,
+    "costing_variants": ["auto", "truck"],
+    "units_variants": ["km"],
+    "costing_options_variants": [
+      {},
+      {"auto": {"use_highways": 1.0, "use_tolls": 0.5}},
+      {"auto": {"use_highways": 0.5, "use_tolls": 0.0}}
+    ]
+  },
+
+  "timeout_seconds": 10,
+  "input_encoding": "utf-8",
+  "output_encoding": "utf-8"
+}

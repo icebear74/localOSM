@@ -1,0 +1,4 @@
+id;destination_ascertained;destination_entry;distance;origin_ascertained;origin_entry;saved_date;is_used
+2058438;"D;42551;Velbert;Blumenstr. 4";"D;42551;Velbert;Blumenstr. 4";8946;"D;42489;Wülfrath;Am Rathaus 7";"D;42489;Wülfrath;Am Rathaus 7";2026-08-24 12:55:52.407;1
+2058437;"D;42489;Wülfrath;Zur Hotzepar 23";"D;42489;Wülfrath;Zur Hotzepar 23";10499;"D;42109;Wuppertal;Hainstraße 15-17";"D;42109;Wuppertal;Hainstraße 15-17";2026-08-24 12:55:43.377;1
+2058436;"D;34277;Fuldabrück;Guntershäuser Str. 10";"D;34277;Fuldabrück;Guntershäuser Str. 10";9571;"D;34132;Kassel , Hess;Oberzwehrener Straße 72";"D;34132;Kassel , Hess;Oberzwehrener Straße 72";2026-08-24 12:55:40.573;1
