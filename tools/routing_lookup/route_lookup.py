@@ -6,14 +6,22 @@ Reads a semicolon-delimited CSV of origin/destination addresses, geocodes
 them via Photon or Nominatim, queries Valhalla for the route distance, and
 writes a result CSV comparing the original distance with the Valhalla distance.
 
-Optionally tries multiple routing-parameter combinations to find the variant
-closest to the stored original distance (optimization mode).
+Optionally tries multiple routing-parameter combinations (including float
+value ranges) to find the variant closest to the stored original distance.
 
 Usage
 -----
-  python route_lookup.py --input example_input.csv --output results.csv
-  python route_lookup.py --input example_input.csv --output results.csv \\
-      --config config.json --geocoder nominatim
+  # positional – quickest way to call it:
+  python route_lookup.py input.csv output.csv
+
+  # named flags (same result):
+  python route_lookup.py --input input.csv --output output.csv
+
+  # use Nominatim instead of Photon for geocoding:
+  python route_lookup.py input.csv output.csv --geocoder nominatim
+
+  # use a custom config file:
+  python route_lookup.py input.csv output.csv --config myconfig.json
 
 Run  python route_lookup.py --help  for all options.
 """
@@ -265,6 +273,62 @@ def valhalla_route(
         return None, elapsed
 
 
+def _expand_range(value: Any) -> List[Any]:
+    """
+    If *value* is a range dict ``{"from": f, "to": t, "step": s}`` return a
+    list of float values from f to t (inclusive) with step s.
+    Otherwise return ``[value]``.
+    """
+    if isinstance(value, dict) and "from" in value and "to" in value:
+        start = float(value["from"])
+        stop = float(value["to"])
+        step = float(value.get("step", 0.1))
+        result: List[float] = []
+        current = start
+        while current <= stop + 1e-9:
+            result.append(round(current, 10))
+            current += step
+        return result
+    return [value]
+
+
+def _expand_costing_options(co_template: Dict) -> List[Dict]:
+    """
+    Expand a costing-options dict that may contain range values into a list of
+    fully resolved dicts.
+
+    Example input::
+
+        {"auto": {"use_highways": {"from": 0.0, "to": 1.0, "step": 0.5},
+                  "use_tolls": 0.5}}
+
+    Yields three dicts where ``use_highways`` is 0.0, 0.5, 1.0.
+    """
+    # Flatten: collect (profile_key, option_key, expanded_values) triples
+    expanded: List[Dict] = [{}]
+    for profile, opts in co_template.items():
+        # Skip documentation-only keys
+        if profile.startswith("_"):
+            continue
+        if not isinstance(opts, dict):
+            # Scalar value – keep as-is
+            for d in expanded:
+                d[profile] = opts
+            continue
+        for opt_key, opt_val in opts.items():
+            if opt_key.startswith("_"):
+                continue
+            values = _expand_range(opt_val)
+            new_expanded: List[Dict] = []
+            for existing in expanded:
+                for v in values:
+                    entry = copy.deepcopy(existing)
+                    entry.setdefault(profile, {})[opt_key] = v
+                    new_expanded.append(entry)
+            expanded = new_expanded
+    return expanded
+
+
 # ---------------------------------------------------------------------------
 # Optimization helpers
 # ---------------------------------------------------------------------------
@@ -274,6 +338,10 @@ def _build_param_combinations(config: Dict) -> List[Dict]:
 
     When ``optimize.enabled`` is ``False``, returns a single entry with the
     base valhalla config.
+
+    Each entry in ``costing_options_variants`` may contain range dicts of the
+    form ``{"from": 0.0, "to": 1.0, "step": 0.25}`` which are expanded into
+    individual float values before building the cross-product of combinations.
     """
     opt = config.get("optimize", {})
     if not opt.get("enabled", False):
@@ -282,12 +350,17 @@ def _build_param_combinations(config: Dict) -> List[Dict]:
     base = copy.deepcopy(config.get("valhalla", {}))
     costings = opt.get("costing_variants") or [base.get("costing", "auto")]
     units_list = opt.get("units_variants") or [base.get("units", "km")]
-    costing_opts_list = opt.get("costing_options_variants") or [{}]
+    raw_co_list = opt.get("costing_options_variants") or [{}]
+
+    # Expand each costing-options template (may contain range dicts)
+    expanded_co_list: List[Dict] = []
+    for co_template in raw_co_list:
+        expanded_co_list.extend(_expand_costing_options(co_template))
 
     combos: List[Dict] = []
     for costing in costings:
         for units in units_list:
-            for co in costing_opts_list:
+            for co in expanded_co_list:
                 params = copy.deepcopy(base)
                 params["costing"] = costing
                 params["units"] = units
@@ -427,12 +500,25 @@ def build_arg_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    p.add_argument("--input", "-i", required=True, help="Path to input CSV file.")
-    p.add_argument("--output", "-o", required=True, help="Path to output CSV file.")
+    # Positional shortcuts: route_lookup.py input.csv output.csv
+    p.add_argument(
+        "pos_input",
+        nargs="?",
+        metavar="INPUT",
+        help="Input CSV file (positional shortcut for --input).",
+    )
+    p.add_argument(
+        "pos_output",
+        nargs="?",
+        metavar="OUTPUT",
+        help="Output CSV file (positional shortcut for --output).",
+    )
+    p.add_argument("--input", "-i", default=None, help="Path to input CSV file.")
+    p.add_argument("--output", "-o", default=None, help="Path to output CSV file.")
     p.add_argument(
         "--config",
         "-c",
-        default=os.path.join(os.path.dirname(__file__), "config.json"),
+        default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json"),
         help="Path to JSON config file (default: config.json next to this script).",
     )
     p.add_argument(
@@ -497,6 +583,15 @@ def main() -> int:
     parser = build_arg_parser()
     args = parser.parse_args()
 
+    # Resolve input/output: positional args take precedence if named args absent
+    input_path = args.input or args.pos_input
+    output_path = args.output or args.pos_output
+
+    if not input_path:
+        parser.error("input CSV is required (positional or --input)")
+    if not output_path:
+        parser.error("output CSV is required (positional or --output)")
+
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
@@ -514,8 +609,8 @@ def main() -> int:
     if args.no_optimize:
         config.setdefault("optimize", {})["enabled"] = False
 
-    log.info("Reading input: %s", args.input)
-    rows = read_input_csv(args.input, config.get("input_encoding", "utf-8"))
+    log.info("Reading input: %s", input_path)
+    rows = read_input_csv(input_path, config.get("input_encoding", "utf-8"))
     log.info("Rows to process: %d", len(rows))
 
     results: List[Dict] = []
@@ -534,8 +629,8 @@ def main() -> int:
             result["difference_meters"],
         )
 
-    log.info("Writing output: %s", args.output)
-    write_output_csv(results, args.output, config.get("output_encoding", "utf-8"))
+    log.info("Writing output: %s", output_path)
+    write_output_csv(results, output_path, config.get("output_encoding", "utf-8"))
 
     # Timing summary
     log.info("--- Timing summary ---")

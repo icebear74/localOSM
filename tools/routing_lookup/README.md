@@ -21,23 +21,29 @@ distance.
 ## Quick start
 
 ```bash
-# Run with the example input and default config (writes results.csv)
-python route_lookup.py --input example_input.csv --output results.csv
+# Positional shortcut (quickest):
+python route_lookup.py QVadis.csv results.csv
+
+# Or with named flags:
+python route_lookup.py --input QVadis.csv --output results.csv
 
 # Use Nominatim instead of Photon for geocoding
-python route_lookup.py --input example_input.csv --output results.csv --geocoder nominatim
+python route_lookup.py QVadis.csv results.csv --geocoder nominatim
 
 # Override service URLs on the command line
-python route_lookup.py --input example_input.csv --output results.csv \
+python route_lookup.py QVadis.csv results.csv \
     --photon-url https://photon.example.com \
     --nominatim-url https://nominatim.example.com \
     --valhalla-url https://valhalla.example.com
 
+# Use a custom config file
+python route_lookup.py QVadis.csv results.csv --config myconfig.json
+
 # Disable optimization (single-pass, base config only)
-python route_lookup.py --input example_input.csv --output results.csv --no-optimize
+python route_lookup.py QVadis.csv results.csv --no-optimize
 
 # Enable verbose / debug logging
-python route_lookup.py --input example_input.csv --output results.csv --verbose
+python route_lookup.py QVadis.csv results.csv --verbose
 ```
 
 ## Input CSV format
@@ -107,6 +113,45 @@ When `optimize.enabled` is `true` the script tries every combination of
 `costing_variants × units_variants × costing_options_variants` for each row and
 keeps the result closest to the stored original distance.  Disable it with
 `--no-optimize` or by setting `"enabled": false` in the config.
+
+#### Value ranges (from/to/step)
+
+Any scalar in `costing_options_variants` can be replaced with a range dict so
+the script sweeps that parameter automatically:
+
+```json
+{
+  "auto": {
+    "use_highways": { "from": 0.0, "to": 1.0, "step": 0.25 },
+    "use_tolls": 0.5
+  }
+}
+```
+
+This generates 5 combinations (0.0 / 0.25 / 0.5 / 0.75 / 1.0) for
+`use_highways`, each paired with `use_tolls = 0.5`.  Ranges from
+multiple keys are cross-multiplied.
+
+#### All available Valhalla costing parameters
+
+The `_all_valhalla_costing_options` section in `config.json` documents every
+known Valhalla option for `auto`, `truck`, `pedestrian`, `bicycle`,
+`motorcycle`, and `motor_scooter` profiles.  Copy any of these into
+`costing_options_variants` to include them in the optimization sweep.
+
+Key parameters for car routing (`auto` / `truck`):
+
+| Parameter | Range | Meaning |
+|---|---|---|
+| `use_highways` | 0.0–1.0 | 0 = avoid motorways, 1 = prefer motorways |
+| `use_tolls` | 0.0–1.0 | 0 = avoid tolls, 1 = accept tolls freely |
+| `use_ferry` | 0.0–1.0 | 0 = avoid ferries, 1 = prefer ferries |
+| `top_speed` | km/h | Assumed top speed (affects time-based routing) |
+| `shortest` | bool | true = minimize distance instead of time |
+| `maneuver_penalty` | seconds | Penalty applied at every turn/manoeuvre |
+| `country_crossing_cost` | seconds | Extra time for crossing a border |
+| `gate_cost` / `gate_penalty` | seconds | Cost for passing a gate |
+| `private_access_penalty` | seconds | Penalty for roads with private access |
 
 ## Timing
 
