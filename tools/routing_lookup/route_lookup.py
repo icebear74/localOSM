@@ -29,6 +29,7 @@ Run  python route_lookup.py --help  for all options.
 import argparse
 import copy
 import csv
+import datetime
 import json
 import logging
 import os
@@ -58,6 +59,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "nominatim_base_url": "https://nominatim.optadata.io",
     "valhalla_base_url": "https://valhalla.optadata.io",
     "geocoder": "photon",
+    "fallback_to_nominatim": True,
     "photon": {
         "limit": 1,
         "lang": "de",
@@ -213,13 +215,26 @@ def geocode(
         )
         return lon, lat, elapsed, "nominatim"
 
-    # default: photon
+    # default: photon, optionally fallback to Nominatim
     lon, lat, elapsed = geocode_photon(
         address,
         config.get("photon_base_url", DEFAULT_CONFIG["photon_base_url"]),
         config.get("photon", {}),
         timeout,
     )
+    if lon is not None and lat is not None:
+        return lon, lat, elapsed, "photon"
+
+    if config.get("fallback_to_nominatim", True):
+        log.info("Photon failed for %r, falling back to Nominatim.", address)
+        n_lon, n_lat, n_elapsed = geocode_nominatim(
+            address,
+            config.get("nominatim_base_url", DEFAULT_CONFIG["nominatim_base_url"]),
+            config.get("nominatim", {}),
+            timeout,
+        )
+        return n_lon, n_lat, elapsed + n_elapsed, "photon+nominatim"
+
     return lon, lat, elapsed, "photon"
 
 
@@ -455,6 +470,154 @@ def process_row(
     }
 
 
+def process_global_optimization(
+    rows: List[Dict[str, str]],
+    config: Dict,
+    timing_totals: Dict[str, float],
+) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]], Dict[str, Any]]:
+    """Evaluate each parameter set across all rows and keep the globally best one."""
+    prepared_rows: List[Dict[str, Any]] = []
+    row_start_total = time.perf_counter()
+
+    for idx, row in enumerate(rows, start=1):
+        log.info("[prep %d/%d] Geocoding row id=%s", idx, len(rows), row.get("id", "?"))
+        origin_raw = row.get("origin_ascertained") or row.get("origin_entry", "")
+        dest_raw = row.get("destination_ascertained") or row.get("destination_entry", "")
+        original_meters = float(row.get("distance", 0) or 0)
+        origin_addr = parse_address(origin_raw)
+        dest_addr = parse_address(dest_raw)
+
+        o_lon, o_lat, geo_o_t, geocoder_name = geocode(origin_addr, config)
+        timing_totals[geocoder_name] = timing_totals.get(geocoder_name, 0.0) + geo_o_t
+
+        d_lon, d_lat, geo_d_t, geocoder_name_d = geocode(dest_addr, config)
+        timing_totals[geocoder_name_d] = timing_totals.get(geocoder_name_d, 0.0) + geo_d_t
+
+        prepared_rows.append(
+            {
+                "row": row,
+                "id": row.get("id", ""),
+                "origin_address": origin_addr,
+                "destination_address": dest_addr,
+                "original_meters": original_meters,
+                "o_lon": o_lon,
+                "o_lat": o_lat,
+                "d_lon": d_lon,
+                "d_lat": d_lat,
+            }
+        )
+
+    combos = _build_param_combinations(config)
+    valhalla_base = config.get("valhalla_base_url", DEFAULT_CONFIG["valhalla_base_url"])
+    timeout = config.get("timeout_seconds", 10)
+
+    best_combo_params: Optional[Dict[str, Any]] = None
+    best_combo_pct = float("inf")
+    best_combo_row_meters: Dict[int, Optional[float]] = {}
+    best_combo_metrics: Dict[str, Any] = {}
+
+    for combo_idx, params in enumerate(combos, start=1):
+        combo_start = time.perf_counter()
+        sum_original = 0.0
+        sum_abs_diff = 0.0
+        sum_signed_diff = 0.0
+        routed_count = 0
+        failed_routing = 0
+        geocode_failed = 0
+        row_meters: Dict[int, Optional[float]] = {}
+
+        for row_idx, p in enumerate(prepared_rows):
+            if p["o_lon"] is None or p["d_lon"] is None:
+                geocode_failed += 1
+                row_meters[row_idx] = None
+                continue
+
+            meters, v_t = valhalla_route(
+                p["o_lon"], p["o_lat"], p["d_lon"], p["d_lat"], valhalla_base, params, timeout
+            )
+            timing_totals["valhalla"] = timing_totals.get("valhalla", 0.0) + v_t
+
+            if meters is None:
+                failed_routing += 1
+                row_meters[row_idx] = None
+                continue
+
+            original = p["original_meters"]
+            diff = meters - original
+            sum_original += original
+            sum_abs_diff += abs(diff)
+            sum_signed_diff += diff
+            routed_count += 1
+            row_meters[row_idx] = meters
+
+        abs_pct = (sum_abs_diff / sum_original * 100.0) if sum_original else float("inf")
+        signed_pct = (sum_signed_diff / sum_original * 100.0) if sum_original else float("inf")
+        combo_elapsed = time.perf_counter() - combo_start
+        log.info(
+            (
+                "[combo %d/%d] routed=%d failed=%d geocode_failed=%d "
+                "abs_diff=%.1f m abs_diff_pct=%.4f%% signed_diff_pct=%.4f%% "
+                "elapsed=%.2fs best_so_far=%.4f%%"
+            ),
+            combo_idx,
+            len(combos),
+            routed_count,
+            failed_routing,
+            geocode_failed,
+            sum_abs_diff,
+            abs_pct,
+            signed_pct,
+            combo_elapsed,
+            min(best_combo_pct, abs_pct),
+        )
+
+        if abs_pct < best_combo_pct:
+            best_combo_pct = abs_pct
+            best_combo_params = copy.deepcopy(params)
+            best_combo_row_meters = row_meters
+            best_combo_metrics = {
+                "combo_index": combo_idx,
+                "combo_count": len(combos),
+                "routed_count": routed_count,
+                "failed_routing": failed_routing,
+                "geocode_failed": geocode_failed,
+                "sum_original_meters": round(sum_original, 3),
+                "sum_abs_diff_meters": round(sum_abs_diff, 3),
+                "sum_signed_diff_meters": round(sum_signed_diff, 3),
+                "abs_diff_percent": round(abs_pct, 6),
+                "signed_diff_percent": round(signed_pct, 6),
+                "elapsed_seconds": round(combo_elapsed, 3),
+            }
+
+    results: List[Dict[str, Any]] = []
+    for row_idx, p in enumerate(prepared_rows):
+        best_meters = best_combo_row_meters.get(row_idx)
+        error = ""
+        if p["o_lon"] is None or p["d_lon"] is None:
+            error = "geocoding failed"
+        elif best_meters is None:
+            error = "routing failed"
+        results.append(
+            {
+                "id": p["id"],
+                "origin_address": p["origin_address"],
+                "destination_address": p["destination_address"],
+                "original_meters": p["original_meters"],
+                "valhalla_meters": round(best_meters, 1) if best_meters is not None else "",
+                "difference_meters": (
+                    round(best_meters - p["original_meters"], 1)
+                    if best_meters is not None
+                    else ""
+                ),
+                "best_costing": (best_combo_params or {}).get("costing", ""),
+                "error": error,
+            }
+        )
+
+    timing_totals["total"] = timing_totals.get("total", 0.0) + (time.perf_counter() - row_start_total)
+    return results, best_combo_params, best_combo_metrics
+
+
 # ---------------------------------------------------------------------------
 # CSV I/O
 # ---------------------------------------------------------------------------
@@ -548,6 +711,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Disable parameter-range optimization; use only base config.",
     )
     p.add_argument(
+        "--optimize-global",
+        action="store_true",
+        help="Evaluate each parameter set across all rows and choose one best overall set.",
+    )
+    p.add_argument(
+        "--optimal-config-out",
+        default=None,
+        help="Path to write best overall parameter set (used with --optimize-global).",
+    )
+    p.add_argument(
         "--verbose",
         action="store_true",
         help="Enable DEBUG logging.",
@@ -577,6 +750,17 @@ def load_config(path: str) -> Dict:
     else:
         log.warning("Config file not found: %s – using defaults.", path)
     return cfg
+
+
+def save_optimal_config(path: str, valhalla_params: Dict[str, Any], metrics: Dict[str, Any]) -> None:
+    payload = {
+        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "valhalla": valhalla_params,
+        "metrics": metrics,
+    }
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=2)
+        fh.write("\n")
 
 
 def main() -> int:
@@ -615,19 +799,32 @@ def main() -> int:
 
     results: List[Dict] = []
     timing_totals: Dict[str, float] = {}
-
-    for idx, row in enumerate(rows, start=1):
-        log.info("[%d/%d] Processing row id=%s", idx, len(rows), row.get("id", "?"))
-        result = process_row(row, config, timing_totals)
-        results.append(result)
-        log.info(
-            "  origin=%-40s  dest=%-40s  orig=%8s m  valhalla=%8s m  diff=%s m",
-            result["origin_address"][:40],
-            result["destination_address"][:40],
-            result["original_meters"],
-            result["valhalla_meters"],
-            result["difference_meters"],
-        )
+    if args.optimize_global:
+        log.info("Global optimization mode enabled: evaluating each parameter set over all rows.")
+        results, best_params, best_metrics = process_global_optimization(rows, config, timing_totals)
+        if best_params is not None:
+            out_path = args.optimal_config_out or os.path.join(os.getcwd(), "optimal.json")
+            save_optimal_config(out_path, best_params, best_metrics)
+            log.info(
+                "Best overall combination: [%d/%d] abs_diff_pct=%.4f%% -> %s",
+                best_metrics.get("combo_index", 0),
+                best_metrics.get("combo_count", 0),
+                best_metrics.get("abs_diff_percent", float("inf")),
+                out_path,
+            )
+    else:
+        for idx, row in enumerate(rows, start=1):
+            log.info("[%d/%d] Processing row id=%s", idx, len(rows), row.get("id", "?"))
+            result = process_row(row, config, timing_totals)
+            results.append(result)
+            log.info(
+                "  origin=%-40s  dest=%-40s  orig=%8s m  valhalla=%8s m  diff=%s m",
+                result["origin_address"][:40],
+                result["destination_address"][:40],
+                result["original_meters"],
+                result["valhalla_meters"],
+                result["difference_meters"],
+            )
 
     log.info("Writing output: %s", output_path)
     write_output_csv(results, output_path, config.get("output_encoding", "utf-8"))
