@@ -6,7 +6,7 @@ metadata:
   labels:
     app: valhalla
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: valhalla
@@ -17,6 +17,15 @@ spec:
     spec:
       nodeSelector:
         osm: "true"
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: valhalla
+              topologyKey: topology.kubernetes.io/zone
       initContainers:
       - name: ca-injector
         image: alpine:3.20
