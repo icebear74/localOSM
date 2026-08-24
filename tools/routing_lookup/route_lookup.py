@@ -251,8 +251,13 @@ def valhalla_route(
         data = _http_post(url, body, timeout)
         elapsed = time.perf_counter() - t0
         legs = data["trip"]["legs"]
-        total_km: float = sum(leg["summary"]["length"] for leg in legs)
-        total_meters = total_km * 1000.0
+        total_length: float = sum(leg["summary"]["length"] for leg in legs)
+        # Valhalla returns length in the requested units; normalise to meters.
+        units = valhalla_params.get("units", "km")
+        if units == "miles":
+            total_meters = total_length * 1609.344
+        else:  # "km" (default) or anything else treated as km
+            total_meters = total_length * 1000.0
         return total_meters, elapsed
     except Exception as exc:  # pylint: disable=broad-except
         elapsed = time.perf_counter() - t0
@@ -318,8 +323,8 @@ def process_row(
     timing_totals[geocoder_name] = timing_totals.get(geocoder_name, 0.0) + geo_o_t
 
     # Geocode destination
-    d_lon, d_lat, geo_d_t, _ = geocode(dest_addr, config)
-    timing_totals[geocoder_name] = timing_totals.get(geocoder_name, 0.0) + geo_d_t
+    d_lon, d_lat, geo_d_t, geocoder_name_d = geocode(dest_addr, config)
+    timing_totals[geocoder_name_d] = timing_totals.get(geocoder_name_d, 0.0) + geo_d_t
 
     if o_lon is None or d_lon is None:
         return {
@@ -464,13 +469,25 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _deep_merge(base: Dict, override: Dict) -> Dict:
+    """Recursively merge *override* into a copy of *base*."""
+    result = copy.deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
+
+
 def load_config(path: str) -> Dict:
     cfg = copy.deepcopy(DEFAULT_CONFIG)
     if os.path.exists(path):
         with open(path, encoding="utf-8") as fh:
             file_cfg = json.load(fh)
-        # Shallow-merge top-level keys; nested dicts are replaced entirely.
-        cfg.update(file_cfg)
+        # Deep-merge so that nested keys (valhalla, photon, optimize, …) are
+        # updated individually rather than replaced wholesale.
+        cfg = _deep_merge(cfg, file_cfg)
     else:
         log.warning("Config file not found: %s – using defaults.", path)
     return cfg
