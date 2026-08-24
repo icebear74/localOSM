@@ -436,7 +436,9 @@ def process_row(
     best_costing = ""
     valhalla_elapsed = 0.0
 
-    for params in combos:
+    for combo_idx, params in enumerate(combos, start=1):
+        if len(combos) > 1:
+            log.info("route %s step %d/%d", row.get("id", "?"), combo_idx, len(combos))
         meters, v_t = valhalla_route(
             o_lon, o_lat, d_lon, d_lat, valhalla_base, params, timeout
         )
@@ -526,12 +528,13 @@ def process_global_optimization(
         geocode_failed = 0
         row_meters: Dict[int, Optional[float]] = {}
 
-        for row_idx, p in enumerate(prepared_rows):
+        for row_idx, p in enumerate(prepared_rows, start=1):
             if p["o_lon"] is None or p["d_lon"] is None:
                 geocode_failed += 1
-                row_meters[row_idx] = None
+                row_meters[row_idx - 1] = None
                 continue
 
+            log.info("route %d/%d step %d/%d", row_idx, len(prepared_rows), combo_idx, len(combos))
             meters, v_t = valhalla_route(
                 p["o_lon"], p["o_lat"], p["d_lon"], p["d_lat"], valhalla_base, params, timeout
             )
@@ -539,7 +542,7 @@ def process_global_optimization(
 
             if meters is None:
                 failed_routing += 1
-                row_meters[row_idx] = None
+                row_meters[row_idx - 1] = None
                 continue
 
             original = p["original_meters"]
@@ -548,7 +551,7 @@ def process_global_optimization(
             sum_abs_diff += abs(diff)
             sum_signed_diff += diff
             routed_count += 1
-            row_meters[row_idx] = meters
+            row_meters[row_idx - 1] = meters
 
         abs_pct = (sum_abs_diff / sum_original * 100.0) if sum_original else float("inf")
         signed_pct = (sum_signed_diff / sum_original * 100.0) if sum_original else float("inf")

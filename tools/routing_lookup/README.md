@@ -126,6 +126,7 @@ keeps the result closest to the stored original distance.  Disable it with
 With `--optimize-global` the script evaluates **one setting over all rows**,
 then the next setting, and so on. After each setting it prints:
 
+- per-request step logs (`route <n> step <m>/<total_steps>`)
 - routed/failed/geocoding-failed counts
 - elapsed time for the setting
 - overall absolute difference to stored distances in percent
