@@ -45,6 +45,9 @@ python route_lookup.py QVadis.csv results.csv --no-optimize
 # Evaluate each setting globally over all rows and save best one
 python route_lookup.py QVadis.csv results.csv --optimize-global --optimal-config-out optimal.json
 
+# Use multithreading for faster global optimization (default from config is 10)
+python route_lookup.py QVadis.csv results.csv --optimize-global --threads 10
+
 # Enable verbose / debug logging
 python route_lookup.py QVadis.csv results.csv --verbose
 ```
@@ -76,7 +79,7 @@ Also semicolon-delimited:
 | `original_meters` | Distance stored in the input file |
 | `valhalla_meters` | Distance returned by Valhalla (best match when optimizing) |
 | `difference_meters` | `valhalla_meters − original_meters` |
-| `best_costing` | Valhalla costing profile that produced the best match |
+| `best_costing` | JSON with winning Valhalla `costing`, `units`, and `costing_options` |
 | `error` | Non-empty if geocoding or routing failed |
 
 ## Configuration (`config.json`)
@@ -121,6 +124,10 @@ When `optimize.enabled` is `true` the script tries every combination of
 keeps the result closest to the stored original distance.  Disable it with
 `--no-optimize` or by setting `"enabled": false` in the config.
 
+The default config now varies only `use_highways` (`0.0 .. 0.9` in steps of
+`0.1`) to tune closest↔fastest preference while leaving other routing settings
+unchanged (10 requests per entry).
+
 ### Global optimization mode
 
 With `--optimize-global` the script evaluates **one setting over all rows**,
@@ -134,6 +141,9 @@ then the next setting, and so on. After each setting it prints:
 
 The best overall setting is written to `optimal.json` by default, or to the
 path passed via `--optimal-config-out`.
+
+Global optimization uses a thread pool for routing requests (`worker_threads`
+in config, overridable with `--threads`).
 
 #### Value ranges (from/to/step)
 

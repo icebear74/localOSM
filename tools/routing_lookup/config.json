@@ -7,6 +7,7 @@
 
   "geocoder": "photon",
   "fallback_to_nominatim": true,
+  "worker_threads": 10,
 
   "photon": {
     "limit": 1,
@@ -46,31 +47,9 @@
 
     "costing_options_variants": [
       {
-        "_doc": "Baseline – no overrides, pure default Valhalla behaviour",
-        "auto": {}
-      },
-      {
-        "_doc": "Prefer fastest route (motorways favoured, tolls accepted)",
+        "_doc": "Sweep closest↔fastest preference only (10 steps / requests per entry)",
         "auto": {
-          "use_highways": 1.0,
-          "use_tolls":    1.0,
-          "use_ferry":    0.5,
-          "top_speed":    130
-        }
-      },
-      {
-        "_doc": "Prefer shortest route (avoid motorways / tolls where possible)",
-        "auto": {
-          "use_highways": 0.0,
-          "use_tolls":    0.0,
-          "use_ferry":    0.0,
-          "top_speed":    100
-        }
-      },
-      {
-        "_doc": "Range example: sweep use_highways from 0.0 to 1.0 in steps of 0.5",
-        "auto": {
-          "use_highways": { "from": 0.0, "to": 1.0, "step": 0.5 }
+          "use_highways": { "from": 0.0, "to": 0.9, "step": 0.1 }
         }
       }
     ]
