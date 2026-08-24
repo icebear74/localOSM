@@ -6,6 +6,7 @@
   "valhalla_base_url":  "https://valhalla.optadata.io",
 
   "geocoder": "photon",
+  "fallback_to_nominatim": true,
 
   "photon": {
     "limit": 1,

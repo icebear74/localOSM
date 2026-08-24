@@ -42,6 +42,9 @@ python route_lookup.py QVadis.csv results.csv --config myconfig.json
 # Disable optimization (single-pass, base config only)
 python route_lookup.py QVadis.csv results.csv --no-optimize
 
+# Evaluate each setting globally over all rows and save best one
+python route_lookup.py QVadis.csv results.csv --optimize-global --optimal-config-out optimal.json
+
 # Enable verbose / debug logging
 python route_lookup.py QVadis.csv results.csv --verbose
 ```
@@ -56,6 +59,10 @@ id;destination_ascertained;destination_entry;distance;origin_ascertained;origin_
 
 Addresses are stored as `"<country>;<postcode>;<city>;<street>"` (the script parses
 this format automatically).
+
+When using `geocoder=photon`, the script can automatically fall back to
+Nominatim if Photon returns no coordinates (`fallback_to_nominatim` in
+`config.json`, enabled by default).
 
 ## Output CSV format
 
@@ -113,6 +120,19 @@ When `optimize.enabled` is `true` the script tries every combination of
 `costing_variants × units_variants × costing_options_variants` for each row and
 keeps the result closest to the stored original distance.  Disable it with
 `--no-optimize` or by setting `"enabled": false` in the config.
+
+### Global optimization mode
+
+With `--optimize-global` the script evaluates **one setting over all rows**,
+then the next setting, and so on. After each setting it prints:
+
+- routed/failed/geocoding-failed counts
+- elapsed time for the setting
+- overall absolute difference to stored distances in percent
+- overall signed difference in percent
+
+The best overall setting is written to `optimal.json` by default, or to the
+path passed via `--optimal-config-out`.
 
 #### Value ranges (from/to/step)
 
