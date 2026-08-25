@@ -251,7 +251,7 @@ spec:
           mkdir -p /runtime/bin /runtime/active
           find /runtime/bin -mindepth 1 -maxdepth 1 -exec rm -rf {} \;
           find /runtime/active -mindepth 1 -maxdepth 1 -exec rm -rf {} \;
-          cp -a "${JAR}" "/runtime/bin/photon-${PHOTON_VERSION}.jar"
+          ln -s "/shared-store/bin/photon-${PHOTON_VERSION}.jar" "/runtime/bin/photon-${PHOTON_VERSION}.jar"
           cp -a /photon-store/active/. /runtime/active/
         resources:
           requests:
