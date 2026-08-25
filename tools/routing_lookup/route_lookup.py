@@ -406,6 +406,7 @@ def _build_param_combinations(config: Dict) -> List[Dict]:
 
 
 def _best_costing_payload(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Build a compact Valhalla-params payload without empty fields."""
     payload: Dict[str, Any] = {}
     for key in ("costing", "directions_type", "units"):
         value = params.get(key)
