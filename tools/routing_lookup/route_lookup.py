@@ -94,14 +94,20 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 # ---------------------------------------------------------------------------
 # Address parsing
 # ---------------------------------------------------------------------------
-def parse_address(raw: str) -> str:
+def parse_address(raw: Any) -> str:
     """
     Convert a semicolon-encoded address field to a plain query string.
 
     The CSV stores addresses as ``"D;42551;Velbert;Blumenstr. 4"``.
     We drop the country code prefix and join the remaining parts with a comma.
     """
+    if raw is None:
+        return ""
+    if not isinstance(raw, str):
+        raw = str(raw)
     raw = raw.strip().strip('"')
+    if not raw:
+        return ""
     parts = [p.strip() for p in raw.split(";")]
     if len(parts) >= 4:
         # Format: country_code ; postcode ; city ; street
@@ -109,6 +115,22 @@ def parse_address(raw: str) -> str:
     if len(parts) == 3:
         return f"{parts[2]}, {parts[1]}, {parts[0]}"
     return ", ".join(parts)
+
+
+def _parse_distance(raw: Any, row_id: str) -> float:
+    """Parse the CSV distance field without aborting the whole run."""
+    if raw is None:
+        return 0.0
+    if not isinstance(raw, str):
+        raw = str(raw)
+    value = raw.strip()
+    if not value:
+        return 0.0
+    try:
+        return float(value)
+    except ValueError:
+        log.warning("Invalid distance for row id=%s: %r; using 0.", row_id, raw)
+        return 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -435,7 +457,8 @@ def process_row(
 
     origin_raw = row.get("origin_ascertained") or row.get("origin_entry", "")
     dest_raw = row.get("destination_ascertained") or row.get("destination_entry", "")
-    original_meters = float(row.get("distance", 0) or 0)
+    row_id = str(row.get("id", "") or "?")
+    original_meters = _parse_distance(row.get("distance"), row_id)
 
     origin_addr = parse_address(origin_raw)
     dest_addr = parse_address(dest_raw)
@@ -538,10 +561,11 @@ def process_global_optimization(
     row_start_total = time.perf_counter()
 
     for idx, row in enumerate(rows, start=1):
-        log.info("[prep %d/%d] Geocoding row id=%s", idx, len(rows), row.get("id", "?"))
+        row_id = str(row.get("id", "") or "?")
+        log.info("[prep %d/%d] Geocoding row id=%s", idx, len(rows), row_id)
         origin_raw = row.get("origin_ascertained") or row.get("origin_entry", "")
         dest_raw = row.get("destination_ascertained") or row.get("destination_entry", "")
-        original_meters = float(row.get("distance", 0) or 0)
+        original_meters = _parse_distance(row.get("distance"), row_id)
         origin_addr = parse_address(origin_raw)
         dest_addr = parse_address(dest_raw)
 
@@ -734,10 +758,28 @@ def process_global_optimization(
 # ---------------------------------------------------------------------------
 def read_input_csv(path: str, encoding: str) -> List[Dict[str, str]]:
     rows = []
-    with open(path, newline="", encoding=encoding) as fh:
+    normalized_encoding = encoding
+    if encoding.lower().replace("_", "-") == "utf-8":
+        normalized_encoding = "utf-8-sig"
+    with open(path, newline="", encoding=normalized_encoding) as fh:
         reader = csv.DictReader(fh, delimiter=";")
-        for row in reader:
-            rows.append(dict(row))
+        for row_num, row in enumerate(reader, start=2):
+            normalized_row: Dict[str, str] = {}
+            extra_values = row.get(None) or []
+            if extra_values:
+                log.warning(
+                    "Row %d has %d unexpected extra column(s); ignoring them.",
+                    row_num,
+                    len(extra_values),
+                )
+            for key, value in row.items():
+                if key is None:
+                    continue
+                normalized_key = key.lstrip("\ufeff").strip()
+                normalized_row[normalized_key] = value
+            if not any((value or "").strip() for value in normalized_row.values()):
+                continue
+            rows.append(normalized_row)
     return rows
 
 
