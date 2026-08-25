@@ -30,7 +30,6 @@ import argparse
 import copy
 import concurrent.futures
 import csv
-import datetime
 import json
 import logging
 import os
@@ -971,53 +970,23 @@ def load_config(path: str) -> Dict:
     return cfg
 
 
-def _collect_cli_overrides(args: argparse.Namespace) -> Dict[str, Any]:
-    overrides: Dict[str, Any] = {}
-    key_map = {
-        "geocoder": "geocoder",
-        "photon_url": "photon_base_url",
-        "nominatim_url": "nominatim_base_url",
-        "valhalla_url": "valhalla_base_url",
-        "threads": "worker_threads",
-        "optimal_config_out": "optimal_config_out",
-    }
-    for arg_key, out_key in key_map.items():
-        value = getattr(args, arg_key, None)
-        if value is not None:
-            overrides[out_key] = value
-    if getattr(args, "no_optimize", False):
-        overrides["no_optimize"] = True
-    if getattr(args, "optimize_global", False):
-        overrides["optimize_global"] = True
-    return overrides
-
-
 def save_optimal_config(
     path: str,
     valhalla_params: Dict[str, Any],
-    metrics: Dict[str, Any],
-    config: Dict[str, Any],
-    cli_overrides: Dict[str, Any],
 ) -> None:
-    payload = {
-        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "valhalla": valhalla_params,
-        "passed_parameters": {
-            "service_urls": {
-                "photon_base_url": config.get("photon_base_url"),
-                "nominatim_base_url": config.get("nominatim_base_url"),
-                "valhalla_base_url": config.get("valhalla_base_url"),
-            },
-            "geocoder": config.get("geocoder"),
-            "fallback_to_nominatim": config.get("fallback_to_nominatim"),
-            "timeout_seconds": config.get("timeout_seconds"),
-            "worker_threads": config.get("worker_threads"),
-            "optimize": config.get("optimize", {}),
-        },
-        "effective_config": config,
-        "cli_overrides": cli_overrides,
-        "metrics": metrics,
+    payload: Dict[str, Any] = {
+        "locations": [
+            {"lon": "<origin_lon>", "lat": "<origin_lat>"},
+            {"lon": "<destination_lon>", "lat": "<destination_lat>"},
+        ],
     }
+    for key in ("costing", "directions_type", "units"):
+        value = valhalla_params.get(key)
+        if value not in (None, ""):
+            payload[key] = value
+    costing_options = valhalla_params.get("costing_options")
+    if costing_options:
+        payload["costing_options"] = costing_options
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2)
         fh.write("\n")
@@ -1040,7 +1009,6 @@ def main() -> int:
         logging.getLogger().setLevel(logging.DEBUG)
 
     config = load_config(args.config)
-    cli_overrides = _collect_cli_overrides(args)
 
     # CLI overrides
     if args.geocoder:
@@ -1072,7 +1040,7 @@ def main() -> int:
         )
         if best_params_global is not None:
             out_path = args.optimal_config_out or os.path.join(os.getcwd(), "optimal.json")
-            save_optimal_config(out_path, best_params_global, best_metrics, config, cli_overrides)
+            save_optimal_config(out_path, best_params_global)
             log.info(
                 "Best overall combination: [%d/%d] abs_diff_pct=%.4f%% -> %s",
                 best_metrics.get("combo_index", 0),

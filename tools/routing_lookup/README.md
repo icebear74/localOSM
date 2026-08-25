@@ -39,6 +39,11 @@ python route_lookup.py QVadis.csv results.csv \
 # Use a custom config file
 python route_lookup.py QVadis.csv results.csv --config myconfig.json
 
+# Use demo config (defaults + auto sweep for use_distance/maneuver_penalty)
+python route_lookup.py QVadis.csv results.csv \
+    --config config.demo-defaults-only.json \
+    --optimize-global --optimal-config-out out.json
+
 # Disable optimization (single-pass, base config only)
 python route_lookup.py QVadis.csv results.csv --no-optimize
 
@@ -143,12 +148,11 @@ then the next setting, and so on. After each setting it prints:
 - overall signed difference in percent
 
 The best overall setting is written to `optimal.json` by default, or to the
-path passed via `--optimal-config-out`. The file now includes:
+path passed via `--optimal-config-out`.
 
-- winning Valhalla parameters (`valhalla`)
-- all passed/effective parameters (`passed_parameters`, `effective_config`)
-- CLI overrides actually used (`cli_overrides`)
-- optimization metrics (`metrics`)
+That output file contains only the Valhalla `/route` request JSON template
+needed to reproduce routing. Replace the `locations` placeholders with real
+coordinates and send the JSON to Valhalla.
 
 Global optimization uses a thread pool for routing requests (`worker_threads`
 in config, overridable with `--threads`).
@@ -177,6 +181,9 @@ The `_all_valhalla_costing_options` section in `config.json` documents every
 known Valhalla option for `auto`, `truck`, `pedestrian`, `bicycle`,
 `motorcycle`, and `motor_scooter` profiles.  Copy any of these into
 `costing_options_variants` to include them in the optimization sweep.
+
+For a defaults-only start with just a focused parameter sweep, see
+`config.demo-defaults-only.json`.
 
 Key parameters for car routing (`auto` / `truck`):
 
