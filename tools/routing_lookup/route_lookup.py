@@ -27,6 +27,7 @@ Run  python route_lookup.py --help  for all options.
 """
 
 import argparse
+import codecs
 import copy
 import concurrent.futures
 import csv
@@ -759,8 +760,11 @@ def process_global_optimization(
 def read_input_csv(path: str, encoding: str) -> List[Dict[str, str]]:
     rows = []
     normalized_encoding = encoding
-    if encoding.lower().replace("_", "-") == "utf-8":
-        normalized_encoding = "utf-8-sig"
+    try:
+        if codecs.lookup(encoding).name == "utf-8":
+            normalized_encoding = "utf-8-sig"
+    except LookupError:
+        pass
     with open(path, newline="", encoding=normalized_encoding) as fh:
         reader = csv.DictReader(fh, delimiter=";")
         for row_num, row in enumerate(reader, start=2):
