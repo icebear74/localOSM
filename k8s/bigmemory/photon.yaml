@@ -362,10 +362,10 @@ spec:
         - containerPort: 2322
         resources:
           requests:
-            memory: "3Gi"
+            memory: "32Gi"
             cpu: "1"
           limits:
-            memory: "44Gi"
+            memory: "60Gi"
             cpu: "4"
         readinessProbe:
           httpGet:
