@@ -267,6 +267,7 @@ def valhalla_route(
         value = valhalla_params.get(key)
         if value not in (None, ""):
             body[key] = value
+    # Intentionally omit empty costing_options so Valhalla can use profile defaults.
     costing_options = valhalla_params.get("costing_options")
     if costing_options:
         body["costing_options"] = costing_options
@@ -972,17 +973,18 @@ def load_config(path: str) -> Dict:
 
 def _collect_cli_overrides(args: argparse.Namespace) -> Dict[str, Any]:
     overrides: Dict[str, Any] = {}
-    for key in (
-        "geocoder",
-        "photon_url",
-        "nominatim_url",
-        "valhalla_url",
-        "threads",
-        "optimal_config_out",
-    ):
-        value = getattr(args, key, None)
+    key_map = {
+        "geocoder": "geocoder",
+        "photon_url": "photon_base_url",
+        "nominatim_url": "nominatim_base_url",
+        "valhalla_url": "valhalla_base_url",
+        "threads": "worker_threads",
+        "optimal_config_out": "optimal_config_out",
+    }
+    for arg_key, out_key in key_map.items():
+        value = getattr(args, arg_key, None)
         if value is not None:
-            overrides[key] = value
+            overrides[out_key] = value
     if getattr(args, "no_optimize", False):
         overrides["no_optimize"] = True
     if getattr(args, "optimize_global", False):
