@@ -6,7 +6,7 @@ metadata:
   labels:
     app: photon
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: photon
@@ -225,6 +225,70 @@ spec:
           value: /ca-certs/ca.crt
         - name: NODE_EXTRA_CA_CERTS
           value: /ca-certs/ca.crt
+      - name: copy-index-to-ram
+        image: alpine:3.20
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -eu
+          SRC="/photon-store/active/photon_data"
+          DST="/photon-ram/active/photon_data"
+
+          echo "[copy-index-to-ram] $(date -u '+%Y-%m-%dT%H:%M:%SZ') Starting copy of OpenSearch index to RAM disk ..."
+          echo "[copy-index-to-ram] Source : ${SRC}"
+          echo "[copy-index-to-ram] Destination: ${DST}"
+
+          # Determine total size for progress reporting
+          TOTAL_BYTES=$(du -sb "${SRC}" 2>/dev/null | awk '{print $1}' || echo 0)
+          TOTAL_MB=$(( TOTAL_BYTES / 1048576 ))
+          echo "[copy-index-to-ram] Total size to copy: ${TOTAL_MB} MiB"
+
+          mkdir -p "${DST}"
+
+          # Count total files for progress
+          TOTAL_FILES=$(find "${SRC}" -type f | wc -l)
+          echo "[copy-index-to-ram] Total files to copy: ${TOTAL_FILES}"
+
+          COPIED=0
+          COPIED_BYTES=0
+          LAST_REPORT=0
+
+          find "${SRC}" -type f | while read -r FILE; do
+            REL="${FILE#${SRC}/}"
+            DEST_FILE="${DST}/${REL}"
+            mkdir -p "$(dirname "${DEST_FILE}")"
+            cp "${FILE}" "${DEST_FILE}"
+            COPIED=$(( COPIED + 1 ))
+            FILE_BYTES=$(stat -c '%s' "${FILE}" 2>/dev/null || echo 0)
+            COPIED_BYTES=$(( COPIED_BYTES + FILE_BYTES ))
+            COPIED_MB=$(( COPIED_BYTES / 1048576 ))
+            # Report progress every 500 files
+            if [ $(( COPIED % 500 )) -eq 0 ] || [ "${COPIED}" -eq "${TOTAL_FILES}" ]; then
+              PCT=0
+              if [ "${TOTAL_BYTES}" -gt 0 ]; then
+                PCT=$(( COPIED_BYTES * 100 / TOTAL_BYTES ))
+              fi
+              echo "[copy-index-to-ram] $(date -u '+%Y-%m-%dT%H:%M:%SZ') Progress: ${COPIED}/${TOTAL_FILES} files, ${COPIED_MB}/${TOTAL_MB} MiB copied (${PCT}%)"
+            fi
+          done
+
+          echo "[copy-index-to-ram] $(date -u '+%Y-%m-%dT%H:%M:%SZ') Copy complete. Verifying ..."
+          DEST_BYTES=$(du -sb "${DST}" 2>/dev/null | awk '{print $1}' || echo 0)
+          DEST_MB=$(( DEST_BYTES / 1048576 ))
+          echo "[copy-index-to-ram] $(date -u '+%Y-%m-%dT%H:%M:%SZ') RAM disk index size: ${DEST_MB} MiB — ready."
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "256Mi"
+          limits:
+            cpu: "2"
+            memory: "512Mi"
+        volumeMounts:
+        - name: photon-storage
+          mountPath: /photon-store
+          readOnly: true
+        - name: photon-ramdisk
+          mountPath: /photon-ram
       - name: prepare-runtime-files
         image: busybox:1.36
         env:
@@ -247,10 +311,9 @@ spec:
           set -eu
           JAR="/photon-store/bin/photon-${PHOTON_VERSION}.jar"
           test -s "${JAR}" || { echo "ERROR: ${JAR} missing"; exit 1; }
-          test -d /photon-store/active || { echo "ERROR: /photon-store/active missing"; exit 1; }
-          test -d /photon-store/active/photon_data || { echo "ERROR: /photon-store/active/photon_data missing"; exit 1; }
-          test -d /photon-store/active/photon_data/node_1/data/nodes/0 || { echo "ERROR: /photon-store/active/photon_data/node_1/data/nodes/0 missing"; exit 1; }
-          ln -sfn /photon-lock/node.lock /photon-store/active/photon_data/node_1/data/nodes/0/node.lock
+          test -d /photon-ram/active/photon_data || { echo "ERROR: /photon-ram/active/photon_data missing"; exit 1; }
+          test -d /photon-ram/active/photon_data/node_1/data/nodes/0 || { echo "ERROR: /photon-ram/active/photon_data/node_1/data/nodes/0 missing"; exit 1; }
+          ln -sfn /photon-lock/node.lock /photon-ram/active/photon_data/node_1/data/nodes/0/node.lock
           : > /photon-lock/node.lock
         resources:
           requests:
@@ -262,6 +325,9 @@ spec:
         volumeMounts:
         - name: photon-storage
           mountPath: /photon-store
+          readOnly: true
+        - name: photon-ramdisk
+          mountPath: /photon-ram
         - name: ca-certs
           mountPath: /ca-certs
           readOnly: true
@@ -291,15 +357,15 @@ spec:
         - |
           set -e
           exec java -jar "/photon-store/bin/photon-${PHOTON_VERSION}.jar" serve \
-            -listen-ip 0.0.0.0 -listen-port 2322 -cors-any -data-dir /photon-store/active
+            -listen-ip 0.0.0.0 -listen-port 2322 -cors-any -data-dir /photon-ram/active
         ports:
         - containerPort: 2322
         resources:
           requests:
-            memory: "2Gi"
+            memory: "3Gi"
             cpu: "1"
           limits:
-            memory: "6Gi"
+            memory: "44Gi"
             cpu: "4"
         readinessProbe:
           httpGet:
@@ -319,6 +385,9 @@ spec:
         volumeMounts:
         - name: photon-storage
           mountPath: /photon-store
+          readOnly: true
+        - name: photon-ramdisk
+          mountPath: /photon-ram
         - name: photon-lock
           mountPath: /photon-lock
         - name: ca-certs
@@ -328,6 +397,10 @@ spec:
       - name: photon-storage
         persistentVolumeClaim:
           claimName: photon
+      - name: photon-ramdisk
+        emptyDir:
+          medium: Memory
+          sizeLimit: 40Gi
       - name: photon-lock
         emptyDir: {}
       - name: ca-certs
