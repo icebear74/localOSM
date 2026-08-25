@@ -249,11 +249,13 @@ def valhalla_route(
     base_url: str,
     valhalla_params: Dict,
     timeout: int,
-) -> Tuple[Optional[float], float]:
+) -> Tuple[Optional[float], float, Optional[float]]:
     """
-    Query Valhalla for a route and return ``(distance_meters, elapsed_seconds)``.
+    Query Valhalla for a route and return
+    ``(distance_meters, elapsed_seconds, routing_cost)``.
 
-    Distance is ``None`` on failure.
+    Distance and routing_cost are ``None`` on failure.
+    routing_cost comes from ``trip.summary.cost`` when present.
     """
     body: Dict[str, Any] = {
         "locations": [
@@ -281,11 +283,18 @@ def valhalla_route(
             total_meters = total_length * 1609.344
         else:  # "km" (default) or anything else treated as km
             total_meters = total_length * 1000.0
-        return total_meters, elapsed
+        # Routing cost: prefer trip-level summary, fall back to sum of legs.
+        trip_summary = data["trip"].get("summary", {})
+        routing_cost: Optional[float] = trip_summary.get("cost")
+        if routing_cost is None:
+            leg_costs = [leg["summary"].get("cost") for leg in legs]
+            if all(c is not None for c in leg_costs):
+                routing_cost = sum(leg_costs)  # type: ignore[arg-type]
+        return total_meters, elapsed, routing_cost
     except Exception as exc:  # pylint: disable=broad-except
         elapsed = time.perf_counter() - t0
         log.error("Valhalla routing failed: %s", exc)
-        return None, elapsed
+        return None, elapsed, None
 
 
 def _expand_range(value: Any) -> List[Any]:
@@ -445,22 +454,30 @@ def process_row(
     best_meters: Optional[float] = None
     best_diff = float("inf")
     best_params: Dict[str, Any] = {}
+    best_cost: Optional[float] = None
+    min_meters: Optional[float] = None
+    max_meters: Optional[float] = None
     valhalla_elapsed = 0.0
 
     for combo_idx, params in enumerate(combos, start=1):
         if len(combos) > 1:
             log.info("route %s step %d/%d", row.get("id", "?"), combo_idx, len(combos))
-        meters, v_t = valhalla_route(
+        meters, v_t, cost = valhalla_route(
             o_lon, o_lat, d_lon, d_lat, valhalla_base, params, timeout
         )
         valhalla_elapsed += v_t
         if meters is None:
             continue
+        if min_meters is None or meters < min_meters:
+            min_meters = meters
+        if max_meters is None or meters > max_meters:
+            max_meters = meters
         diff = abs(meters - original_meters)
         if diff < best_diff:
             best_diff = diff
             best_meters = meters
             best_params = copy.deepcopy(params)
+            best_cost = cost
 
     timing_totals["valhalla"] = timing_totals.get("valhalla", 0.0) + valhalla_elapsed
 
@@ -473,6 +490,9 @@ def process_row(
         "destination_address": dest_addr,
         "original_meters": original_meters,
         "valhalla_meters": round(best_meters, 1) if best_meters is not None else "",
+        "valhalla_km_min": round(min_meters / 1000.0, 3) if min_meters is not None else "",
+        "valhalla_km_max": round(max_meters / 1000.0, 3) if max_meters is not None else "",
+        "routing_cost": round(best_cost, 3) if best_cost is not None else "",
         "difference_meters": (
             round(best_meters - original_meters, 1)
             if best_meters is not None
@@ -498,8 +518,12 @@ def process_global_optimization(
     rows: List[Dict[str, str]],
     config: Dict,
     timing_totals: Dict[str, float],
-) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]], Dict[str, Any]]:
-    """Evaluate each parameter set across all rows and keep the globally best one."""
+) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]], Dict[str, Any], List[Dict[str, Any]]]:
+    """Evaluate each parameter set across all rows and keep the globally best one.
+
+    Returns ``(results, best_params, best_metrics, prepared_rows)`` so the caller
+    can reuse the already-geocoded row data for the opt-output pass.
+    """
     prepared_rows: List[Dict[str, Any]] = []
     row_start_total = time.perf_counter()
 
@@ -539,7 +563,11 @@ def process_global_optimization(
     best_combo_params: Optional[Dict[str, Any]] = None
     best_combo_pct = float("inf")
     best_combo_row_meters: Dict[int, Optional[float]] = {}
+    best_combo_row_costs: Dict[int, Optional[float]] = {}
     best_combo_metrics: Dict[str, Any] = {}
+    # Per-row min/max across all combos
+    row_min_meters: Dict[int, Optional[float]] = {}
+    row_max_meters: Dict[int, Optional[float]] = {}
 
     for combo_idx, params in enumerate(combos, start=1):
         combo_start = time.perf_counter()
@@ -550,6 +578,7 @@ def process_global_optimization(
         failed_routing = 0
         geocode_failed = 0
         row_meters: Dict[int, Optional[float]] = {}
+        row_costs: Dict[int, Optional[float]] = {}
         valhalla_elapsed_combo = 0.0
 
         runnable_rows: List[Tuple[int, Dict[str, Any]]] = []
@@ -579,16 +608,23 @@ def process_global_optimization(
                 row_idx = futures[future]
                 log.info("route %d/%d step %d/%d", row_idx + 1, len(prepared_rows), combo_idx, len(combos))
                 try:
-                    meters, v_t = future.result()
+                    meters, v_t, cost = future.result()
                 except Exception as exc:  # pylint: disable=broad-except
                     log.error("Valhalla worker failed for row %d: %s", row_idx + 1, exc)
-                    meters, v_t = None, 0.0
+                    meters, v_t, cost = None, 0.0, None
                 valhalla_elapsed_combo += v_t
 
                 if meters is None:
                     failed_routing += 1
                     row_meters[row_idx] = None
+                    row_costs[row_idx] = None
                     continue
+
+                # Track global min/max per row
+                prev_min = row_min_meters.get(row_idx)
+                prev_max = row_max_meters.get(row_idx)
+                row_min_meters[row_idx] = meters if prev_min is None else min(prev_min, meters)
+                row_max_meters[row_idx] = meters if prev_max is None else max(prev_max, meters)
 
                 original = prepared_rows[row_idx]["original_meters"]
                 diff = meters - original
@@ -597,6 +633,7 @@ def process_global_optimization(
                 sum_signed_diff += diff
                 routed_count += 1
                 row_meters[row_idx] = meters
+                row_costs[row_idx] = cost
         timing_totals["valhalla"] = timing_totals.get("valhalla", 0.0) + valhalla_elapsed_combo
 
         abs_pct = (sum_abs_diff / sum_original * 100.0) if sum_original else float("inf")
@@ -625,6 +662,7 @@ def process_global_optimization(
             best_combo_pct = abs_pct
             best_combo_params = copy.deepcopy(params)
             best_combo_row_meters = row_meters
+            best_combo_row_costs = row_costs
             best_combo_metrics = {
                 "combo_index": combo_idx,
                 "combo_count": len(combos),
@@ -642,6 +680,9 @@ def process_global_optimization(
     results: List[Dict[str, Any]] = []
     for row_idx, p in enumerate(prepared_rows):
         best_meters = best_combo_row_meters.get(row_idx)
+        best_cost = best_combo_row_costs.get(row_idx)
+        min_m = row_min_meters.get(row_idx)
+        max_m = row_max_meters.get(row_idx)
         error = ""
         if p["o_lon"] is None or p["o_lat"] is None or p["d_lon"] is None or p["d_lat"] is None:
             error = "geocoding failed"
@@ -654,6 +695,9 @@ def process_global_optimization(
                 "destination_address": p["destination_address"],
                 "original_meters": p["original_meters"],
                 "valhalla_meters": round(best_meters, 1) if best_meters is not None else "",
+                "valhalla_km_min": round(min_m / 1000.0, 3) if min_m is not None else "",
+                "valhalla_km_max": round(max_m / 1000.0, 3) if max_m is not None else "",
+                "routing_cost": round(best_cost, 3) if best_cost is not None else "",
                 "difference_meters": (
                     round(best_meters - p["original_meters"], 1)
                     if best_meters is not None
@@ -676,7 +720,7 @@ def process_global_optimization(
         )
 
     timing_totals["total"] = timing_totals.get("total", 0.0) + (time.perf_counter() - row_start_total)
-    return results, best_combo_params, best_combo_metrics
+    return results, best_combo_params, best_combo_metrics, prepared_rows
 
 
 # ---------------------------------------------------------------------------
@@ -697,6 +741,9 @@ OUTPUT_FIELDS = [
     "destination_address",
     "original_meters",
     "valhalla_meters",
+    "valhalla_km_min",
+    "valhalla_km_max",
+    "routing_cost",
     "difference_meters",
     "best_costing",
     "error",
@@ -713,6 +760,99 @@ def write_output_csv(results: List[Dict], path: str, encoding: str) -> None:
         )
         writer.writeheader()
         writer.writerows(results)
+
+
+def _opt_output_path(output_path: str) -> str:
+    """Derive the '-opt' companion output path from the main output path.
+
+    ``results.csv`` → ``results-opt.csv``
+    ``results``     → ``results-opt``
+    """
+    base, ext = os.path.splitext(output_path)
+    return f"{base}-opt{ext}"
+
+
+def run_with_fixed_params(
+    prepared_rows: List[Dict[str, Any]],
+    params: Dict[str, Any],
+    valhalla_base: str,
+    timeout: int,
+    worker_threads: int,
+    timing_totals: Dict[str, float],
+) -> List[Dict[str, Any]]:
+    """Route all *prepared_rows* with a single fixed *params* set.
+
+    Returns a result list suitable for writing to a CSV via ``write_output_csv``.
+    *prepared_rows* must be the list produced by the geocoding phase of
+    ``process_global_optimization`` (each entry has the standard geocoded fields).
+    """
+    runnable: List[Tuple[int, Dict[str, Any]]] = [
+        (i, p) for i, p in enumerate(prepared_rows)
+        if p["o_lon"] is not None and p["d_lon"] is not None
+    ]
+    row_meters: Dict[int, Optional[float]] = {}
+    row_costs: Dict[int, Optional[float]] = {}
+    valhalla_elapsed = 0.0
+
+    best_costing_json = json.dumps(
+        {
+            "costing": params.get("costing", ""),
+            "units": params.get("units", ""),
+            "costing_options": params.get("costing_options", {}),
+        },
+        ensure_ascii=False,
+    )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=worker_threads) as executor:
+        futures = {
+            executor.submit(
+                valhalla_route,
+                p["o_lon"], p["o_lat"], p["d_lon"], p["d_lat"],
+                valhalla_base, params, timeout,
+            ): row_idx
+            for row_idx, p in runnable
+        }
+        for future in concurrent.futures.as_completed(futures):
+            row_idx = futures[future]
+            try:
+                meters, v_t, cost = future.result()
+            except Exception as exc:  # pylint: disable=broad-except
+                log.error("Valhalla worker (opt pass) failed for row %d: %s", row_idx + 1, exc)
+                meters, v_t, cost = None, 0.0, None
+            valhalla_elapsed += v_t
+            row_meters[row_idx] = meters
+            row_costs[row_idx] = cost
+
+    timing_totals["valhalla"] = timing_totals.get("valhalla", 0.0) + valhalla_elapsed
+
+    results: List[Dict[str, Any]] = []
+    for row_idx, p in enumerate(prepared_rows):
+        meters = row_meters.get(row_idx)
+        cost = row_costs.get(row_idx)
+        if p["o_lon"] is None or p["d_lon"] is None:
+            error = "geocoding failed"
+        elif meters is None:
+            error = "routing failed"
+        else:
+            error = ""
+        results.append(
+            {
+                "id": p["id"],
+                "origin_address": p["origin_address"],
+                "destination_address": p["destination_address"],
+                "original_meters": p["original_meters"],
+                "valhalla_meters": round(meters, 1) if meters is not None else "",
+                "valhalla_km_min": "",
+                "valhalla_km_max": "",
+                "routing_cost": round(cost, 3) if cost is not None else "",
+                "difference_meters": (
+                    round(meters - p["original_meters"], 1) if meters is not None else ""
+                ),
+                "best_costing": best_costing_json if meters is not None else "",
+                "error": error,
+            }
+        )
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -868,12 +1008,17 @@ def main() -> int:
 
     results: List[Dict] = []
     timing_totals: Dict[str, float] = {}
+    prepared_rows_cache: List[Dict[str, Any]] = []
+    best_params_global: Optional[Dict[str, Any]] = None
+
     if args.optimize_global:
         log.info("Global optimization mode enabled: evaluating each parameter set over all rows.")
-        results, best_params, best_metrics = process_global_optimization(rows, config, timing_totals)
-        if best_params is not None:
+        results, best_params_global, best_metrics, prepared_rows_cache = process_global_optimization(
+            rows, config, timing_totals
+        )
+        if best_params_global is not None:
             out_path = args.optimal_config_out or os.path.join(os.getcwd(), "optimal.json")
-            save_optimal_config(out_path, best_params, best_metrics)
+            save_optimal_config(out_path, best_params_global, best_metrics)
             log.info(
                 "Best overall combination: [%d/%d] abs_diff_pct=%.4f%% -> %s",
                 best_metrics.get("combo_index", 0),
@@ -897,6 +1042,27 @@ def main() -> int:
 
     log.info("Writing output: %s", output_path)
     write_output_csv(results, output_path, config.get("output_encoding", "utf-8"))
+
+    # Write the -opt companion file when a globally best parameter set is available.
+    if best_params_global is not None and prepared_rows_cache:
+        opt_path = _opt_output_path(output_path)
+        log.info(
+            "Writing opt output with best params (costing_options=%s): %s",
+            best_params_global.get("costing_options", {}),
+            opt_path,
+        )
+        valhalla_base = config.get("valhalla_base_url", DEFAULT_CONFIG["valhalla_base_url"])
+        timeout = config.get("timeout_seconds", 10)
+        worker_threads = max(1, int(config.get("worker_threads", 10)))
+        opt_results = run_with_fixed_params(
+            prepared_rows_cache,
+            best_params_global,
+            valhalla_base,
+            timeout,
+            worker_threads,
+            timing_totals,
+        )
+        write_output_csv(opt_results, opt_path, config.get("output_encoding", "utf-8"))
 
     # Timing summary
     log.info("--- Timing summary ---")
