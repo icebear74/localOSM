@@ -503,6 +503,7 @@ def process_row(
             json.dumps(
                 {
                     "costing": best_params.get("costing", ""),
+                    "directions_type": best_params.get("directions_type", ""),
                     "units": best_params.get("units", ""),
                     "costing_options": best_params.get("costing_options", {}),
                 },
@@ -708,6 +709,7 @@ def process_global_optimization(
                     json.dumps(
                         {
                             "costing": (best_combo_params or {}).get("costing", ""),
+                            "directions_type": (best_combo_params or {}).get("directions_type", ""),
                             "units": (best_combo_params or {}).get("units", ""),
                             "costing_options": (best_combo_params or {}).get("costing_options", {}),
                         },
@@ -803,6 +805,7 @@ def run_with_fixed_params(
     best_costing_json = json.dumps(
         {
             "costing": params.get("costing", ""),
+            "directions_type": params.get("directions_type", ""),
             "units": params.get("units", ""),
             "costing_options": params.get("costing_options", {}),
         },
