@@ -249,23 +249,6 @@ spec:
           test -s "${JAR}" || { echo "ERROR: ${JAR} missing"; exit 1; }
           test -d /photon-store/active || { echo "ERROR: /photon-store/active missing"; exit 1; }
           test -d /photon-store/active/photon_data || { echo "ERROR: /photon-store/active/photon_data missing"; exit 1; }
-          mkdir -p /runtime/bin /runtime/active
-          find /runtime/bin -mindepth 1 -maxdepth 1 -exec rm -rf {} \;
-          find /runtime/active -mindepth 1 -maxdepth 1 -exec rm -rf {} \;
-          ln -s "/shared-store/bin/photon-${PHOTON_VERSION}.jar" "/runtime/bin/photon-${PHOTON_VERSION}.jar"
-          find /photon-store/active -mindepth 1 -maxdepth 1 | while read -r src; do
-            name="$(basename "${src}")"
-            [ "${name}" = "photon_data" ] && continue
-            ln -s "/shared-store/active/${name}" "/runtime/active/${name}"
-          done
-          mkdir -p /runtime/active/photon_data
-          find /photon-store/active/photon_data -mindepth 1 -maxdepth 1 | while read -r src; do
-            name="$(basename "${src}")"
-            case "${name}" in
-              node_*) continue ;;
-            esac
-            ln -s "/shared-store/active/photon_data/${name}" "/runtime/active/photon_data/${name}"
-          done
         resources:
           requests:
             cpu: "10m"
@@ -276,8 +259,6 @@ spec:
         volumeMounts:
         - name: photon-storage
           mountPath: /photon-store
-        - name: photon-runtime
-          mountPath: /runtime
         - name: ca-certs
           mountPath: /ca-certs
           readOnly: true
@@ -331,11 +312,12 @@ spec:
           failureThreshold: 60
           timeoutSeconds: 5
         volumeMounts:
-        - name: photon-runtime
-          mountPath: /photon-store
         - name: photon-storage
-          mountPath: /shared-store
+          mountPath: /photon-store
           readOnly: true
+        - name: photon-lock
+          mountPath: /photon-store/active/photon_data/node_1/data/nodes/0/node.lock
+          subPath: node.lock
         - name: ca-certs
           mountPath: /ca-certs
           readOnly: true
@@ -343,7 +325,7 @@ spec:
       - name: photon-storage
         persistentVolumeClaim:
           claimName: photon
-      - name: photon-runtime
+      - name: photon-lock
         emptyDir: {}
       - name: ca-certs
         emptyDir: {}
