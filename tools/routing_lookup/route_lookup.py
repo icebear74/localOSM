@@ -406,12 +406,15 @@ def _build_param_combinations(config: Dict) -> List[Dict]:
 
 
 def _best_costing_payload(params: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "costing": params.get("costing", ""),
-        "directions_type": params.get("directions_type", ""),
-        "units": params.get("units", ""),
-        "costing_options": params.get("costing_options", {}),
-    }
+    payload: Dict[str, Any] = {}
+    for key in ("costing", "directions_type", "units"):
+        value = params.get(key)
+        if value not in (None, ""):
+            payload[key] = value
+    costing_options = params.get("costing_options")
+    if costing_options:
+        payload["costing_options"] = costing_options
+    return payload
 
 
 # ---------------------------------------------------------------------------
