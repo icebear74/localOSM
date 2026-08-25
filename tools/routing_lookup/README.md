@@ -78,6 +78,9 @@ Also semicolon-delimited:
 | `destination_address` | Geocoded query string for the destination |
 | `original_meters` | Distance stored in the input file |
 | `valhalla_meters` | Distance returned by Valhalla (best match when optimizing) |
+| `valhalla_km_min` | Minimum Valhalla distance (km) across tested combinations |
+| `valhalla_km_max` | Maximum Valhalla distance (km) across tested combinations |
+| `routing_cost` | Valhalla routing cost from `trip.summary.cost` (if available) |
 | `difference_meters` | `valhalla_meters − original_meters` |
 | `best_costing` | JSON with winning Valhalla `costing`, `units`, and `costing_options` |
 | `error` | Non-empty if geocoding or routing failed |

@@ -789,7 +789,12 @@ def run_with_fixed_params(
     """
     runnable: List[Tuple[int, Dict[str, Any]]] = [
         (i, p) for i, p in enumerate(prepared_rows)
-        if p["o_lon"] is not None and p["d_lon"] is not None
+        if (
+            p["o_lon"] is not None
+            and p["o_lat"] is not None
+            and p["d_lon"] is not None
+            and p["d_lat"] is not None
+        )
     ]
     row_meters: Dict[int, Optional[float]] = {}
     row_costs: Dict[int, Optional[float]] = {}
@@ -1000,7 +1005,6 @@ def save_optimal_config(
             "fallback_to_nominatim": config.get("fallback_to_nominatim"),
             "timeout_seconds": config.get("timeout_seconds"),
             "worker_threads": config.get("worker_threads"),
-            "valhalla": valhalla_params,
             "optimize": config.get("optimize", {}),
         },
         "effective_config": config,
