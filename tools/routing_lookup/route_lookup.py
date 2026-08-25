@@ -835,7 +835,12 @@ def run_with_fixed_params(
     for row_idx, p in enumerate(prepared_rows):
         meters = row_meters.get(row_idx)
         cost = row_costs.get(row_idx)
-        if p["o_lon"] is None or p["d_lon"] is None:
+        if (
+            p["o_lon"] is None
+            or p["o_lat"] is None
+            or p["d_lon"] is None
+            or p["d_lat"] is None
+        ):
             error = "geocoding failed"
         elif meters is None:
             error = "routing failed"
