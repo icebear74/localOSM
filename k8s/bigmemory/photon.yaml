@@ -249,6 +249,9 @@ spec:
           test -s "${JAR}" || { echo "ERROR: ${JAR} missing"; exit 1; }
           test -d /photon-store/active || { echo "ERROR: /photon-store/active missing"; exit 1; }
           test -d /photon-store/active/photon_data || { echo "ERROR: /photon-store/active/photon_data missing"; exit 1; }
+          test -d /photon-store/active/photon_data/node_1/data/nodes/0 || { echo "ERROR: /photon-store/active/photon_data/node_1/data/nodes/0 missing"; exit 1; }
+          ln -sfn /photon-lock/node.lock /photon-store/active/photon_data/node_1/data/nodes/0/node.lock
+          : > /photon-lock/node.lock
         resources:
           requests:
             cpu: "10m"
@@ -262,6 +265,8 @@ spec:
         - name: ca-certs
           mountPath: /ca-certs
           readOnly: true
+        - name: photon-lock
+          mountPath: /photon-lock
       containers:
       - name: photon
         image: eclipse-temurin:21-jre
@@ -314,10 +319,8 @@ spec:
         volumeMounts:
         - name: photon-storage
           mountPath: /photon-store
-          readOnly: true
         - name: photon-lock
-          mountPath: /photon-store/active/photon_data/node_1/data/nodes/0/node.lock
-          subPath: node.lock
+          mountPath: /photon-lock
         - name: ca-certs
           mountPath: /ca-certs
           readOnly: true
