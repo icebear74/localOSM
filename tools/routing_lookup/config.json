@@ -1,0 +1,207 @@
+{
+  "_doc": "route_lookup configuration. All service URLs and routing parameters are configurable here.",
+
+  "photon_base_url":    "https://photon.optadata.io",
+  "nominatim_base_url": "https://nominatim.optadata.io",
+  "valhalla_base_url":  "https://valhalla.optadata.io",
+
+  "geocoder": "photon",
+  "fallback_to_nominatim": true,
+  "worker_threads": 10,
+
+  "photon": {
+    "limit": 1,
+    "lang": "de"
+  },
+
+  "nominatim": {
+    "format": "json",
+    "limit": 1,
+    "countrycodes": "de",
+    "addressdetails": 0
+  },
+
+  "valhalla": {
+    "costing": "auto",
+    "costing_options": {},
+    "directions_type": "none",
+    "units": "km"
+  },
+
+  "optimize": {
+    "_doc": [
+      "When enabled=true the script tries every combination of the lists below.",
+      "costing_options_variants entries may use range dicts:",
+      "  { 'auto': { 'use_highways': { 'from': 0.0, 'to': 1.0, 'step': 0.5 } } }",
+      "This generates 3 combinations (0.0, 0.5, 1.0) crossed with other variants.",
+      "Tip: start with a small range / large step to keep run time reasonable.",
+      "Example: sweep use_distance from 0 (fastest) to 1 (shortest distance):",
+      "  { 'auto': { 'use_distance': { 'from': 0.0, 'to': 1.0, 'step': 0.5 } } }"
+    ],
+
+    "enabled": true,
+
+    "costing_variants": [
+      "auto"
+    ],
+
+    "units_variants": ["km"],
+
+    "costing_options_variants": [
+      {
+        "_doc": "Sweep closest↔fastest preference only (10 steps / requests per entry)",
+        "auto": {
+          "use_highways": { "from": 0.0, "to": 0.9, "step": 0.1 }
+        }
+      }
+    ]
+  },
+
+  "_all_valhalla_costing_options": {
+    "_doc": [
+      "=== FULL REFERENCE of all known Valhalla costing options ===",
+      "Copy any of these into costing_options (base config) or costing_options_variants.",
+      "Range syntax: replace a scalar with { 'from': <min>, 'to': <max>, 'step': <step> }",
+      "All float weights are in [0.0 .. 1.0] unless noted otherwise.",
+      "",
+      "Profile keys: auto | truck | pedestrian | bicycle | motorcycle | motor_scooter",
+      "              bus | taxi | hov | auto_shorter"
+    ],
+
+    "auto": {
+      "_routing_preference": [
+        "Use 'use_highways' + 'use_tolls' + 'use_ferry' to trade off speed vs. cost.",
+        "'use_distance' (0=time-only .. 1=distance-only) shifts route costs between shortest time and shortest distance.",
+        "'maneuver_penalty' and 'country_crossing_penalty' affect turn-by-turn cost."
+      ],
+
+      "use_highways":   0.5,
+      "use_tolls":      0.5,
+      "use_ferry":      0.5,
+      "ferry_cost":     300,
+      "use_living_streets": 0.5,
+      "use_tracks":     0.0,
+
+      "service_factor": 1.0,
+      "country_crossing_cost":    600.0,
+      "country_crossing_penalty": 0.0,
+      "maneuver_penalty": 5.0,
+
+      "gate_cost":      30.0,
+      "gate_penalty":   300.0,
+      "private_access_penalty": 450.0,
+
+      "top_speed":      130,
+      "shortest":       false,
+      "use_distance":   0.0,
+
+      "_height_weight_note": "truck-relevant, ignored for auto",
+      "height": 4.11,
+      "width":  2.6,
+      "length": 21.64,
+      "weight": 21.77,
+      "axle_load": 9.07,
+      "hazmat": false
+    },
+
+    "truck": {
+      "use_highways":   0.5,
+      "use_tolls":      0.5,
+      "use_ferry":      0.5,
+      "ferry_cost":     300,
+      "top_speed":      90,
+      "shortest":       false,
+
+      "height": 4.11,
+      "width":  2.6,
+      "length": 21.64,
+      "weight": 21.77,
+      "axle_load": 9.07,
+      "hazmat": false,
+
+      "maneuver_penalty": 5.0,
+      "country_crossing_cost":    600.0,
+      "country_crossing_penalty": 0.0
+    },
+
+    "pedestrian": {
+      "walking_speed":  5.1,
+      "walkway_factor": 1.0,
+      "sidewalk_factor": 1.0,
+      "alley_factor":   2.0,
+      "driveway_factor": 5.0,
+      "step_penalty":   30.0,
+      "use_ferry":      1.0,
+      "use_living_streets": 0.6,
+      "use_tracks":     0.5,
+      "use_hills":      0.5,
+      "use_lit":        0.0,
+      "service_factor": 1.0,
+      "max_hiking_difficulty": 1,
+      "transit_start_end_max_distance": 2145,
+      "transit_transfer_max_distance":  800
+    },
+
+    "bicycle": {
+      "bicycle_type":   "Hybrid",
+      "cycling_speed":  25.0,
+      "use_roads":      0.5,
+      "use_hills":      0.5,
+      "avoid_bad_surfaces": 0.25,
+      "use_ferry":      0.5,
+      "use_living_streets": 0.5,
+      "maneuver_penalty": 1.5,
+      "gate_cost":      30.0,
+      "gate_penalty":   300.0,
+      "country_crossing_cost": 600.0,
+      "country_crossing_penalty": 0.0,
+      "service_factor": 1.0,
+      "shortest": false
+    },
+
+    "motorcycle": {
+      "use_highways":   0.5,
+      "use_tolls":      0.5,
+      "use_ferry":      0.5,
+      "use_trails":     0.0,
+      "top_speed":      140,
+      "shortest":       false,
+      "maneuver_penalty": 5.0,
+      "country_crossing_cost":    600.0,
+      "country_crossing_penalty": 0.0
+    },
+
+    "motor_scooter": {
+      "top_speed":      45,
+      "use_primary":    0.5,
+      "use_hills":      0.5,
+      "shortest":       false,
+      "maneuver_penalty": 5.0
+    },
+
+    "_avoid_options": {
+      "_doc": "Add to the top-level Valhalla request body (not inside costing_options).",
+      "avoid_locations": [],
+      "avoid_polygons":  [],
+      "date_time": {
+        "_doc": "0=current departure, 1=depart_at, 2=arrive_by, 3=invariant",
+        "type":  0,
+        "value": "2026-08-24T08:00"
+      }
+    },
+
+    "_directions_options": {
+      "_doc": "Top-level Valhalla request options",
+      "directions_type": "none",
+      "language":        "de-DE",
+      "units":           "km",
+      "narrative":       false,
+      "alternates":      0,
+      "exclude_polygons": []
+    }
+  },
+
+  "timeout_seconds": 10,
+  "input_encoding":  "utf-8",
+  "output_encoding": "utf-8"
+}
