@@ -12,7 +12,9 @@ data:
     import com.onthegomap.planetiler.config.Arguments;
     import com.onthegomap.planetiler.Planetiler;
     import com.onthegomap.planetiler.reader.SourceFeature;
+    import java.nio.file.Path;
     import org.openmaptiles.OpenMapTilesProfile;
+    import org.openmaptiles.generated.OpenMapTilesSchema;
 
     /**
      * Erweiterung des Standard-OpenMapTiles-Profils.
@@ -83,10 +85,37 @@ data:
 
       public static void main(String[] args) throws Exception {
         Arguments arguments = Arguments.fromArgs(args);
+
+        // Default paths kept only as a fallback for local/manual runs. In the k8s import job
+        // these are always overridden via CLI arguments (--osm-path=..., --output=...,
+        // --lake_centerlines_path=..., --water_polygons_path=..., --natural_earth_path=...),
+        // so nothing here is actually hard-coded during a real import.
+        Path dataDir = Path.of("data");
+        Path sourcesDir = dataDir.resolve("sources");
+
         Planetiler.create(arguments)
+          .setDefaultLanguages(OpenMapTilesSchema.LANGUAGES)
           .setProfile(CustomProfile::new)
-          .addOsmSource("osm", java.nio.file.Path.of("/planet/europa.osm.pbf"))
-          .overwriteOutput(java.nio.file.Path.of("/tileserver-gl/planet-NEW.mbtiles"))
+          // Same three auxiliary sources the stock OpenMapTilesMain registers. Without these,
+          // the water/ocean/background layers have no geometry to render, which is what was
+          // causing the all-black tiles when use_java=true: --lake_centerlines_path,
+          // --water_polygons_path and --natural_earth_path passed by the import job were being
+          // silently ignored because this profile never wired up the matching sources.
+          .addShapefileSource("EPSG:3857", OpenMapTilesProfile.LAKE_CENTERLINE_SOURCE,
+            sourcesDir.resolve("lake_centerline.shp.zip"),
+            "https://dev.maptiler.download/geodata/omt/lake_centerline.shp.zip")
+          .addShapefileSource(OpenMapTilesProfile.WATER_POLYGON_SOURCE,
+            sourcesDir.resolve("water-polygons-split-3857.zip"),
+            "https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip")
+          .addNaturalEarthSource(OpenMapTilesProfile.NATURAL_EARTH_SOURCE,
+            sourcesDir.resolve("natural_earth_vector.sqlite.zip"),
+            "https://dev.maptiler.download/geodata/omt/natural_earth_vector.sqlite.zip")
+          // "osm" source: defaults to /planet/europa.osm.pbf but is overridden by the
+          // --osm-path=... argument the import job always passes.
+          .addOsmSource(OpenMapTilesProfile.OSM_SOURCE, Path.of("/planet/europa.osm.pbf"))
+          // Output: defaults to /tileserver-gl/planet-NEW.mbtiles but is overridden by the
+          // --output=... argument the import job always passes.
+          .overwriteOutput("/tileserver-gl/planet-NEW.mbtiles")
           .run();
       }
     }
