@@ -247,14 +247,12 @@ spec:
           set -eu
           JAR="/photon-store/bin/photon-${PHOTON_VERSION}.jar"
           test -s "${JAR}" || { echo "ERROR: ${JAR} missing"; exit 1; }
+          test -d /photon-store/active || { echo "ERROR: /photon-store/active missing"; exit 1; }
           mkdir -p /runtime/bin /runtime/active
           find /runtime/bin -mindepth 1 -maxdepth 1 -exec rm -rf {} \;
           find /runtime/active -mindepth 1 -maxdepth 1 -exec rm -rf {} \;
-          ln -s "/shared-store/bin/photon-${PHOTON_VERSION}.jar" "/runtime/bin/photon-${PHOTON_VERSION}.jar"
-          find /photon-store/active -mindepth 1 -maxdepth 1 | while read -r src; do
-            name="$(basename "${src}")"
-            ln -s "/shared-store/active/${name}" "/runtime/active/${name}"
-          done
+          cp -a "${JAR}" "/runtime/bin/photon-${PHOTON_VERSION}.jar"
+          cp -a /photon-store/active/. /runtime/active/
         resources:
           requests:
             cpu: "10m"
