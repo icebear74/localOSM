@@ -996,7 +996,7 @@ def main() -> int:
     parser = build_arg_parser()
     args = parser.parse_args()
 
-    # Resolve input/output: positional args take precedence if named args absent
+    # Resolve input/output: named args take precedence; positional args are fallback.
     input_path = args.input or args.pos_input
     output_path = args.output or args.pos_output
 
