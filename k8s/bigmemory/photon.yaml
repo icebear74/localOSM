@@ -282,7 +282,7 @@ spec:
             memory: "256Mi"
           limits:
             cpu: "2"
-            memory: "512Mi"
+            memory: "2Gi"
         volumeMounts:
         - name: photon-storage
           mountPath: /photon-store
@@ -362,10 +362,10 @@ spec:
         - containerPort: 2322
         resources:
           requests:
-            memory: "32Gi"
+            memory: "3Gi"
             cpu: "1"
           limits:
-            memory: "60Gi"
+            memory: "44Gi"
             cpu: "4"
         readinessProbe:
           httpGet:

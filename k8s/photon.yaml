@@ -282,7 +282,7 @@ spec:
             memory: "256Mi"
           limits:
             cpu: "2"
-            memory: "512Mi"
+            memory: "2Gi"
         volumeMounts:
         - name: photon-storage
           mountPath: /photon-store
