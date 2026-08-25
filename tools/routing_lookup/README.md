@@ -16,6 +16,7 @@ distance.
 |---|---|
 | `route_lookup.py` | Main script |
 | `config.json` | Default configuration (edit service URLs, routing parameters, …) |
+| `config.demo-defaults-only.json` | Demo config with default routing + focused auto parameter sweep |
 | `example_input.csv` | Sample input file matching the expected CSV format |
 
 ## Quick start
@@ -87,7 +88,7 @@ Also semicolon-delimited:
 | `valhalla_km_max` | Maximum Valhalla distance (km) across tested combinations |
 | `routing_cost` | Valhalla routing cost from `trip.summary.cost` (if available) |
 | `difference_meters` | `valhalla_meters − original_meters` |
-| `best_costing` | JSON with winning Valhalla `costing`, `units`, and `costing_options` |
+| `best_costing` | JSON with winning Valhalla `costing`, `directions_type`, `units`, and `costing_options` |
 | `error` | Non-empty if geocoding or routing failed |
 
 ## Configuration (`config.json`)

@@ -405,6 +405,15 @@ def _build_param_combinations(config: Dict) -> List[Dict]:
     return combos
 
 
+def _best_costing_payload(params: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "costing": params.get("costing", ""),
+        "directions_type": params.get("directions_type", ""),
+        "units": params.get("units", ""),
+        "costing_options": params.get("costing_options", {}),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Core processing
 # ---------------------------------------------------------------------------
@@ -501,12 +510,7 @@ def process_row(
         ),
         "best_costing": (
             json.dumps(
-                {
-                    "costing": best_params.get("costing", ""),
-                    "directions_type": best_params.get("directions_type", ""),
-                    "units": best_params.get("units", ""),
-                    "costing_options": best_params.get("costing_options", {}),
-                },
+                _best_costing_payload(best_params),
                 ensure_ascii=False,
             )
             if best_meters is not None
@@ -707,12 +711,7 @@ def process_global_optimization(
                 ),
                 "best_costing": (
                     json.dumps(
-                        {
-                            "costing": (best_combo_params or {}).get("costing", ""),
-                            "directions_type": (best_combo_params or {}).get("directions_type", ""),
-                            "units": (best_combo_params or {}).get("units", ""),
-                            "costing_options": (best_combo_params or {}).get("costing_options", {}),
-                        },
+                        _best_costing_payload(best_combo_params or {}),
                         ensure_ascii=False,
                     )
                     if best_meters is not None
@@ -803,12 +802,7 @@ def run_with_fixed_params(
     valhalla_elapsed = 0.0
 
     best_costing_json = json.dumps(
-        {
-            "costing": params.get("costing", ""),
-            "directions_type": params.get("directions_type", ""),
-            "units": params.get("units", ""),
-            "costing_options": params.get("costing_options", {}),
-        },
+        _best_costing_payload(params),
         ensure_ascii=False,
     )
 
