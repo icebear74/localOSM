@@ -140,7 +140,12 @@ then the next setting, and so on. After each setting it prints:
 - overall signed difference in percent
 
 The best overall setting is written to `optimal.json` by default, or to the
-path passed via `--optimal-config-out`.
+path passed via `--optimal-config-out`. The file now includes:
+
+- winning Valhalla parameters (`valhalla`)
+- all passed/effective parameters (`passed_parameters`, `effective_config`)
+- CLI overrides actually used (`cli_overrides`)
+- optimization metrics (`metrics`)
 
 Global optimization uses a thread pool for routing requests (`worker_threads`
 in config, overridable with `--threads`).
