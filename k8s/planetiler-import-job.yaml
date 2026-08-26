@@ -429,8 +429,9 @@ spec:
         persistentVolumeClaim:
           claimName: planet
       - name: osm-temp
-        persistentVolumeClaim:
-          claimName: osm-temp
+        hostPath:
+          path: /mnt/osm-temp
+          type: DirectoryOrCreate
       - name: tileserver-gl
         persistentVolumeClaim:
           claimName: tileserver-gl
