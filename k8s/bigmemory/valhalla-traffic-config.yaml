@@ -38,6 +38,10 @@ data:
     GRAPH_ID_LEVEL_MASK = (1 << GRAPH_ID_LEVEL_BITS) - 1
     GRAPH_ID_TILE_MASK = (1 << GRAPH_ID_TILE_BITS) - 1
     GRAPH_ID_INDEX_MASK = (1 << GRAPH_ID_INDEX_BITS) - 1
+    BREAKPOINT1_SHIFT = 28
+    CONGESTION1_SHIFT = 44
+    FULL_BREAKPOINT = 255
+    MAX_CONGESTION = 63
 
     # Valhalla traffictile.h: TrafficTileHeader is
     # uint64_t tile_id, uint64_t last_update, uint32_t directededgecount,
@@ -161,7 +165,7 @@ data:
         len_a = abs(diagonal_a[0][0] - diagonal_a[1][0]) + abs(diagonal_a[0][1] - diagonal_a[1][1])
         len_b = abs(diagonal_b[0][0] - diagonal_b[1][0]) + abs(diagonal_b[0][1] - diagonal_b[1][1])
         start, end = diagonal_a if len_a >= len_b else diagonal_b
-        points = [{"lat": extent["center_lat"], "lon": extent["center_lon"]}]
+        points = []
         for index in range(SAMPLE_COUNT):
             factor = index / float(SAMPLE_COUNT - 1)
             lat = start[0] + ((end[0] - start[0]) * factor)
@@ -290,11 +294,10 @@ data:
     def load_index_offsets():
         with tarfile.open(TRAFFIC_TAR_PATH, mode="r:") as archive:
             index_member = archive.getmember("index.bin")
-            index_offset = index_member.offset_data
-            index_size = index_member.size
-        with open(TRAFFIC_TAR_PATH, "rb") as handle:
-            handle.seek(index_offset)
-            raw = handle.read(index_size)
+            handle = archive.extractfile(index_member)
+            if handle is None:
+                raise RuntimeError("Could not open index.bin inside traffic.tar.")
+            raw = handle.read()
         offsets = {}
         for offset in range(0, len(raw), INDEX_ENTRY_STRUCT.size):
             chunk = raw[offset : offset + INDEX_ENTRY_STRUCT.size]
@@ -331,8 +334,11 @@ data:
 
     def closed_bytes():
         value = 0
-        value |= 255 << 28
-        value |= 63 << 44
+        # Valhalla traffictile.h: closed() checks breakpoint1 != 0 with
+        # overall_encoded_speed == 0; max congestion marks the first segment as
+        # blocked for consumers that inspect segment congestion.
+        value |= FULL_BREAKPOINT << BREAKPOINT1_SHIFT
+        value |= MAX_CONGESTION << CONGESTION1_SHIFT
         return TRAFFIC_SPEED_STRUCT.pack(value)
 
 
