@@ -53,6 +53,12 @@ data:
         print(f"[roadworks-updater] {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {message}", flush=True)
 
 
+    def ensure_parent_dir(path):
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+
+
     def http_json(url, payload=None, timeout=HTTP_TIMEOUT_SECONDS):
         data = None
         headers = {"User-Agent": "localosm-valhalla-roadworks/1.0"}
@@ -223,11 +229,17 @@ data:
             log(f"Could not read state file {STATE_FILE}: {exc}")
             return set()
         values = payload.get("closed_graph_ids") if isinstance(payload, dict) else []
-        return {int(value) for value in values if str(value).isdigit()}
+        graph_ids = set()
+        for value in values:
+            try:
+                graph_ids.add(int(value))
+            except (TypeError, ValueError):
+                continue
+        return graph_ids
 
 
     def save_graph_ids(graph_ids):
-        os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+        ensure_parent_dir(STATE_FILE)
         payload = {
             "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "closed_graph_ids": sorted(graph_ids),
@@ -239,7 +251,7 @@ data:
 
 
     def acquire_lock():
-        os.makedirs(os.path.dirname(LOCK_DIR), exist_ok=True)
+        ensure_parent_dir(LOCK_DIR)
         while True:
             try:
                 os.mkdir(LOCK_DIR)
@@ -325,12 +337,12 @@ data:
 
 
     def update_traffic_tar(previous_graph_ids, current_graph_ids):
-        offsets = load_index_offsets()
-        touched_tiles = {}
         to_close = current_graph_ids - previous_graph_ids
         to_open = previous_graph_ids - current_graph_ids
         if not to_close and not to_open:
             return
+        offsets = load_index_offsets()
+        touched_tiles = {}
         with open(TRAFFIC_TAR_PATH, "r+b") as handle:
             for graph_id, payload in (
                 *((graph_id, closed_bytes()) for graph_id in to_close),
