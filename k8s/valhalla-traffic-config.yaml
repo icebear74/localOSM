@@ -13,7 +13,6 @@ data:
     import tarfile
     import time
     import urllib.error
-    import urllib.parse
     import urllib.request
 
     VALHALLA_URL = os.environ.get("VALHALLA_URL_LOCAL", "http://127.0.0.1:8002").rstrip("/")
@@ -40,6 +39,9 @@ data:
     GRAPH_ID_TILE_MASK = (1 << GRAPH_ID_TILE_BITS) - 1
     GRAPH_ID_INDEX_MASK = (1 << GRAPH_ID_INDEX_BITS) - 1
 
+    # Valhalla traffictile.h: TrafficTileHeader is
+    # uint64_t tile_id, uint64_t last_update, uint32_t directededgecount,
+    # uint32_t traffic_tile_version, uint32_t spare2, uint32_t spare3.
     TILE_HEADER_STRUCT = struct.Struct("<2Q4I")
     INDEX_ENTRY_STRUCT = struct.Struct("<QLL")
     TRAFFIC_SPEED_STRUCT = struct.Struct("<Q")
