@@ -202,7 +202,7 @@ spec:
 
           valhalla_build_tiles -c "${CONFIG_PATH}" "${SOURCE_PBF}" -j 16
           echo '=== Tile build complete. Creating tile extract archive ...'
-          valhalla_build_extract -c "${CONFIG_PATH}" -e "${WORK_DIR}/valhalla_tiles.tar" -O
+          valhalla_build_extract -c "${CONFIG_PATH}" -e "${WORK_DIR}/valhalla_tiles.tar" -t -O
 
           echo '=== Copying Valhalla data into the next active release directory ...'
           cp -a "${WORK_DIR}/." "${NEXT_DIR}/"

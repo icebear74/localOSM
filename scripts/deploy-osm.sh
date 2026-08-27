@@ -221,6 +221,7 @@ for manifest in \
   nominatim.yaml \
   valhalla.yaml \
   valhalla-config.yaml \
+  valhalla-traffic-config.yaml \
   valhalla-import-config.yaml \
   valhalla-import-job.yaml \
   photon-config.yaml \
@@ -335,7 +336,7 @@ fi
 
 kubectl -n "${NAMESPACE}" create configmap osm-status-config --from-file=config.json="${CONFIG_PATH}" --dry-run=client -o yaml | kubectl apply -f -
 
-for manifest in osm-persistentvolumeclaims.yaml planetiler-rbac.yaml tileserver-gl-deployment.yaml nominatim.yaml nominatim-promotion-job.yaml nominatim-postgres-tuning-config.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml photon-config.yaml photon.yaml pelias-config.yaml pelias.yaml pelias-import-job.yaml pelias-cleanup-job.yaml status.yaml status-deployment.yaml nominatim-import-config.yaml tileserver-import-config.yaml tileserver-import-profile-config.yaml import-orchestrator.yaml web.yaml style-editor.yaml; do
+for manifest in osm-persistentvolumeclaims.yaml planetiler-rbac.yaml tileserver-gl-deployment.yaml nominatim.yaml nominatim-promotion-job.yaml nominatim-postgres-tuning-config.yaml valhalla-config.yaml valhalla-traffic-config.yaml valhalla.yaml valhalla-import-config.yaml photon-config.yaml photon.yaml pelias-config.yaml pelias.yaml pelias-import-job.yaml pelias-cleanup-job.yaml status.yaml status-deployment.yaml nominatim-import-config.yaml tileserver-import-config.yaml tileserver-import-profile-config.yaml import-orchestrator.yaml web.yaml style-editor.yaml; do
   echo ">>> Applying ${manifest}"
   kubectl apply -f "${BASE_DIR}/manifests/${manifest}"
 done

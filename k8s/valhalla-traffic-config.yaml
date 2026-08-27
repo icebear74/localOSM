@@ -1,0 +1,408 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: osm-valhalla-traffic-updater
+  namespace: osm
+data:
+  roadworks_updater.py: |
+    #!/usr/bin/env python3
+    import json
+    import os
+    import re
+    import struct
+    import tarfile
+    import time
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    VALHALLA_URL = os.environ.get("VALHALLA_URL_LOCAL", "http://127.0.0.1:8002").rstrip("/")
+    ROADWORKS_URL = os.environ.get(
+        "ROADWORKS_URL",
+        "https://verkehr.autobahn.de/o/autobahn/A1/services/roadworks",
+    )
+    TRAFFIC_TAR_PATH = os.environ.get("TRAFFIC_TAR_PATH", "/shared-data/active/traffic.tar")
+    STATE_FILE = os.environ.get("ROADWORKS_STATE_FILE", "/shared-data/active/roadworks-state.json")
+    LOCK_DIR = os.environ.get("ROADWORKS_LOCK_DIR", "/shared-data/active/.roadworks-update.lock")
+    REFRESH_SECONDS = max(300, int(os.environ.get("ROADWORKS_REFRESH_SECONDS", "3600")))
+    HTTP_TIMEOUT_SECONDS = max(5, int(os.environ.get("ROADWORKS_HTTP_TIMEOUT_SECONDS", "30")))
+    STARTUP_TIMEOUT_SECONDS = max(30, int(os.environ.get("ROADWORKS_STARTUP_TIMEOUT_SECONDS", "600")))
+    SAMPLE_COUNT = max(3, int(os.environ.get("ROADWORKS_SAMPLE_COUNT", "11")))
+    MAX_EDGE_DISTANCE_METERS = max(
+        5.0, float(os.environ.get("ROADWORKS_LOCATE_DISTANCE_METERS", "75"))
+    )
+    STALE_LOCK_SECONDS = max(600, int(os.environ.get("ROADWORKS_STALE_LOCK_SECONDS", "7200")))
+
+    GRAPH_ID_LEVEL_BITS = 3
+    GRAPH_ID_TILE_BITS = 22
+    GRAPH_ID_INDEX_BITS = 21
+    GRAPH_ID_LEVEL_MASK = (1 << GRAPH_ID_LEVEL_BITS) - 1
+    GRAPH_ID_TILE_MASK = (1 << GRAPH_ID_TILE_BITS) - 1
+    GRAPH_ID_INDEX_MASK = (1 << GRAPH_ID_INDEX_BITS) - 1
+
+    TILE_HEADER_STRUCT = struct.Struct("<2Q4I")
+    INDEX_ENTRY_STRUCT = struct.Struct("<QLL")
+    TRAFFIC_SPEED_STRUCT = struct.Struct("<Q")
+
+    CLOSURE_TEXT_RE = re.compile(r"\b(vollsperr\w*|voll gesperrt|gesperrt)\b", re.IGNORECASE)
+
+
+    def log(message):
+        print(f"[roadworks-updater] {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {message}", flush=True)
+
+
+    def http_json(url, payload=None, timeout=HTTP_TIMEOUT_SECONDS):
+        data = None
+        headers = {"User-Agent": "localosm-valhalla-roadworks/1.0"}
+        if payload is not None:
+            data = json.dumps(payload).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        request = urllib.request.Request(url, data=data, headers=headers, method="POST" if data else "GET")
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+
+    def wait_for_startup():
+        deadline = time.time() + STARTUP_TIMEOUT_SECONDS
+        while time.time() < deadline:
+            if os.path.isfile(TRAFFIC_TAR_PATH):
+                try:
+                    urllib.request.urlopen(
+                        urllib.request.Request(VALHALLA_URL, headers={"User-Agent": "localosm-valhalla-roadworks/1.0"}),
+                        timeout=5,
+                    ).read(1)
+                    return
+                except Exception:
+                    pass
+            time.sleep(5)
+        raise RuntimeError(
+            f"Valhalla or traffic.tar was not ready within {STARTUP_TIMEOUT_SECONDS} seconds."
+        )
+
+
+    def parse_bool(value):
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        return str(value).strip().lower() in {"1", "true", "yes", "ja"}
+
+
+    def roadworks_from_payload(payload):
+        if isinstance(payload, dict):
+            entries = payload.get("roadworks")
+            if isinstance(entries, list):
+                return entries
+        if isinstance(payload, list):
+            return payload
+        return []
+
+
+    def roadwork_text(item):
+        parts = []
+        for key in ("title", "subtitle"):
+            value = item.get(key)
+            if isinstance(value, str):
+                parts.append(value)
+        description = item.get("description")
+        if isinstance(description, list):
+            parts.extend(str(value) for value in description if value is not None)
+        elif isinstance(description, str):
+            parts.append(description)
+        return "\n".join(parts)
+
+
+    def parse_extent(value):
+        if not isinstance(value, str):
+            return None
+        try:
+            lon1, lat1, lon2, lat2 = [float(part.strip()) for part in value.split(",")]
+        except (TypeError, ValueError):
+            return None
+        min_lon = min(lon1, lon2)
+        max_lon = max(lon1, lon2)
+        min_lat = min(lat1, lat2)
+        max_lat = max(lat1, lat2)
+        center_lon = (min_lon + max_lon) / 2.0
+        center_lat = (min_lat + max_lat) / 2.0
+        return {
+            "min_lon": min_lon,
+            "min_lat": min_lat,
+            "max_lon": max_lon,
+            "max_lat": max_lat,
+            "center_lon": center_lon,
+            "center_lat": center_lat,
+        }
+
+
+    def should_close_roadwork(item):
+        if parse_bool(item.get("isBlocked")):
+            return True
+        return bool(CLOSURE_TEXT_RE.search(roadwork_text(item)))
+
+
+    def sample_locations(extent):
+        diagonal_a = (
+            (extent["min_lat"], extent["min_lon"]),
+            (extent["max_lat"], extent["max_lon"]),
+        )
+        diagonal_b = (
+            (extent["max_lat"], extent["min_lon"]),
+            (extent["min_lat"], extent["max_lon"]),
+        )
+        len_a = abs(diagonal_a[0][0] - diagonal_a[1][0]) + abs(diagonal_a[0][1] - diagonal_a[1][1])
+        len_b = abs(diagonal_b[0][0] - diagonal_b[1][0]) + abs(diagonal_b[0][1] - diagonal_b[1][1])
+        start, end = diagonal_a if len_a >= len_b else diagonal_b
+        points = [{"lat": extent["center_lat"], "lon": extent["center_lon"]}]
+        for index in range(SAMPLE_COUNT):
+            factor = index / float(SAMPLE_COUNT - 1)
+            lat = start[0] + ((end[0] - start[0]) * factor)
+            lon = start[1] + ((end[1] - start[1]) * factor)
+            points.append({"lat": lat, "lon": lon})
+        return points
+
+
+    def parse_graph_id(value):
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            value = value.strip()
+            if value.isdigit():
+                return int(value)
+            if "/" in value:
+                parts = [part.strip() for part in value.split("/")]
+                if len(parts) == 3 and all(part.isdigit() for part in parts):
+                    level, tile_id, edge_id = [int(part) for part in parts]
+                    return (edge_id << (GRAPH_ID_TILE_BITS + GRAPH_ID_LEVEL_BITS)) | (tile_id << GRAPH_ID_LEVEL_BITS) | level
+        if isinstance(value, dict):
+            if isinstance(value.get("value"), int):
+                return int(value["value"])
+            keys = ("level", "tile_id", "id")
+            if all(str(value.get(key, "")).isdigit() for key in keys):
+                level = int(value["level"])
+                tile_id = int(value["tile_id"])
+                edge_id = int(value["id"])
+                return (edge_id << (GRAPH_ID_TILE_BITS + GRAPH_ID_LEVEL_BITS)) | (tile_id << GRAPH_ID_LEVEL_BITS) | level
+        return None
+
+
+    def locate_graph_ids(points):
+        payload = {"locations": points, "verbose": True}
+        response = http_json(f"{VALHALLA_URL}/locate", payload)
+        if isinstance(response, dict):
+            response = response.get("locations") or response.get("results") or []
+        graph_ids = set()
+        for entry in response if isinstance(response, list) else []:
+            edges = entry.get("edges") or entry.get("correlated_edges") or []
+            for edge in edges:
+                if not isinstance(edge, dict):
+                    continue
+                distance = edge.get("distance")
+                if isinstance(distance, (int, float)) and distance > MAX_EDGE_DISTANCE_METERS:
+                    continue
+                access = edge.get("access")
+                if isinstance(access, dict) and access and not any(
+                    bool(access.get(key)) for key in ("car", "auto", "taxi", "truck")
+                ):
+                    continue
+                graph_id = parse_graph_id(edge.get("graph_id"))
+                if graph_id is not None:
+                    graph_ids.add(graph_id)
+        return graph_ids
+
+
+    def load_previous_graph_ids():
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except FileNotFoundError:
+            return set()
+        except Exception as exc:
+            log(f"Could not read state file {STATE_FILE}: {exc}")
+            return set()
+        values = payload.get("closed_graph_ids") if isinstance(payload, dict) else []
+        return {int(value) for value in values if str(value).isdigit()}
+
+
+    def save_graph_ids(graph_ids):
+        os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+        payload = {
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "closed_graph_ids": sorted(graph_ids),
+        }
+        temp_path = f"{STATE_FILE}.tmp"
+        with open(temp_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+        os.replace(temp_path, STATE_FILE)
+
+
+    def acquire_lock():
+        os.makedirs(os.path.dirname(LOCK_DIR), exist_ok=True)
+        while True:
+            try:
+                os.mkdir(LOCK_DIR)
+                with open(os.path.join(LOCK_DIR, "owner"), "w", encoding="utf-8") as handle:
+                    handle.write(f"{os.uname().nodename}\n{os.getpid()}\n{int(time.time())}\n")
+                return True
+            except FileExistsError:
+                try:
+                    age_seconds = time.time() - os.path.getmtime(LOCK_DIR)
+                except OSError:
+                    age_seconds = 0
+                if age_seconds > STALE_LOCK_SECONDS:
+                    log(f"Removing stale roadworks lock older than {int(age_seconds)} seconds.")
+                    try:
+                        owner_path = os.path.join(LOCK_DIR, "owner")
+                        if os.path.exists(owner_path):
+                            os.remove(owner_path)
+                        os.rmdir(LOCK_DIR)
+                        continue
+                    except OSError:
+                        pass
+                log("Another Valhalla pod is already updating live roadworks; skipping this cycle.")
+                return False
+
+
+    def release_lock():
+        try:
+            owner_path = os.path.join(LOCK_DIR, "owner")
+            if os.path.exists(owner_path):
+                os.remove(owner_path)
+            os.rmdir(LOCK_DIR)
+        except OSError:
+            pass
+
+
+    def load_index_offsets():
+        with tarfile.open(TRAFFIC_TAR_PATH, mode="r:") as archive:
+            index_member = archive.getmember("index.bin")
+            index_offset = index_member.offset_data
+            index_size = index_member.size
+        with open(TRAFFIC_TAR_PATH, "rb") as handle:
+            handle.seek(index_offset)
+            raw = handle.read(index_size)
+        offsets = {}
+        for offset in range(0, len(raw), INDEX_ENTRY_STRUCT.size):
+            chunk = raw[offset : offset + INDEX_ENTRY_STRUCT.size]
+            if len(chunk) < INDEX_ENTRY_STRUCT.size:
+                break
+            tile_offset, tile_graph_id, tile_size = INDEX_ENTRY_STRUCT.unpack(chunk)
+            offsets[tile_graph_id] = (tile_offset, tile_size)
+        return offsets
+
+
+    def graph_components(graph_id):
+        level = graph_id & GRAPH_ID_LEVEL_MASK
+        tile_id = (graph_id >> GRAPH_ID_LEVEL_BITS) & GRAPH_ID_TILE_MASK
+        edge_index = (graph_id >> (GRAPH_ID_LEVEL_BITS + GRAPH_ID_TILE_BITS)) & GRAPH_ID_INDEX_MASK
+        tile_graph_id = (tile_id << GRAPH_ID_LEVEL_BITS) | level
+        return tile_graph_id, edge_index
+
+
+    def resolve_tile_data_offset(handle, tile_offset):
+        for candidate in (tile_offset, tile_offset + 512):
+            handle.seek(candidate)
+            raw = handle.read(TILE_HEADER_STRUCT.size)
+            if len(raw) != TILE_HEADER_STRUCT.size:
+                continue
+            tile_id, _last_update, directededgecount, version, _spare2, _spare3 = TILE_HEADER_STRUCT.unpack(raw)
+            if tile_id and 0 < directededgecount < 50_000_000 and 0 < version < 10_000:
+                return candidate, directededgecount
+        raise RuntimeError(f"Could not read traffic tile header at offset {tile_offset}.")
+
+
+    def open_bytes():
+        return TRAFFIC_SPEED_STRUCT.pack(0)
+
+
+    def closed_bytes():
+        value = 0
+        value |= 255 << 28
+        value |= 63 << 44
+        return TRAFFIC_SPEED_STRUCT.pack(value)
+
+
+    def update_traffic_tar(previous_graph_ids, current_graph_ids):
+        offsets = load_index_offsets()
+        touched_tiles = {}
+        to_close = current_graph_ids - previous_graph_ids
+        to_open = previous_graph_ids - current_graph_ids
+        if not to_close and not to_open:
+            return
+        with open(TRAFFIC_TAR_PATH, "r+b") as handle:
+            for graph_id, payload in (
+                *((graph_id, closed_bytes()) for graph_id in to_close),
+                *((graph_id, open_bytes()) for graph_id in to_open),
+            ):
+                tile_graph_id, edge_index = graph_components(graph_id)
+                tile_offset, _tile_size = offsets.get(tile_graph_id, (None, None))
+                if tile_offset is None:
+                    continue
+                tile_data_offset, directededgecount = touched_tiles.get(tile_graph_id, (None, None))
+                if tile_data_offset is None:
+                    tile_data_offset, directededgecount = resolve_tile_data_offset(handle, tile_offset)
+                    touched_tiles[tile_graph_id] = (tile_data_offset, directededgecount)
+                if edge_index >= directededgecount:
+                    continue
+                speed_offset = tile_data_offset + TILE_HEADER_STRUCT.size + (edge_index * TRAFFIC_SPEED_STRUCT.size)
+                handle.seek(speed_offset)
+                handle.write(payload)
+            updated_at = int(time.time())
+            for tile_data_offset, _directededgecount in touched_tiles.values():
+                handle.seek(tile_data_offset + 8)
+                handle.write(struct.pack("<Q", updated_at))
+            handle.flush()
+            os.fsync(handle.fileno())
+
+
+    def collect_closed_graph_ids():
+        payload = http_json(ROADWORKS_URL)
+        entries = roadworks_from_payload(payload)
+        closed_graph_ids = set()
+        matched_roadworks = 0
+        for item in entries:
+            if not isinstance(item, dict) or not should_close_roadwork(item):
+                continue
+            extent = parse_extent(item.get("extent"))
+            if not extent:
+                continue
+            graph_ids = locate_graph_ids(sample_locations(extent))
+            if not graph_ids:
+                continue
+            matched_roadworks += 1
+            closed_graph_ids.update(graph_ids)
+        log(
+            f"Feed returned {len(entries)} roadworks; matched {matched_roadworks} closure candidate(s) to {len(closed_graph_ids)} edge(s)."
+        )
+        return closed_graph_ids
+
+
+    def run_cycle():
+        if not acquire_lock():
+            return
+        try:
+            previous_graph_ids = load_previous_graph_ids()
+            current_graph_ids = collect_closed_graph_ids()
+            update_traffic_tar(previous_graph_ids, current_graph_ids)
+            save_graph_ids(current_graph_ids)
+        finally:
+            release_lock()
+
+
+    def main():
+        wait_for_startup()
+        while True:
+            cycle_started = time.time()
+            try:
+                run_cycle()
+            except urllib.error.URLError as exc:
+                log(f"Roadworks update failed while fetching data: {exc}")
+            except Exception as exc:
+                log(f"Roadworks update failed: {exc}")
+            sleep_seconds = REFRESH_SECONDS - (time.time() - cycle_started)
+            if sleep_seconds > 0:
+                time.sleep(sleep_seconds)
+
+
+    if __name__ == "__main__":
+        main()
