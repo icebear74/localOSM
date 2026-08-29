@@ -40,8 +40,6 @@ data:
 
       @Override
       public void processFeature(SourceFeature feature, FeatureCollector features) {
-        super.processFeature(feature, features);
-
         if (feature.canBeLine() && isAttractionTransit(feature)) {
           var line = features.line("transportation")
             .setBufferPixels(4)
@@ -55,7 +53,10 @@ data:
           if (feature.hasTag("layer")) {
             line.setAttr("layer", feature.getLong("layer"));
           }
+          return;
         }
+
+        super.processFeature(feature, features);
 
         if (feature.hasTag("tourism", "theme_park", "water_park")
             || feature.hasTag("landuse", "attraction")
