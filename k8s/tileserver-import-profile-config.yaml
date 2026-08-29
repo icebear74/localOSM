@@ -41,8 +41,8 @@ data:
 
       private static String attractionTransitSubclass(SourceFeature feature) {
         String rollerCoaster = rollerCoasterValue(feature);
-        return !rollerCoaster.isEmpty() && !"no".equalsIgnoreCase(rollerCoaster) ? rollerCoaster : feature.getString("roller_coaster",
-          feature.getString("attraction", feature.getString("railway", "roller_coaster")));
+        return !rollerCoaster.isEmpty() && !"no".equalsIgnoreCase(rollerCoaster) ? rollerCoaster :
+          feature.getString("attraction", feature.getString("railway", "roller_coaster"));
       }
 
       @Override
