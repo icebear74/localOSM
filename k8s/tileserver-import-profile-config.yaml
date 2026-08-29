@@ -28,8 +28,7 @@ data:
       }
 
       private static String rollerCoasterValue(SourceFeature feature) {
-        String value = feature.getString("roller_coaster", "");
-        return value == null ? "" : value.trim();
+        return feature.getString("roller_coaster", "").trim();
       }
 
       private static boolean isAttractionTransit(SourceFeature feature) {
