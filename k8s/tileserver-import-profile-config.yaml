@@ -27,19 +27,33 @@ data:
         super(planetiler);
       }
 
+      private static boolean isAttractionTransit(SourceFeature feature) {
+        return feature.hasTag("roller_coaster")
+          || feature.hasTag("attraction", "roller_coaster", "water_slide")
+          || feature.hasTag("railway", "coaster", "narrow_gauge", "monorail", "miniature");
+      }
+
+      private static String attractionTransitSubclass(SourceFeature feature) {
+        return feature.getString("roller_coaster",
+          feature.getString("attraction", feature.getString("railway", "roller_coaster")));
+      }
+
       @Override
       public void processFeature(SourceFeature feature, FeatureCollector features) {
         super.processFeature(feature, features);
 
-        if (feature.canBeLine()) {
-          boolean isCoasterLine = feature.hasTag("attraction", "roller_coaster", "water_slide")
-            || feature.hasTag("railway", "coaster", "narrow_gauge", "monorail", "miniature");
-          if (isCoasterLine) {
-            features.line("transportation")
-              .setBufferPixels(4)
-              .setAttr("class", "transit")
-              .setAttr("subclass", feature.getString("attraction", feature.getString("railway", "transit")))
-              .setMinZoom(11);
+        if (feature.canBeLine() && isAttractionTransit(feature)) {
+          var line = features.line("transportation")
+            .setBufferPixels(4)
+            .setAttr("class", "transit")
+            .setAttr("subclass", attractionTransitSubclass(feature))
+            .setMinZoom(11);
+          String name = feature.getString("name", null);
+          if (name != null && !name.isBlank()) {
+            line.setAttr("name", name);
+          }
+          if (feature.hasTag("layer")) {
+            line.setAttr("layer", feature.getLong("layer"));
           }
         }
 

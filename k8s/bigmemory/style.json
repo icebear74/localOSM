@@ -543,8 +543,35 @@
         "transit"
       ],
       "minzoom": 11,
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round",
+        "line-sort-key": [
+          "coalesce",
+          [
+            "get",
+            "layer"
+          ],
+          0
+        ]
+      },
       "paint": {
-        "line-color": "#d9463b",
+        "line-color": [
+          "match",
+          [
+            "get",
+            "subclass"
+          ],
+          "water_slide",
+          "#1d9bf0",
+          "monorail",
+          "#8b5cf6",
+          "miniature",
+          "#f59e0b",
+          "narrow_gauge",
+          "#c2410c",
+          "#d9463b"
+        ],
         "line-width": {
           "stops": [
             [
@@ -565,6 +592,51 @@
           2,
           1.2
         ]
+      }
+    },
+    {
+      "id": "transportation-attraction-labels",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "==",
+          "class",
+          "transit"
+        ],
+        [
+          "has",
+          "name"
+        ]
+      ],
+      "minzoom": 13,
+      "layout": {
+        "symbol-placement": "line",
+        "text-field": "{name}",
+        "text-font": [
+          "KlokanTech Noto Sans Bold"
+        ],
+        "text-size": {
+          "stops": [
+            [
+              13,
+              10
+            ],
+            [
+              16,
+              12
+            ]
+          ]
+        },
+        "text-max-angle": 30,
+        "text-padding": 3
+      },
+      "paint": {
+        "text-color": "#7f1d1d",
+        "text-halo-color": "#fff7f3",
+        "text-halo-width": 1.2
       }
     },
     {
