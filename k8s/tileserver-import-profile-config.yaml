@@ -27,14 +27,21 @@ data:
         super(planetiler);
       }
 
+      private static String rollerCoasterValue(SourceFeature feature) {
+        String value = feature.getString("roller_coaster", "");
+        return value == null ? "" : value.trim();
+      }
+
       private static boolean isAttractionTransit(SourceFeature feature) {
-        return feature.hasTag("roller_coaster")
+        String rollerCoaster = rollerCoasterValue(feature);
+        return (!rollerCoaster.isEmpty() && !"no".equalsIgnoreCase(rollerCoaster))
           || feature.hasTag("attraction", "roller_coaster", "water_slide")
           || feature.hasTag("railway", "coaster", "narrow_gauge", "monorail", "miniature");
       }
 
       private static String attractionTransitSubclass(SourceFeature feature) {
-        return feature.getString("roller_coaster",
+        String rollerCoaster = rollerCoasterValue(feature);
+        return !rollerCoaster.isEmpty() && !"no".equalsIgnoreCase(rollerCoaster) ? rollerCoaster : feature.getString("roller_coaster",
           feature.getString("attraction", feature.getString("railway", "roller_coaster")));
       }
 
