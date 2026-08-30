@@ -249,31 +249,7 @@ done
 ${SUDO} cp "${REPO_ROOT}/scripts/import-orchestrator.sh" "${BASE_DIR}/scripts/import-orchestrator.sh"
 ${SUDO} chmod +x "${BASE_DIR}/scripts/import-orchestrator.sh"
 
-if [ -d "${REPO_ROOT}/fonts" ]; then
-  ${SUDO} mkdir -p "${BASE_DIR}/tileserver/bootstrap/fonts"
-  ${SUDO} find "${BASE_DIR}/tileserver/bootstrap/fonts" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-  ${SUDO} cp -a "${REPO_ROOT}/fonts/." "${BASE_DIR}/tileserver/bootstrap/fonts/"
-fi
-
-for style_file in style.json dark_style.json blue_style.json futuristic_style.json; do
-  if [ -f "${REPO_ROOT}/k8s/${style_file}" ]; then
-    ${SUDO} cp "${REPO_ROOT}/k8s/${style_file}" "${BASE_DIR}/tileserver/bootstrap/${style_file}"
-  else
-    ${SUDO} rm -f "${BASE_DIR}/tileserver/bootstrap/${style_file}"
-  fi
-done
-
-styles_json='"osm":{"style":"/data/style.json"}'
-if [ -f "${BASE_DIR}/tileserver/bootstrap/dark_style.json" ]; then
-  styles_json="${styles_json},\"osm-dark\":{\"style\":\"/data/dark_style.json\"}"
-fi
-if [ -f "${BASE_DIR}/tileserver/bootstrap/blue_style.json" ]; then
-  styles_json="${styles_json},\"osm-blue\":{\"style\":\"/data/blue_style.json\"}"
-fi
-if [ -f "${BASE_DIR}/tileserver/bootstrap/futuristic_style.json" ]; then
-  styles_json="${styles_json},\"osm-futuristic\":{\"style\":\"/data/futuristic_style.json\"}"
-fi
-printf '%s\n' "{\"options\":{\"paths\":{\"root\":\"/\",\"fonts\":\"/data/fonts\",\"sprites\":\"\",\"icons\":\"\"},\"serveAllFonts\":true,\"cors\":true},\"styles\":{${styles_json}},\"data\":{\"v3\":{\"mbtiles\":\"/data/planet.mbtiles\"}}}" | ${SUDO} tee "${BASE_DIR}/tileserver/bootstrap/config.json" >/dev/null
+bash "${REPO_ROOT}/scripts/prepare-tileserver-bootstrap.sh" --base-dir "${BASE_DIR}" --namespace "${NAMESPACE}" --apply-configmap
 
 CONFIG_PATH="${BASE_DIR}/status/config.json"
 if [ ! -f "${CONFIG_PATH}" ]; then
@@ -327,20 +303,6 @@ if [ ! -f "${CA_BUNDLE_SRC}" ]; then
   ${SUDO} cp "${CA_BUNDLE_EXAMPLE}" "${CA_BUNDLE_SRC}"
 fi
 kubectl apply -f "${CA_BUNDLE_SRC}"
-
-if [ -f "${REPO_ROOT}/k8s/style.json" ]; then
-  style_files=("--from-file=style.json=${REPO_ROOT}/k8s/style.json")
-  if [ -f "${REPO_ROOT}/k8s/dark_style.json" ]; then
-    style_files+=("--from-file=dark_style.json=${REPO_ROOT}/k8s/dark_style.json")
-  fi
-  if [ -f "${REPO_ROOT}/k8s/blue_style.json" ]; then
-    style_files+=("--from-file=blue_style.json=${REPO_ROOT}/k8s/blue_style.json")
-  fi
-  if [ -f "${REPO_ROOT}/k8s/futuristic_style.json" ]; then
-    style_files+=("--from-file=futuristic_style.json=${REPO_ROOT}/k8s/futuristic_style.json")
-  fi
-  kubectl -n "${NAMESPACE}" create configmap tileserver-style "${style_files[@]}" --dry-run=client -o yaml | kubectl apply -f -
-fi
 
 kubectl -n "${NAMESPACE}" create configmap osm-status-config --from-file=config.json="${CONFIG_PATH}" --dry-run=client -o yaml | kubectl apply -f -
 
