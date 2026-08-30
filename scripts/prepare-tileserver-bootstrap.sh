@@ -29,6 +29,7 @@ is_safe_basedir() {
   local unsafe_prefixes=("/" "/bin" "/boot" "/dev" "/etc" "/home" "/lib" "/lib64" "/media" "/opt" "/proc" "/root" "/run" "/sbin" "/srv" "/sys" "/tmp" "/usr" "/var")
   for prefix in "${unsafe_prefixes[@]}"; do
     [ "${dir}" = "${prefix}" ] && return 1
+    [[ "${dir}" == "${prefix}/"* ]] && return 1
   done
   local depth
   depth="$(echo "${dir}" | tr -cd '/' | wc -c)"
