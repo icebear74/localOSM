@@ -47,7 +47,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 BOOTSTRAP_DIR="${BASE_DIR}/tileserver/bootstrap"
-${SUDO} mkdir -p "${BOOTSTRAP_DIR}" "${BOOTSTRAP_DIR}/fonts" "${BOOTSTRAP_DIR}/sprites"
+${SUDO} mkdir -p "${BOOTSTRAP_DIR}" "${BOOTSTRAP_DIR}/fonts" "${BOOTSTRAP_DIR}/sprites" "${BOOTSTRAP_DIR}/icons"
 
 if [ -d "${REPO_ROOT}/fonts" ]; then
   ${SUDO} find "${BOOTSTRAP_DIR}/fonts" -mindepth 1 -maxdepth 1 -exec rm -rf {} +

@@ -74,7 +74,7 @@ spec:
         args:
         - |
           set -eu
-          mkdir -p /data/fonts /data/sprites
+          mkdir -p /data/fonts /data/sprites /data/icons
 
           for style_file in style.json dark_style.json blue_style.json futuristic_style.json; do
             if [ -f "/style-source/${style_file}" ] && [ ! -f "/data/${style_file}" ]; then
