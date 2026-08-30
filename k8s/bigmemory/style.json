@@ -1338,7 +1338,15 @@
           1.05
         ],
         "icon-allow-overlap": false,
-        "icon-ignore-placement": false
+        "icon-ignore-placement": false,
+        "symbol-sort-key": [
+          "coalesce",
+          [
+            "get",
+            "layer"
+          ],
+          0
+        ]
       }
     },
     {
@@ -1392,7 +1400,15 @@
           ]
         },
         "text-max-angle": 30,
-        "text-padding": 3
+        "text-padding": 3,
+        "symbol-sort-key": [
+          "coalesce",
+          [
+            "get",
+            "layer"
+          ],
+          0
+        ]
       },
       "paint": {
         "text-color": "#7f1d1d",
@@ -2419,5 +2435,5 @@
       }
     }
   ],
-  "sprite": "/sprites/sprite"
+  "sprite": "sprites/sprite"
 }
