@@ -1,0 +1,26 @@
+{
+  "construction-stripes": {
+    "width": 32,
+    "height": 32,
+    "x": 0,
+    "y": 0,
+    "pixelRatio": 2,
+    "visible": true
+  },
+  "roller-coaster": {
+    "width": 48,
+    "height": 48,
+    "x": 36,
+    "y": 0,
+    "pixelRatio": 2,
+    "visible": true
+  },
+  "speed-limit-50": {
+    "width": 48,
+    "height": 48,
+    "x": 88,
+    "y": 0,
+    "pixelRatio": 2,
+    "visible": true
+  }
+}

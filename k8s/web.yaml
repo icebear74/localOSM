@@ -1411,15 +1411,16 @@ data:
                     text = re.sub(r'https?://[^"]*?/data/v3', _ts_browser_url + '/data/v3', text)
                     text = re.sub(r'https?://[^"]*?/fonts', '/fonts', text)
                     text = re.sub(r'https?://[^"]*?/styles', '/styles', text)
+                    text = re.sub(r'https?://[^"]*?/sprites', '/sprites', text)
                     style = json.loads(text)
                     self._send_json(style)
                 except Exception as exc:  # noqa: BLE001
                     self._send_json({"error": self._friendly_error(exc, "TileServer GL")}, 502)
                 return
 
-            if self.path.startswith("/styles/"):
-                # Proxy style-relative assets (e.g. sprite.json/sprite.png) that a
-                # configured style may reference, from the same origin as /api/style.
+            if self.path.startswith("/styles/") or self.path.startswith("/sprites/"):
+                # Proxy style-relative assets (e.g. sprite.json/sprite.png) and
+                # root sprite URLs from the same origin as /api/style.
                 asset_url = TILESERVER_URL + self.path
                 try:
                     req = urllib.request.Request(asset_url, headers={

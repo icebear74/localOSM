@@ -171,6 +171,21 @@
       }
     },
     {
+      "id": "landuse-construction-pattern",
+      "type": "fill",
+      "source": "openmaptiles",
+      "source-layer": "landuse",
+      "filter": [
+        "==",
+        "class",
+        "construction"
+      ],
+      "paint": {
+        "fill-pattern": "construction-stripes",
+        "fill-opacity": 0.42
+      }
+    },
+    {
       "id": "water",
       "type": "fill",
       "source": "openmaptiles",
@@ -1253,6 +1268,46 @@
       }
     },
     {
+      "id": "transportation-attraction-icons",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "==",
+          "class",
+          "transit"
+        ],
+        [
+          "in",
+          "subclass",
+          "track",
+          "roller_coaster"
+        ]
+      ],
+      "minzoom": 12,
+      "layout": {
+        "symbol-placement": "line-center",
+        "icon-image": "roller-coaster",
+        "icon-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          12,
+          0.75,
+          16,
+          1.05
+        ],
+        "icon-allow-overlap": false,
+        "icon-ignore-placement": false
+      }
+    },
+    {
       "id": "transportation-attraction-labels",
       "type": "symbol",
       "source": "openmaptiles",
@@ -1272,7 +1327,21 @@
       "minzoom": 13,
       "layout": {
         "symbol-placement": "line",
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Bold"
         ],
@@ -1384,7 +1453,21 @@
         "housenumber"
       ],
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1416,7 +1499,21 @@
         "attraction"
       ],
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1446,7 +1543,21 @@
         "motorway_junction"
       ],
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1480,7 +1591,21 @@
       "source": "openmaptiles",
       "source-layer": "water_name",
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1515,7 +1640,21 @@
       ],
       "minzoom": 9,
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1554,7 +1693,21 @@
       ],
       "minzoom": 15,
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1582,7 +1735,21 @@
       ],
       "minzoom": 13,
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1610,7 +1777,21 @@
       ],
       "minzoom": 10,
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1771,7 +1952,21 @@
         "country"
       ],
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1811,7 +2006,21 @@
       "minzoom": 5,
       "maxzoom": 12,
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1845,7 +2054,21 @@
         "city"
       ],
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1884,7 +2107,21 @@
       ],
       "minzoom": 8,
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1923,7 +2160,21 @@
       ],
       "minzoom": 10,
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1960,7 +2211,21 @@
       ],
       "minzoom": 12,
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1972,5 +2237,6 @@
         "text-halo-width": 1.4
       }
     }
-  ]
+  ],
+  "sprite": "/sprites/sprite"
 }
