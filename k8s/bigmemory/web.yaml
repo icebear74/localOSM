@@ -1387,7 +1387,7 @@ data:
                     query = self.path.split("?", 1)[1] if "?" in self.path else ""
                     params = urllib.parse.parse_qs(query)
                     style_id = params.get("style", ["osm"])[0].strip().lower()
-                    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", style_id):
+                    if len(style_id) > 64 or not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", style_id):
                         self._send_json({"error": "invalid style id"}, 400)
                         return
                     req = urllib.request.Request(
