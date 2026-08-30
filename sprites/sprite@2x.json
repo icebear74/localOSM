@@ -7,10 +7,50 @@
     "pixelRatio": 2,
     "visible": true
   },
+  "woodland-texture": {
+    "width": 32,
+    "height": 32,
+    "x": 36,
+    "y": 0,
+    "pixelRatio": 2,
+    "visible": true
+  },
+  "grass-texture": {
+    "width": 32,
+    "height": 32,
+    "x": 72,
+    "y": 0,
+    "pixelRatio": 2,
+    "visible": true
+  },
+  "construction-cone": {
+    "width": 48,
+    "height": 48,
+    "x": 108,
+    "y": 0,
+    "pixelRatio": 2,
+    "visible": true
+  },
   "roller-coaster": {
     "width": 48,
     "height": 48,
-    "x": 36,
+    "x": 160,
+    "y": 0,
+    "pixelRatio": 2,
+    "visible": true
+  },
+  "oneway-arrow": {
+    "width": 48,
+    "height": 48,
+    "x": 212,
+    "y": 0,
+    "pixelRatio": 2,
+    "visible": true
+  },
+  "speed-limit-base": {
+    "width": 48,
+    "height": 48,
+    "x": 264,
     "y": 0,
     "pixelRatio": 2,
     "visible": true
@@ -18,7 +58,7 @@
   "speed-limit-50": {
     "width": 48,
     "height": 48,
-    "x": 88,
+    "x": 316,
     "y": 0,
     "pixelRatio": 2,
     "visible": true

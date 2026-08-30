@@ -44,6 +44,22 @@
       }
     },
     {
+      "id": "landcover-wood-pattern",
+      "type": "fill",
+      "source": "openmaptiles",
+      "source-layer": "landcover",
+      "filter": [
+        "in",
+        "class",
+        "wood",
+        "forest"
+      ],
+      "paint": {
+        "fill-pattern": "woodland-texture",
+        "fill-opacity": 0.18
+      }
+    },
+    {
       "id": "landcover-grass",
       "type": "fill",
       "source": "openmaptiles",
@@ -74,6 +90,24 @@
           "#10364d"
         ],
         "fill-opacity": 0.74
+      }
+    },
+    {
+      "id": "landcover-grass-pattern",
+      "type": "fill",
+      "source": "openmaptiles",
+      "source-layer": "landcover",
+      "filter": [
+        "in",
+        "class",
+        "grass",
+        "farmland",
+        "agriculture",
+        "scrub"
+      ],
+      "paint": {
+        "fill-pattern": "grass-texture",
+        "fill-opacity": 0.14
       }
     },
     {
@@ -1399,6 +1433,38 @@
       }
     },
     {
+      "id": "transportation-construction-icons",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "==",
+        "class",
+        "construction"
+      ],
+      "minzoom": 12,
+      "layout": {
+        "symbol-placement": "line",
+        "symbol-spacing": 180,
+        "icon-image": "construction-cone",
+        "icon-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          12,
+          0.65,
+          16,
+          0.95
+        ],
+        "icon-allow-overlap": false,
+        "icon-ignore-placement": false
+      }
+    },
+    {
       "id": "building-extrusion",
       "type": "fill-extrusion",
       "source": "openmaptiles",
@@ -1870,6 +1936,121 @@
         "text-color": "#f2fbff",
         "text-halo-color": "#4a87b9",
         "text-halo-width": 1.4
+      }
+    },
+    {
+      "id": "road-oneway-icons",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "==",
+          "class",
+          "road_annotation"
+        ],
+        [
+          "has",
+          "oneway"
+        ]
+      ],
+      "minzoom": 14,
+      "layout": {
+        "symbol-placement": "line",
+        "symbol-spacing": 160,
+        "icon-image": "oneway-arrow",
+        "icon-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          14,
+          0.55,
+          16,
+          0.85
+        ],
+        "icon-rotate": [
+          "case",
+          [
+            "==",
+            [
+              "get",
+              "oneway"
+            ],
+            -1
+          ],
+          180,
+          0
+        ],
+        "icon-allow-overlap": false,
+        "icon-ignore-placement": false
+      }
+    },
+    {
+      "id": "road-maxspeed-signs",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "==",
+          "class",
+          "road_annotation"
+        ],
+        [
+          "has",
+          "maxspeed_display"
+        ]
+      ],
+      "minzoom": 14,
+      "layout": {
+        "symbol-placement": "line-center",
+        "icon-image": "speed-limit-base",
+        "icon-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          14,
+          0.85,
+          16,
+          1.0
+        ],
+        "text-field": [
+          "get",
+          "maxspeed_display"
+        ],
+        "text-font": [
+          "KlokanTech Noto Sans Bold"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          14,
+          8,
+          16,
+          10
+        ],
+        "text-anchor": "center",
+        "text-allow-overlap": false,
+        "icon-allow-overlap": false,
+        "icon-ignore-placement": false
+      },
+      "paint": {
+        "text-color": "#242424"
       }
     },
     {
