@@ -484,6 +484,7 @@ data:
       availableMapStyles = styles;
       renderMapStyleOptions(styles);
       var select = document.getElementById('map-style');
+      if (!select) return;
       var desired = getSavedMapStyleId();
       if (!styles.some(function(style) { return style.id === desired; })) {
         desired = styles[0] ? styles[0].id : DEFAULT_STYLE_ID;
