@@ -76,25 +76,29 @@ spec:
           set -eu
           mkdir -p /data/fonts /data/sprites
 
-          if [ -f /style-source/style.json ] && [ ! -f /data/style.json ]; then
-            cp /style-source/style.json /data/style.json
-            echo "[INFO] TileServer: installed initial style.json from ConfigMap tileserver-style"
-          fi
-          if [ -f /style-source/dark_style.json ] && [ ! -f /data/dark_style.json ]; then
-            cp /style-source/dark_style.json /data/dark_style.json
-            echo "[INFO] TileServer: installed initial dark_style.json from ConfigMap tileserver-style"
-          fi
+          for style_file in style.json dark_style.json blue_style.json futuristic_style.json; do
+            if [ -f "/style-source/${style_file}" ] && [ ! -f "/data/${style_file}" ]; then
+              cp "/style-source/${style_file}" "/data/${style_file}"
+              echo "[INFO] TileServer: installed initial ${style_file} from ConfigMap tileserver-style"
+            fi
+          done
 
           if [ ! -f /data/style.json ]; then
             printf '%s\n' '{"version":8,"name":"LocalOSM","sources":{"openmaptiles":{"type":"vector","url":"mbtiles://{v3}"}},"glyphs":"{fontstack}/{range}.pbf","layers":[{"id":"background","type":"background","paint":{"background-color":"#f2efe9"}}]}' > /data/style.json
           fi
 
           if [ ! -f /data/config.json ]; then
+            styles_json='"osm":{"style":"/data/style.json"}'
             if [ -f /data/dark_style.json ]; then
-              printf '%s\n' '{"options":{"paths":{"root":"/","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true,"cors":true},"styles":{"osm":{"style":"/data/style.json"},"osm-dark":{"style":"/data/dark_style.json"}},"data":{"v3":{"mbtiles":"/data/planet.mbtiles"}}}' > /data/config.json
-            else
-              printf '%s\n' '{"options":{"paths":{"root":"/","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true,"cors":true},"styles":{"osm":{"style":"/data/style.json"}},"data":{"v3":{"mbtiles":"/data/planet.mbtiles"}}}' > /data/config.json
+              styles_json="${styles_json},\"osm-dark\":{\"style\":\"/data/dark_style.json\"}"
             fi
+            if [ -f /data/blue_style.json ]; then
+              styles_json="${styles_json},\"osm-blue\":{\"style\":\"/data/blue_style.json\"}"
+            fi
+            if [ -f /data/futuristic_style.json ]; then
+              styles_json="${styles_json},\"osm-futuristic\":{\"style\":\"/data/futuristic_style.json\"}"
+            fi
+            printf '%s\n' "{\"options\":{\"paths\":{\"root\":\"/\",\"fonts\":\"/data/fonts\",\"sprites\":\"\",\"icons\":\"\"},\"serveAllFonts\":true,\"cors\":true},\"styles\":{${styles_json}},\"data\":{\"v3\":{\"mbtiles\":\"/data/planet.mbtiles\"}}}" > /data/config.json
           fi
 
           if [ -n "$(find /data/fonts -type f -name '*.pbf' -print -quit 2>/dev/null)" ]; then

@@ -1,6 +1,6 @@
 {
   "version": 8,
-  "name": "LocalOSM Night Bloom",
+  "name": "LocalOSM Blue Hour",
   "sources": {
     "openmaptiles": {
       "type": "vector",
@@ -13,7 +13,7 @@
       "id": "background",
       "type": "background",
       "paint": {
-        "background-color": "#101722"
+        "background-color": "#08111f"
       }
     },
     {
@@ -35,10 +35,10 @@
             "class"
           ],
           "forest",
-          "#1f6c49",
+          "#14536d",
           "wood",
-          "#2b8a5b",
-          "#2b8a5b"
+          "#1c6b8c",
+          "#1c6b8c"
         ],
         "fill-opacity": 0.8
       }
@@ -64,14 +64,14 @@
             "class"
           ],
           "grass",
-          "#214f38",
+          "#10364d",
           "farmland",
-          "#48562a",
+          "#153d57",
           "agriculture",
-          "#335f3a",
+          "#0f4f67",
           "scrub",
-          "#496846",
-          "#214f38"
+          "#23546a",
+          "#10364d"
         ],
         "fill-opacity": 0.74
       }
@@ -87,7 +87,7 @@
         "residential"
       ],
       "paint": {
-        "fill-color": "#263042",
+        "fill-color": "#152338",
         "fill-opacity": 0.8
       }
     },
@@ -103,7 +103,7 @@
         "retail"
       ],
       "paint": {
-        "fill-color": "#3d3148",
+        "fill-color": "#1e3552",
         "fill-opacity": 0.78
       }
     },
@@ -118,7 +118,7 @@
         "industrial"
       ],
       "paint": {
-        "fill-color": "#4a3a35",
+        "fill-color": "#243447",
         "fill-opacity": 0.72
       }
     },
@@ -143,14 +143,14 @@
             "class"
           ],
           "park",
-          "#2f7c61",
+          "#1c688b",
           "recreation_ground",
-          "#2d5d48",
+          "#0f3c56",
           "theme_park",
-          "#5b4684",
+          "#326c9f",
           "amusement_park",
-          "#7a4f98",
-          "#245f52"
+          "#4f7db4",
+          "#144c71"
         ],
         "fill-opacity": 0.8
       }
@@ -166,7 +166,7 @@
         "construction"
       ],
       "paint": {
-        "fill-color": "#5a4134",
+        "fill-color": "#514a5e",
         "fill-opacity": 0.64
       }
     },
@@ -176,7 +176,7 @@
       "source": "openmaptiles",
       "source-layer": "water",
       "paint": {
-        "fill-color": "#123c63"
+        "fill-color": "#0f4f87"
       }
     },
     {
@@ -185,7 +185,7 @@
       "source": "openmaptiles",
       "source-layer": "waterway",
       "paint": {
-        "line-color": "#2b87c8",
+        "line-color": "#46a3ff",
         "line-width": {
           "stops": [
             [
@@ -223,7 +223,7 @@
         ]
       ],
       "paint": {
-        "line-color": "#ff6b6b",
+        "line-color": "#79c7ff",
         "line-width": {
           "stops": [
             [
@@ -254,7 +254,7 @@
         4
       ],
       "paint": {
-        "line-color": "#ffadad",
+        "line-color": "#4ea1d9",
         "line-width": {
           "stops": [
             [
@@ -281,7 +281,7 @@
         "tunnel"
       ],
       "paint": {
-        "line-color": "#607089",
+        "line-color": "#4f6b88",
         "line-width": {
           "stops": [
             [
@@ -339,28 +339,28 @@
             ""
           ],
           "footway",
-          "#8ca0b8",
+          "#9bb6d4",
           "path",
-          "#8ca0b8",
+          "#9bb6d4",
           "pedestrian",
-          "#8ca0b8",
+          "#9bb6d4",
           "sidewalk",
-          "#8ca0b8",
+          "#9bb6d4",
           "crossing",
-          "#8ca0b8",
+          "#9bb6d4",
           "steps",
-          "#b08f84",
+          "#88a0bd",
           "cycleway",
-          "#5fd6c3",
+          "#7bf0ff",
           "bridleway",
-          "#5fd6c3",
+          "#7bf0ff",
           "track",
-          "#c2a96f",
+          "#8dd1ff",
           "service",
-          "#7f93ac",
+          "#7c97b6",
           "minor",
-          "#7f93ac",
-          "#8ca0b8"
+          "#7c97b6",
+          "#9bb6d4"
         ],
         "line-width": [
           "case",
@@ -654,7 +654,7 @@
       ],
       "minzoom": 10,
       "paint": {
-        "line-color": "#7c8fa6",
+        "line-color": "#8ca9c8",
         "line-width": {
           "stops": [
             [
@@ -698,7 +698,7 @@
       ],
       "minzoom": 9,
       "paint": {
-        "line-color": "#91a9c3",
+        "line-color": "#a4c2e6",
         "line-width": {
           "stops": [
             [
@@ -742,7 +742,7 @@
       ],
       "minzoom": 7,
       "paint": {
-        "line-color": "#ffc067",
+        "line-color": "#58b9ff",
         "line-width": {
           "stops": [
             [
@@ -785,7 +785,7 @@
       ],
       "minzoom": 6,
       "paint": {
-        "line-color": "#ff8f5a",
+        "line-color": "#7cd6ff",
         "line-width": {
           "stops": [
             [
@@ -824,7 +824,7 @@
         "funicular"
       ],
       "paint": {
-        "line-color": "#a7b2c1",
+        "line-color": "#c1d4ea",
         "line-width": {
           "stops": [
             [
@@ -885,18 +885,18 @@
               "subclass"
             ],
             "water_slide",
-            "#38bdf8",
+            "#53c7ff",
             "monorail",
-            "#a78bfa",
+            "#8db8ff",
             "miniature",
-            "#fbbf24",
+            "#ffd27f",
             "narrow_gauge",
-            "#f59e0b",
+            "#9ed8ff",
             "track",
-            "#ecf2f9",
+            "#eff7ff",
             "roller_coaster",
-            "#fb7185",
-            "#d9e2ef"
+            "#6ad7ff",
+            "#dbe9f7"
           ]
         ],
         "line-width": {
@@ -975,7 +975,7 @@
       ],
       "minzoom": 11,
       "paint": {
-        "line-color": "#c49a6c",
+        "line-color": "#8ca5c2",
         "line-width": {
           "stops": [
             [
@@ -1002,7 +1002,7 @@
       "source-layer": "building",
       "minzoom": 14,
       "paint": {
-        "fill-extrusion-color": "#425067",
+        "fill-extrusion-color": "#31455d",
         "fill-extrusion-height": 12,
         "fill-extrusion-base": 0,
         "fill-extrusion-opacity": 0.9
@@ -1015,7 +1015,7 @@
       "source-layer": "building",
       "minzoom": 14,
       "paint": {
-        "fill-color": "#334155",
+        "fill-color": "#25364b",
         "fill-opacity": 0.9
       }
     },
@@ -1033,8 +1033,8 @@
         "text-size": 10
       },
       "paint": {
-        "text-color": "#c6d0df",
-        "text-halo-color": "#101722",
+        "text-color": "#d2e2f2",
+        "text-halo-color": "#08111f",
         "text-halo-width": 1.2
       }
     },
@@ -1065,8 +1065,8 @@
         "text-justify": "center"
       },
       "paint": {
-        "text-color": "#e5c07b",
-        "text-halo-color": "#101722",
+        "text-color": "#b8d9ff",
+        "text-halo-color": "#08111f",
         "text-halo-width": 1.4
       }
     },
@@ -1094,8 +1094,8 @@
         "text-anchor": "top"
       },
       "paint": {
-        "text-color": "#f7a072",
-        "text-halo-color": "#101722",
+        "text-color": "#7dd3fc",
+        "text-halo-color": "#08111f",
         "text-halo-width": 1.2
       }
     },
@@ -1135,8 +1135,8 @@
         "text-anchor": "top"
       },
       "paint": {
-        "text-color": "#c6d0df",
-        "text-halo-color": "#101722",
+        "text-color": "#d6e5f7",
+        "text-halo-color": "#08111f",
         "text-halo-width": 1.4
       }
     },
@@ -1165,8 +1165,8 @@
         "symbol-placement": "point"
       },
       "paint": {
-        "text-color": "#8dd9ff",
-        "text-halo-color": "#101722",
+        "text-color": "#c0ecff",
+        "text-halo-color": "#08111f",
         "text-halo-width": 1.2
       }
     },
@@ -1200,8 +1200,8 @@
         "symbol-placement": "line"
       },
       "paint": {
-        "text-color": "#8dd9ff",
-        "text-halo-color": "#101722",
+        "text-color": "#c0ecff",
+        "text-halo-color": "#08111f",
         "text-halo-width": 1.1
       }
     },
@@ -1230,8 +1230,8 @@
         "text-padding": 5
       },
       "paint": {
-        "text-color": "#c6d0df",
-        "text-halo-color": "#101722",
+        "text-color": "#d2e2f2",
+        "text-halo-color": "#08111f",
         "text-halo-width": 1.4
       }
     },
@@ -1257,8 +1257,8 @@
         "text-max-angle": 30
       },
       "paint": {
-        "text-color": "#e8edf5",
-        "text-halo-color": "#101722",
+        "text-color": "#edf5ff",
+        "text-halo-color": "#08111f",
         "text-halo-width": 1.4
       }
     },
@@ -1285,8 +1285,8 @@
         "text-max-angle": 30
       },
       "paint": {
-        "text-color": "#e8edf5",
-        "text-halo-color": "#101722",
+        "text-color": "#edf5ff",
+        "text-halo-color": "#08111f",
         "text-halo-width": 1.5
       }
     },
@@ -1352,8 +1352,8 @@
         ]
       },
       "paint": {
-        "text-color": "#fff7ef",
-        "text-halo-color": "#df7b45",
+        "text-color": "#f2fbff",
+        "text-halo-color": "#4a87b9",
         "text-halo-width": 1.4
       }
     },
@@ -1386,8 +1386,8 @@
         "text-rotation-alignment": "viewport"
       },
       "paint": {
-        "text-color": "#fff7f1",
-        "text-halo-color": "#e4753f",
+        "text-color": "#eef8ff",
+        "text-halo-color": "#3f86c4",
         "text-halo-width": 2.2
       }
     },
@@ -1421,8 +1421,8 @@
         "text-rotation-alignment": "viewport"
       },
       "paint": {
-        "text-color": "#fff8ec",
-        "text-halo-color": "#c8964f",
+        "text-color": "#f4fbff",
+        "text-halo-color": "#4c6fa8",
         "text-halo-width": 2.0
       }
     },
@@ -1459,8 +1459,8 @@
         }
       },
       "paint": {
-        "text-color": "#f4f7fb",
-        "text-halo-color": "#101722",
+        "text-color": "#f4f9ff",
+        "text-halo-color": "#08111f",
         "text-halo-width": 1.8
       }
     },
@@ -1495,8 +1495,8 @@
         }
       },
       "paint": {
-        "text-color": "#f4f7fb",
-        "text-halo-color": "#101722",
+        "text-color": "#f4f9ff",
+        "text-halo-color": "#08111f",
         "text-halo-width": 1.5
       }
     },
@@ -1533,8 +1533,8 @@
         }
       },
       "paint": {
-        "text-color": "#f4f7fb",
-        "text-halo-color": "#101722",
+        "text-color": "#f4f9ff",
+        "text-halo-color": "#08111f",
         "text-halo-width": 1.8
       }
     },
@@ -1572,8 +1572,8 @@
         }
       },
       "paint": {
-        "text-color": "#dae3f2",
-        "text-halo-color": "#101722",
+        "text-color": "#d7e7f8",
+        "text-halo-color": "#08111f",
         "text-halo-width": 1.5
       }
     },
@@ -1607,8 +1607,8 @@
         }
       },
       "paint": {
-        "text-color": "#dae3f2",
-        "text-halo-color": "#101722",
+        "text-color": "#d7e7f8",
+        "text-halo-color": "#08111f",
         "text-halo-width": 1.4
       }
     },
@@ -1633,8 +1633,8 @@
         "text-size": 11
       },
       "paint": {
-        "text-color": "#dae3f2",
-        "text-halo-color": "#101722",
+        "text-color": "#d7e7f8",
+        "text-halo-color": "#08111f",
         "text-halo-width": 1.4
       }
     }

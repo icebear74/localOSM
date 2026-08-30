@@ -52,6 +52,10 @@ data:
             .setAttr("class", "transit")
             .setAttr("subclass", attractionTransitSubclass(feature))
             .setMinZoom(11);
+          String colour = feature.getString("colour", feature.getString("color", null));
+          if (colour != null && !colour.isBlank()) {
+            line.setAttr("colour", colour);
+          }
           String name = feature.getString("name", null);
           if (name != null && !name.isBlank()) {
             line.setAttr("name", name);
