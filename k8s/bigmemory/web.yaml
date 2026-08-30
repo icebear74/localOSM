@@ -1378,7 +1378,7 @@ data:
                 self._send_json({"styles": styles, "default": styles[0]["id"]})
                 return
 
-            if self.path.startswith("/api/style"):
+            if self.path == "/api/style" or self.path.startswith("/api/style?"):
                 # Serve the style actually configured in TileServer-GL (e.g. via the
                 # Maputnik style editor / status dashboard "/api/style"), so the
                 # routing window's map matches what is configured there instead of
