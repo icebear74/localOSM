@@ -76,7 +76,7 @@ fi
 if [ -f "${BOOTSTRAP_DIR}/futuristic_style.json" ]; then
   styles_json="${styles_json},\"osm-futuristic\":{\"style\":\"/data/futuristic_style.json\"}"
 fi
-printf '%s\n' "{\"options\":{\"paths\":{\"root\":\"/\",\"fonts\":\"/data/fonts\",\"sprites\":\"\",\"icons\":\"\"},\"serveAllFonts\":true,\"cors\":true},\"styles\":{${styles_json}},\"data\":{\"v3\":{\"mbtiles\":\"/data/planet.mbtiles\"}}}" | ${SUDO} tee "${BOOTSTRAP_DIR}/config.json" >/dev/null
+printf '%s\n' "{\"options\":{\"paths\":{\"root\":\"/data\",\"fonts\":\"fonts\",\"sprites\":\"sprites\",\"icons\":\"icons\"},\"serveAllFonts\":true,\"cors\":true},\"styles\":{${styles_json}},\"data\":{\"v3\":{\"mbtiles\":\"planet.mbtiles\"}}}" | ${SUDO} tee "${BOOTSTRAP_DIR}/config.json" >/dev/null
 
 if [ "${APPLY_CONFIGMAP}" = true ]; then
   if ! command -v kubectl >/dev/null 2>&1; then

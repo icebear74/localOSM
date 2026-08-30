@@ -98,7 +98,7 @@ spec:
             if [ -f /data/futuristic_style.json ]; then
               styles_json="${styles_json},\"osm-futuristic\":{\"style\":\"/data/futuristic_style.json\"}"
             fi
-            printf '%s\n' "{\"options\":{\"paths\":{\"root\":\"/\",\"fonts\":\"/data/fonts\",\"sprites\":\"\",\"icons\":\"\"},\"serveAllFonts\":true,\"cors\":true},\"styles\":{${styles_json}},\"data\":{\"v3\":{\"mbtiles\":\"/data/planet.mbtiles\"}}}" > /data/config.json
+            printf '%s\n' "{\"options\":{\"paths\":{\"root\":\"/data\",\"fonts\":\"fonts\",\"sprites\":\"sprites\",\"icons\":\"icons\"},\"serveAllFonts\":true,\"cors\":true},\"styles\":{${styles_json}},\"data\":{\"v3\":{\"mbtiles\":\"planet.mbtiles\"}}}" > /data/config.json
           fi
 
           if [ -n "$(find /data/fonts -type f -name '*.pbf' -print -quit 2>/dev/null)" ]; then
