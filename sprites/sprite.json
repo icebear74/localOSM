@@ -54,5 +54,21 @@
     "y": 0,
     "pixelRatio": 1,
     "visible": true
+  },
+  "rail-sleepers": {
+    "width": 24,
+    "height": 12,
+    "x": 158,
+    "y": 0,
+    "pixelRatio": 1,
+    "visible": true
+  },
+  "coaster-sleepers": {
+    "width": 24,
+    "height": 12,
+    "x": 184,
+    "y": 0,
+    "pixelRatio": 1,
+    "visible": true
   }
 }

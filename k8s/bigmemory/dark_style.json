@@ -1212,19 +1212,77 @@
           "stops": [
             [
               8,
-              0.96
+              1.8
             ],
             [
               12,
-              1.89
+              3.0
             ],
             [
               16,
-              3.51
+              5.4
             ]
           ]
         },
-        "line-opacity": 0.92
+        "line-opacity": 0.96,
+        "line-gap-width": {
+          "stops": [
+            [
+              8,
+              0.45
+            ],
+            [
+              12,
+              0.95
+            ],
+            [
+              16,
+              2.1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "railway-sleepers",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "in",
+        "class",
+        "rail",
+        "subway",
+        "light_rail",
+        "monorail",
+        "tram",
+        "funicular"
+      ],
+      "minzoom": 10,
+      "layout": {
+        "symbol-placement": "line",
+        "symbol-spacing": 28,
+        "icon-image": "rail-sleepers",
+        "icon-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          10,
+          0.68,
+          16,
+          1.08
+        ],
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
+        "icon-rotation-alignment": "map",
+        "icon-keep-upright": true
+      },
+      "paint": {
+        "icon-opacity": 0.95
       }
     },
     {
@@ -1286,19 +1344,172 @@
           "stops": [
             [
               11,
-              1.2
+              1.7
             ],
             [
               13,
-              2.2
+              2.9
             ],
             [
               16,
-              4.2
+              5.1
             ]
           ]
         },
         "line-opacity": 0.98
+      }
+    },
+    {
+      "id": "transportation-attraction-rails",
+      "type": "line",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "==",
+          "class",
+          "transit"
+        ],
+        [
+          "in",
+          "subclass",
+          "track",
+          "roller_coaster"
+        ]
+      ],
+      "minzoom": 11,
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round",
+        "line-sort-key": [
+          "coalesce",
+          [
+            "get",
+            "layer"
+          ],
+          0
+        ]
+      },
+      "paint": {
+        "line-color": [
+          "case",
+          [
+            "has",
+            "colour"
+          ],
+          [
+            "get",
+            "colour"
+          ],
+          [
+            "match",
+            [
+              "get",
+              "subclass"
+            ],
+            "water_slide",
+            "#38bdf8",
+            "monorail",
+            "#a78bfa",
+            "miniature",
+            "#fbbf24",
+            "narrow_gauge",
+            "#f59e0b",
+            "track",
+            "#ecf2f9",
+            "roller_coaster",
+            "#fb7185",
+            "#d9e2ef"
+          ]
+        ],
+        "line-width": {
+          "stops": [
+            [
+              11,
+              1.7
+            ],
+            [
+              13,
+              2.9
+            ],
+            [
+              16,
+              5.1
+            ]
+          ]
+        },
+        "line-gap-width": {
+          "stops": [
+            [
+              11,
+              0.3
+            ],
+            [
+              13,
+              0.8
+            ],
+            [
+              16,
+              1.9
+            ]
+          ]
+        },
+        "line-opacity": 0.9
+      }
+    },
+    {
+      "id": "transportation-attraction-track-detail",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "==",
+          "class",
+          "transit"
+        ],
+        [
+          "in",
+          "subclass",
+          "track",
+          "roller_coaster"
+        ]
+      ],
+      "minzoom": 12,
+      "layout": {
+        "symbol-placement": "line",
+        "symbol-spacing": 30,
+        "icon-image": "coaster-sleepers",
+        "icon-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          12,
+          0.75,
+          16,
+          1.1
+        ],
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
+        "icon-rotation-alignment": "map",
+        "icon-keep-upright": true,
+        "symbol-sort-key": [
+          "coalesce",
+          [
+            "get",
+            "layer"
+          ],
+          0
+        ]
+      },
+      "paint": {
+        "icon-opacity": 0.95
       }
     },
     {

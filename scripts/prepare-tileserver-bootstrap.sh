@@ -59,6 +59,11 @@ if [ -d "${REPO_ROOT}/sprites" ]; then
   ${SUDO} cp -a "${REPO_ROOT}/sprites/." "${BOOTSTRAP_DIR}/sprites/"
 fi
 
+if [ -d "${REPO_ROOT}/icons" ]; then
+  ${SUDO} find "${BOOTSTRAP_DIR}/icons" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+  ${SUDO} cp -a "${REPO_ROOT}/icons/." "${BOOTSTRAP_DIR}/icons/"
+fi
+
 for style_file in style.json dark_style.json blue_style.json futuristic_style.json; do
   if [ -f "${REPO_ROOT}/k8s/${style_file}" ]; then
     ${SUDO} cp "${REPO_ROOT}/k8s/${style_file}" "${BOOTSTRAP_DIR}/${style_file}"
