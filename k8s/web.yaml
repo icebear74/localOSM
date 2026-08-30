@@ -43,6 +43,12 @@ data:
     PHOTON_URL = os.environ.get("PHOTON_URL", "http://photon.osm.svc.cluster.local:2322")
     TILESERVER_URL = os.environ.get("TILESERVER_URL", "http://tileserver-gl.osm.svc.cluster.local")
     STATUS_URL = os.environ.get("STATUS_URL", "")
+    STYLE_CANDIDATES = (
+        ("osm", "Standard"),
+        ("osm-dark", "Dunkel"),
+        ("osm-blue", "Blau"),
+        ("osm-futuristic", "Futuristisch"),
+    )
     PLANET_UPDATE_REQUEST_FILE = os.environ.get("PLANET_UPDATE_REQUEST_FILE", "/state/planet-update-request.flag")
     PLANET_UPDATE_STATUS_FILE = os.environ.get("PLANET_UPDATE_STATUS_FILE", "/status/planet-update.json")
     FAVICON_GIF = (
@@ -113,12 +119,13 @@ data:
     <div id="main">
       <div id="sidebar">
       <div>
-        <label>Suchdienst</label>
-        <select id="geocoder-provider" onchange="updateGeocoderUi()">
-          <option value="photon_nominatim">Photon + Nominatim</option>
+      <label>Kartenstil</label>
+      <select id="map-style" onchange="onMapStyleChange()">
+        <option value="osm">Standard</option>
         </select>
-        </div>
-      <div class="section-title">Start</div>
+      <div class="hint">Verfügbare TileServer-Styles.</div>
+      </div>
+    <div class="section-title">Start</div>
       <div class="photon-search provider-photon-only">
         <label>Volltextsuche (Photon)</label>
         <input id="startPhoton" placeholder="Ab 3 Zeichen tippen ..." autocomplete="off"
@@ -408,6 +415,96 @@ data:
     }
     updateLinks();
 
+    var DEFAULT_GEOCODER_PROVIDER = 'photon_nominatim';
+    var DEFAULT_STYLE_ID = 'osm';
+    var MAP_STYLE_STORAGE_KEY = 'localosm.mapStyleId';
+    var routeGeojson = null;
+    var availableMapStyles = [{id: 'osm', label: 'Standard'}];
+
+    function ensureRouteLayer() {
+      if (!routeGeojson || !map || !map.isStyleLoaded()) return;
+      if (!map.getSource('route')) {
+        map.addSource('route', {type: 'geojson', data: routeGeojson});
+      } else {
+        map.getSource('route').setData(routeGeojson);
+      }
+      if (!map.getLayer('route-line')) {
+        map.addLayer({id:'route-line',type:'line',source:'route',
+          paint:{'line-color':'#2c7ab5','line-width':5,'line-opacity':0.8}});
+      }
+    }
+
+    function getSavedMapStyleId() {
+      try {
+        var saved = localStorage.getItem(MAP_STYLE_STORAGE_KEY);
+        return saved || DEFAULT_STYLE_ID;
+      } catch (e) {
+        return DEFAULT_STYLE_ID;
+      }
+    }
+
+    function saveMapStyleId(styleId) {
+      try {
+        localStorage.setItem(MAP_STYLE_STORAGE_KEY, styleId);
+      } catch (e) {}
+    }
+
+    function renderMapStyleOptions(styles) {
+      var select = document.getElementById('map-style');
+      if (!select) return;
+      select.innerHTML = '';
+      (styles || []).forEach(function(style) {
+        var option = document.createElement('option');
+        option.value = style.id;
+        option.textContent = style.label;
+        select.appendChild(option);
+      });
+    }
+
+    async function loadMapStyle(styleId) {
+      var resp = await fetch('/api/style?style=' + encodeURIComponent(styleId));
+      if (!resp.ok) throw new Error('style fetch failed: ' + resp.status);
+      var styleJson = await resp.json();
+      map.setStyle(styleJson);
+      saveMapStyleId(styleId);
+    }
+
+    async function initStyleSelector() {
+      var styles = availableMapStyles.slice();
+      try {
+        var resp = await fetch('/api/styles');
+        if (!resp.ok) throw new Error('style list fetch failed: ' + resp.status);
+        var data = await resp.json();
+        if (Array.isArray(data.styles) && data.styles.length) {
+          styles = data.styles;
+        }
+      } catch (e) {
+        console.warn('Falling back to built-in style list:', e);
+      }
+      availableMapStyles = styles;
+      renderMapStyleOptions(styles);
+      var select = document.getElementById('map-style');
+      var desired = getSavedMapStyleId();
+      if (!styles.some(function(style) { return style.id === desired; })) {
+        desired = styles[0] ? styles[0].id : DEFAULT_STYLE_ID;
+      }
+      select.value = desired;
+      try {
+        await loadMapStyle(desired);
+      } catch (e) {
+        console.warn('Falling back to built-in style; failed to load configured TileServer-GL style:', e);
+      }
+    }
+
+    function onMapStyleChange() {
+      var select = document.getElementById('map-style');
+      var styleId = (select && select.value) || DEFAULT_STYLE_ID;
+      loadMapStyle(styleId).catch(function(err) {
+        console.error('Failed to switch map style:', err);
+        alert('Kartenstil konnte nicht geladen werden.');
+      });
+    }
+
     // ---- Planet-Update Panel ----
     function loadPlanetUpdateStatus() {
       fetch('/api/planet-update/status')
@@ -490,6 +587,7 @@ data:
       zoom: 2,
       attributionControl: true
     });
+    map.on('styledata', ensureRouteLayer);
 
     // Firefox sometimes computes a 0-size WebGL canvas when the map is created
     // inside a flexbox layout before the surrounding layout has settled, leaving
@@ -501,18 +599,10 @@ data:
     }
     window.addEventListener('resize', function() { map.resize(); });
 
-    // The style embedded above is only a fallback so the map is usable
-    // immediately. Swap it for the style actually configured in TileServer-GL
-    // (e.g. via the Maputnik style editor) as soon as it is available, so the
-    // routing window shows the same style as the tile server.
-    fetch('/api/style').then(function(resp) {
-      if (!resp.ok) throw new Error('style fetch failed: ' + resp.status);
-      return resp.json();
-    }).then(function(styleJson) {
-      map.setStyle(styleJson);
-    }).catch(function(e) {
-      console.warn('Falling back to built-in style; failed to load configured TileServer-GL style:', e);
-    });
+    // The embedded style is only a fallback. The selector below swaps it for
+    // one of the TileServer-configured styles as soon as the available style
+    // list has been discovered.
+    initStyleSelector();
 
     // The map is interactive (pan/zoom/click) from the moment it is created,
     // even before any address has been searched -- users can already explore
@@ -579,7 +669,7 @@ data:
     // Reverse geocode a coordinate and populate the address input
     async function reverseGeocode(which, lat, lon) {
       try {
-        var provider = document.getElementById('geocoder-provider').value || 'photon_nominatim';
+        var provider = DEFAULT_GEOCODER_PROVIDER;
         var resp = await fetch('/api/reverse?provider=' + encodeURIComponent(provider) + '&lat=' + lat + '&lon=' + lon);
         var data = await resp.json();
         if (!data.error && data.display_name) {
@@ -611,14 +701,8 @@ data:
         });
       });
       if (allCoords.length === 0) return;
-      var geojson = {type:'Feature',geometry:{type:'LineString',coordinates:allCoords}};
-      if (map.getSource('route')) {
-        map.getSource('route').setData(geojson);
-      } else {
-        map.addSource('route', {type:'geojson', data: geojson});
-        map.addLayer({id:'route-line',type:'line',source:'route',
-          paint:{'line-color':'#2c7ab5','line-width':5,'line-opacity':0.8}});
-      }
+      routeGeojson = {type:'Feature',geometry:{type:'LineString',coordinates:allCoords}};
+      ensureRouteLayer();
       var bounds = allCoords.reduce(function(b, c) { return b.extend(c); },
         new maplibregl.LngLatBounds(allCoords[0], allCoords[0]));
       map.fitBounds(bounds, {padding: 30});
@@ -1008,7 +1092,7 @@ data:
     async function geocode(which) {
       var addrInput = document.getElementById(which + 'Addr').value.trim();
       if (!addrInput) return;
-      var provider = document.getElementById('geocoder-provider').value || 'photon_nominatim';
+      var provider = DEFAULT_GEOCODER_PROVIDER;
       var box = document.getElementById('result-box');
       box.innerHTML = '&#128269; Suche: ' + addrInput + ' ...';
       try {
@@ -1024,9 +1108,6 @@ data:
       } catch(err) {
         box.innerHTML = '<span class="err">Geocoding-Fehler: ' + err + '</span>';
       }
-    }
-
-    function updateGeocoderUi() {
     }
 
     // --- Photon full-text search-as-you-type ---------------------------------
@@ -1183,7 +1264,6 @@ data:
       });
     }
 
-    updateGeocoderUi();
     </script>
     </body>
     </html>
@@ -1279,14 +1359,39 @@ data:
                     self.end_headers()
                 return
 
-            if self.path == "/api/style":
+            if self.path == "/api/styles":
+                styles = []
+                for style_id, label in STYLE_CANDIDATES:
+                    try:
+                        req = urllib.request.Request(
+                            f"{TILESERVER_URL}/styles/{style_id}/style.json",
+                            headers={"User-Agent": "localosm-web/1.0"}
+                        )
+                        with urllib.request.urlopen(req, timeout=5) as response:
+                            if response.status != 200:
+                                continue
+                        styles.append({"id": style_id, "label": label})
+                    except Exception:
+                        continue
+                if not styles:
+                    styles = [{"id": "osm", "label": "Standard"}]
+                self._send_json({"styles": styles, "default": styles[0]["id"]})
+                return
+
+            if self.path.startswith("/api/style"):
                 # Serve the style actually configured in TileServer-GL (e.g. via the
                 # Maputnik style editor / status dashboard "/api/style"), so the
                 # routing window's map matches what is configured there instead of
                 # a hardcoded style baked into this page.
                 try:
+                    query = self.path.split("?", 1)[1] if "?" in self.path else ""
+                    params = urllib.parse.parse_qs(query)
+                    style_id = params.get("style", ["osm"])[0].strip().lower()
+                    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", style_id):
+                        self._send_json({"error": "invalid style id"}, 400)
+                        return
                     req = urllib.request.Request(
-                        f"{TILESERVER_URL}/styles/osm/style.json",
+                        f"{TILESERVER_URL}/styles/{style_id}/style.json",
                         headers={"User-Agent": "localosm-web/1.0"}
                     )
                     with urllib.request.urlopen(req, timeout=10) as response:
