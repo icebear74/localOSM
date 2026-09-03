@@ -214,3 +214,10 @@ style becomes active within seconds — without any manual `scp`/`kubectl` steps
 - The orchestrator exits with code 0 when watched config maps change so Kubernetes restarts it with fresh state.
 
 - The orchestrator uses `alpine/k8s:1.30.0`; keep it aligned with the cluster Kubernetes minor version.
+
+## StorageClass performance testing
+
+`storage-perf-tester/` is a self-contained, optional tool for comparing the
+StorageClasses available in a cluster (fio + PostgreSQL/pgbench workloads,
+IOPS/MB/s/latency, configurable ranking). It never touches the OSM stack
+deployed by this repository; see `storage-perf-tester/README.md` for usage.
