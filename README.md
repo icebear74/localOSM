@@ -31,6 +31,7 @@ A self-hosted OSM stack on K3s with a read-only status dashboard, a routing web 
 | `scripts/deploy-osm.sh` | Installs manifests and stages static files on the host |
 | `scripts/run-import.sh` | Downloads a `.osm.pbf` and creates an import request |
 | `scripts/import-orchestrator.sh` | Sequential import workflow executed inside the orchestrator pod |
+| `scripts/localosm-menu.sh` | `dialog`/`whiptail` TUI menu that drives deploy/build/promote/abort and shows live job progress (see below) |
 
 ## Host data
 
@@ -87,6 +88,28 @@ bash scripts/run-import.sh --url https://download.geofabrik.de/europe/germany/be
 ```
 
 The script downloads the extract and writes an import request. The orchestrator pod processes requests strictly in sequence. Import jobs are intended to be autonomous: the orchestrator only submits them, while each job should manage its own deployment lifecycle (scale/rollout/restart) and data promotion steps internally.
+
+## Control menu (`dialog`/`whiptail`)
+
+`scripts/localosm-menu.sh` is a single, menu-driven entry point for the operations above, so you don't have to remember individual scripts/URLs:
+
+```bash
+bash scripts/localosm-menu.sh
+```
+
+It requires `dialog` (falls back to `whiptail` if `dialog` isn't installed), `curl`, `python3`, and `kubectl`. Install `dialog` if needed: `sudo apt-get install -y dialog`.
+
+The menu never re-implements any orchestration logic itself: build/promote/abort actions call the status dashboard's existing HTTP API (the same one the web UI uses), so there is exactly one place that owns import-workflow state and locking. From the menu you can:
+
+- Deploy/update the stack (wraps `scripts/deploy-osm.sh`, with prompts for `--clean`/`--preserve-downloads`/`--node-url`)
+- Add or queue an extract, check for extract updates, remove a queued extract
+- Start a full build, a single build step (tileserver/nominatim/valhalla/photon), or a download-and-merge-only run
+- Promote staged data for a service, or abort the currently running import
+- Watch **live progress** of the running import: polls `/api/status` into an auto-updating progress bar (phase, message, and a Kubernetes Jobs completions summary), and closes automatically once the workflow finishes
+- View a raw Kubernetes overview (deployments/jobs/pods/PVCs in the `osm` namespace) and tail a pod's logs live
+- Run cluster maintenance (`scripts/remove-rancher.sh`, `scripts/reset-k3s.sh`), each with an explicit confirmation prompt and a `--dry-run` preview option
+
+By default it autodetects the status dashboard at `http://127.0.0.1:30083` (when run on a cluster node) or via the first node's InternalIP; override with `--url http://<node-ip>:30083` or `--namespace <ns>` if needed.
 
 1. Nominatim
 2. Valhalla
