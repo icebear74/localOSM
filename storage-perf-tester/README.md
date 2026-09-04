@@ -18,6 +18,7 @@ by default) and cleans up after itself.
 - [Safety and cost notes](#safety-and-cost-notes)
 - [Quick start](#quick-start)
 - [Usage](#usage)
+- [Control menu (`spt-menu.sh`)](#control-menu-spt-menush)
 - [Configuration](#configuration)
 - [Workloads](#workloads)
 - [Results and ranking](#results-and-ranking)
@@ -130,6 +131,46 @@ Commands:
 ```
 
 Run `./bin/storage-perf-tester.sh --help` for the full option reference.
+
+## Control menu (`spt-menu.sh`)
+
+For interactive use, `bin/spt-menu.sh` provides a `dialog`/`whiptail`
+menu on top of `bin/storage-perf-tester.sh`. It never re-implements any
+discovery/testing/ranking logic itself - every menu action just invokes
+`bin/storage-perf-tester.sh` (either synchronously, or in the background
+for `run`), so there is exactly one place that owns the Kubernetes/testing
+logic and the CLI documented above always works standalone.
+
+Requires `dialog` (preferred) or `whiptail`, plus the same prerequisites
+as the CLI (`kubectl`, `jq`, `bash`; `fio`/`psql` only matter inside the
+worker images, not on the machine running the menu).
+
+```bash
+cd storage-perf-tester
+./bin/spt-menu.sh
+# or: bash bin/spt-menu.sh --namespace my-ns --output-dir ./results
+```
+
+Menu actions:
+
+| Action | What it does |
+|---|---|
+| Configure run | Interactively set namespace, StorageClass selection/exclusion, workloads, PVC size, duration/file size, queue depths, repeats, `--max-parallel`, cleanup behavior, and output directory. Pre-filled from `config/default.conf`. |
+| Start a performance run | Launches `storage-perf-tester.sh run` in the background with the configured options and a fresh `--run-id`, so the menu stays responsive. Only one tracked run at a time; shows an estimated case count before confirming. |
+| Stop the tracked run | Sends a stop signal to the background run process. Does **not** delete already-created cluster resources - use Cleanup afterwards. |
+| Status dashboard | Live progress gauge for the tracked run: completed vs. estimated total test cases (read from `results.json`), a `kubectl get jobs -l spt-run-id=<id>` summary, and the last log lines. Auto-closes once the run finishes. |
+| Tail the tracked run's raw log output | Live `tail -f`-style view of the background run's full stdout/stderr. |
+| Kubernetes overview | Read-only snapshot of Jobs/Pods/PVCs in the target namespace. |
+| Performance dashboard | Browse any previous (or the current) run's results: overall ranking, per-workload ranking, raw per-case IOPS/throughput/latency/errors, or the path to the CSV export. |
+| Discover StorageClasses | Runs `storage-perf-tester.sh discover` and shows the output. |
+| Plan (dry-run manifest render) | Runs `storage-perf-tester.sh plan` and shows the rendered manifests, without touching the cluster. |
+| Cleanup cluster resources | Runs `storage-perf-tester.sh cleanup`, scoped to the tracked run, a specific `--run-id`, or the whole namespace. Always asks for confirmation first. |
+
+The menu keeps a small state file under `results/.menu-state/` to track
+the currently running background job (run-id, PID, log file path) so the
+status dashboard keeps working even if you close and reopen the menu
+while a run is still in progress. It is git-ignored along with the rest
+of `results/`.
 
 ## Configuration
 
@@ -305,6 +346,7 @@ IOPS/MB/s/latency numbers.
 | Path | Purpose |
 |---|---|
 | `bin/storage-perf-tester.sh` | Main entry point (all commands) |
+| `bin/spt-menu.sh` | Optional `dialog`/`whiptail` control menu wrapping the CLI |
 | `lib/common.sh` | Logging, config parsing, locking helpers |
 | `lib/k8s.sh` | kubectl wrappers: discovery, templating, wait/collect helpers |
 | `lib/collect.sh` | Extracts worker Job results from Pod logs |
