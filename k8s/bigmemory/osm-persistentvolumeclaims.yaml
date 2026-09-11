@@ -6,10 +6,10 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: longhorn-static
+  storageClassName: cephfs-ec-2-4-zone
   resources:
     requests:
-      storage: 250Gi
+      storage: 300Gi
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -19,10 +19,10 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: longhorn-static
+  storageClassName: cephfs-temp
   resources:
     requests:
-      storage: 700Gi
+      storage: 800Gi
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -32,10 +32,10 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: longhorn-static
+  storageClassName: cephfs-ec-2-4-zone
   resources:
     requests:
-      storage: 150Gi
+      storage: 200Gi
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -45,10 +45,10 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: longhorn-static
+  storageClassName: cephfs-ec-2-4-zone
   resources:
     requests:
-      storage: 150Gi
+      storage: 500Gi
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -58,10 +58,10 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: longhorn-static
+  storageClassName: cephfs-rp-4-zone
   resources:
     requests:
-      storage: 100Gi
+      storage: 200Gi
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -71,7 +71,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: longhorn-static
+  storageClassName: cephfs-rp-4-zone
   resources:
     requests:
       storage: 100Gi
@@ -84,7 +84,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: longhorn-static
+  storageClassName: cephfs-rp-4-zone
   resources:
     requests:
-      storage: 10Mi
+      storage: 100Mi
