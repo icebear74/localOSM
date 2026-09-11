@@ -1,6 +1,6 @@
 {
   "version": 8,
-  "name": "LocalOSM-Dark",
+  "name": "LocalOSM Night Bloom",
   "sources": {
     "openmaptiles": {
       "type": "vector",
@@ -13,7 +13,7 @@
       "id": "background",
       "type": "background",
       "paint": {
-        "background-color": "#0f1722"
+        "background-color": "#101722"
       }
     },
     {
@@ -28,8 +28,35 @@
         "forest"
       ],
       "paint": {
-        "fill-color": "#4d6b45",
-        "fill-opacity": 0.72
+        "fill-color": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          "forest",
+          "#1f6c49",
+          "wood",
+          "#2b8a5b",
+          "#2b8a5b"
+        ],
+        "fill-opacity": 0.8
+      }
+    },
+    {
+      "id": "landcover-wood-pattern",
+      "type": "fill",
+      "source": "openmaptiles",
+      "source-layer": "landcover",
+      "filter": [
+        "in",
+        "class",
+        "wood",
+        "forest"
+      ],
+      "paint": {
+        "fill-pattern": "woodland-texture",
+        "fill-opacity": 0.18
       }
     },
     {
@@ -46,8 +73,41 @@
         "scrub"
       ],
       "paint": {
-        "fill-color": "#2d4930",
-        "fill-opacity": 0.68
+        "fill-color": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          "grass",
+          "#214f38",
+          "farmland",
+          "#48562a",
+          "agriculture",
+          "#335f3a",
+          "scrub",
+          "#496846",
+          "#214f38"
+        ],
+        "fill-opacity": 0.74
+      }
+    },
+    {
+      "id": "landcover-grass-pattern",
+      "type": "fill",
+      "source": "openmaptiles",
+      "source-layer": "landcover",
+      "filter": [
+        "in",
+        "class",
+        "grass",
+        "farmland",
+        "agriculture",
+        "scrub"
+      ],
+      "paint": {
+        "fill-pattern": "grass-texture",
+        "fill-opacity": 0.14
       }
     },
     {
@@ -61,7 +121,7 @@
         "residential"
       ],
       "paint": {
-        "fill-color": "#2e2f35",
+        "fill-color": "#263042",
         "fill-opacity": 0.8
       }
     },
@@ -77,7 +137,7 @@
         "retail"
       ],
       "paint": {
-        "fill-color": "#6f542b",
+        "fill-color": "#3d3148",
         "fill-opacity": 0.78
       }
     },
@@ -92,7 +152,7 @@
         "industrial"
       ],
       "paint": {
-        "fill-color": "#4c3b24",
+        "fill-color": "#4a3a35",
         "fill-opacity": 0.72
       }
     },
@@ -110,8 +170,23 @@
         "park"
       ],
       "paint": {
-        "fill-color": "#6f553f",
-        "fill-opacity": 0.86
+        "fill-color": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          "park",
+          "#2f7c61",
+          "recreation_ground",
+          "#2d5d48",
+          "theme_park",
+          "#5b4684",
+          "amusement_park",
+          "#7a4f98",
+          "#245f52"
+        ],
+        "fill-opacity": 0.8
       }
     },
     {
@@ -125,8 +200,23 @@
         "construction"
       ],
       "paint": {
-        "fill-color": "#7f4e3c",
-        "fill-opacity": 0.78
+        "fill-color": "#5a4134",
+        "fill-opacity": 0.64
+      }
+    },
+    {
+      "id": "landuse-construction-pattern",
+      "type": "fill",
+      "source": "openmaptiles",
+      "source-layer": "landuse",
+      "filter": [
+        "==",
+        "class",
+        "construction"
+      ],
+      "paint": {
+        "fill-pattern": "construction-stripes",
+        "fill-opacity": 0.42
       }
     },
     {
@@ -135,7 +225,7 @@
       "source": "openmaptiles",
       "source-layer": "water",
       "paint": {
-        "fill-color": "#2c546f"
+        "fill-color": "#123c63"
       }
     },
     {
@@ -144,7 +234,7 @@
       "source": "openmaptiles",
       "source-layer": "waterway",
       "paint": {
-        "line-color": "#2c546f",
+        "line-color": "#2b87c8",
         "line-width": {
           "stops": [
             [
@@ -182,7 +272,7 @@
         ]
       ],
       "paint": {
-        "line-color": "#ff4d4d",
+        "line-color": "#ff6b6b",
         "line-width": {
           "stops": [
             [
@@ -199,10 +289,7 @@
             ]
           ]
         },
-        "line-dasharray": [
-          3,
-          2
-        ]
+        "line-opacity": 0.8
       }
     },
     {
@@ -216,7 +303,7 @@
         4
       ],
       "paint": {
-        "line-color": "#ff9e9e",
+        "line-color": "#ffadad",
         "line-width": {
           "stops": [
             [
@@ -229,10 +316,7 @@
             ]
           ]
         },
-        "line-dasharray": [
-          2,
-          2
-        ]
+        "line-opacity": 0.72
       }
     },
     {
@@ -246,12 +330,12 @@
         "tunnel"
       ],
       "paint": {
-        "line-color": "#7a7a7a",
+        "line-color": "#607089",
         "line-width": {
           "stops": [
             [
               10,
-              0.9199999999999999
+              0.92
             ],
             [
               14,
@@ -263,11 +347,7 @@
             ]
           ]
         },
-        "line-dasharray": [
-          2,
-          2
-        ],
-        "line-opacity": 0.8
+        "line-opacity": 0.55
       }
     },
     {
@@ -293,27 +373,645 @@
       ],
       "minzoom": 12,
       "paint": {
-        "line-color": "#8d7b60",
-        "line-width": {
-          "stops": [
+        "line-color": [
+          "match",
+          [
+            "coalesce",
             [
-              12,
-              0.9
+              "get",
+              "subclass"
             ],
             [
-              14,
-              1.62
+              "get",
+              "class"
             ],
+            ""
+          ],
+          "footway",
+          "#8ca0b8",
+          "path",
+          "#8ca0b8",
+          "pedestrian",
+          "#8ca0b8",
+          "sidewalk",
+          "#8ca0b8",
+          "crossing",
+          "#8ca0b8",
+          "steps",
+          "#b08f84",
+          "cycleway",
+          "#5fd6c3",
+          "bridleway",
+          "#5fd6c3",
+          "track",
+          "#c2a96f",
+          "service",
+          "#7f93ac",
+          "minor",
+          "#7f93ac",
+          "#8ca0b8"
+        ],
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          12,
+          [
+            "case",
             [
-              16,
-              3.24
-            ]
+              "any",
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "footway"
+              ],
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "path"
+              ],
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "pedestrian"
+              ],
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "steps"
+              ],
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "sidewalk"
+              ],
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "crossing"
+              ]
+            ],
+            0.35,
+            [
+              "any",
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "cycleway"
+              ],
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "bridleway"
+              ]
+            ],
+            0.55,
+            [
+              "any",
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "track"
+              ]
+            ],
+            0.65,
+            [
+              "any",
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "service"
+              ],
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "minor"
+              ]
+            ],
+            0.85,
+            0.35
+          ],
+          14,
+          [
+            "case",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "footway"
+              ],
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "path"
+              ],
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "pedestrian"
+              ],
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "steps"
+              ],
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "sidewalk"
+              ],
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "crossing"
+              ]
+            ],
+            0.75,
+            [
+              "any",
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "cycleway"
+              ],
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "bridleway"
+              ]
+            ],
+            1.0,
+            [
+              "any",
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "track"
+              ]
+            ],
+            1.15,
+            [
+              "any",
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "service"
+              ],
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "minor"
+              ]
+            ],
+            1.55,
+            0.75
+          ],
+          16,
+          [
+            "case",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "footway"
+              ],
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "path"
+              ],
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "pedestrian"
+              ],
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "steps"
+              ],
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "sidewalk"
+              ],
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "crossing"
+              ]
+            ],
+            1.45,
+            [
+              "any",
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "cycleway"
+              ],
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "bridleway"
+              ]
+            ],
+            1.95,
+            [
+              "any",
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "track"
+              ]
+            ],
+            2.2,
+            [
+              "any",
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "service"
+              ],
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "subclass"
+                  ],
+                  [
+                    "get",
+                    "class"
+                  ],
+                  ""
+                ],
+                "minor"
+              ]
+            ],
+            3.0,
+            1.45
           ]
-        },
-        "line-dasharray": [
-          1.6,
-          1.2
-        ]
+        ],
+        "line-opacity": 0.95
       }
     },
     {
@@ -339,7 +1037,7 @@
       ],
       "minzoom": 10,
       "paint": {
-        "line-color": "#d6b889",
+        "line-color": "#7c8fa6",
         "line-width": {
           "stops": [
             [
@@ -383,7 +1081,7 @@
       ],
       "minzoom": 9,
       "paint": {
-        "line-color": "#b6905d",
+        "line-color": "#91a9c3",
         "line-width": {
           "stops": [
             [
@@ -400,7 +1098,7 @@
             ],
             [
               16,
-              7.425000000000001
+              7.425
             ]
           ]
         }
@@ -427,7 +1125,7 @@
       ],
       "minzoom": 7,
       "paint": {
-        "line-color": "#d58e2f",
+        "line-color": "#ffc067",
         "line-width": {
           "stops": [
             [
@@ -440,7 +1138,7 @@
             ],
             [
               14,
-              7.0200000000000005
+              7.02
             ],
             [
               16,
@@ -470,7 +1168,7 @@
       ],
       "minzoom": 6,
       "paint": {
-        "line-color": "#f09c3b",
+        "line-color": "#ff8f5a",
         "line-width": {
           "stops": [
             [
@@ -509,27 +1207,82 @@
         "funicular"
       ],
       "paint": {
-        "line-color": "#8a97a3",
+        "line-color": "#a7b2c1",
         "line-width": {
           "stops": [
             [
               8,
-              0.96
+              1.8
             ],
             [
               12,
-              1.89
+              3.0
             ],
             [
               16,
-              3.5100000000000002
+              5.4
             ]
           ]
         },
-        "line-dasharray": [
-          2,
-          2
-        ]
+        "line-opacity": 0.96,
+        "line-gap-width": {
+          "stops": [
+            [
+              8,
+              0.45
+            ],
+            [
+              12,
+              0.95
+            ],
+            [
+              16,
+              2.1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "railway-sleepers",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "in",
+        "class",
+        "rail",
+        "subway",
+        "light_rail",
+        "monorail",
+        "tram",
+        "funicular"
+      ],
+      "minzoom": 10,
+      "layout": {
+        "symbol-placement": "line",
+        "symbol-spacing": 28,
+        "icon-image": "rail-sleepers",
+        "icon-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          10,
+          0.68,
+          16,
+          1.08
+        ],
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
+        "icon-rotation-alignment": "map",
+        "icon-keep-upright": true
+      },
+      "paint": {
+        "icon-opacity": 0.95
       }
     },
     {
@@ -543,28 +1296,335 @@
         "transit"
       ],
       "minzoom": 11,
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round",
+        "line-sort-key": [
+          "coalesce",
+          [
+            "get",
+            "layer"
+          ],
+          0
+        ]
+      },
       "paint": {
-        "line-color": "#ff8a65",
+        "line-color": [
+          "case",
+          [
+            "has",
+            "colour"
+          ],
+          [
+            "get",
+            "colour"
+          ],
+          [
+            "match",
+            [
+              "get",
+              "subclass"
+            ],
+            "water_slide",
+            "#38bdf8",
+            "monorail",
+            "#a78bfa",
+            "miniature",
+            "#fbbf24",
+            "narrow_gauge",
+            "#f59e0b",
+            "track",
+            "#ecf2f9",
+            "roller_coaster",
+            "#fb7185",
+            "#d9e2ef"
+          ]
+        ],
         "line-width": {
           "stops": [
             [
               11,
-              1.2
+              1.7
             ],
             [
               13,
-              2.2
+              2.9
             ],
             [
               16,
-              4.2
+              5.1
             ]
           ]
         },
-        "line-dasharray": [
-          2,
-          1.2
+        "line-opacity": 0.98
+      }
+    },
+    {
+      "id": "transportation-attraction-rails",
+      "type": "line",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "==",
+          "class",
+          "transit"
+        ],
+        [
+          "in",
+          "subclass",
+          "track",
+          "roller_coaster"
         ]
+      ],
+      "minzoom": 11,
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round",
+        "line-sort-key": [
+          "coalesce",
+          [
+            "get",
+            "layer"
+          ],
+          0
+        ]
+      },
+      "paint": {
+        "line-color": [
+          "case",
+          [
+            "has",
+            "colour"
+          ],
+          [
+            "get",
+            "colour"
+          ],
+          [
+            "match",
+            [
+              "get",
+              "subclass"
+            ],
+            "water_slide",
+            "#38bdf8",
+            "monorail",
+            "#a78bfa",
+            "miniature",
+            "#fbbf24",
+            "narrow_gauge",
+            "#f59e0b",
+            "track",
+            "#ecf2f9",
+            "roller_coaster",
+            "#fb7185",
+            "#d9e2ef"
+          ]
+        ],
+        "line-width": {
+          "stops": [
+            [
+              11,
+              1.7
+            ],
+            [
+              13,
+              2.9
+            ],
+            [
+              16,
+              5.1
+            ]
+          ]
+        },
+        "line-gap-width": {
+          "stops": [
+            [
+              11,
+              0.3
+            ],
+            [
+              13,
+              0.8
+            ],
+            [
+              16,
+              1.9
+            ]
+          ]
+        },
+        "line-opacity": 0.9
+      }
+    },
+    {
+      "id": "transportation-attraction-track-detail",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "==",
+          "class",
+          "transit"
+        ],
+        [
+          "in",
+          "subclass",
+          "track",
+          "roller_coaster"
+        ]
+      ],
+      "minzoom": 12,
+      "layout": {
+        "symbol-placement": "line",
+        "symbol-spacing": 30,
+        "icon-image": "coaster-sleepers",
+        "icon-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          12,
+          0.75,
+          16,
+          1.1
+        ],
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
+        "icon-rotation-alignment": "map",
+        "icon-keep-upright": true,
+        "symbol-sort-key": [
+          "coalesce",
+          [
+            "get",
+            "layer"
+          ],
+          0
+        ]
+      },
+      "paint": {
+        "icon-opacity": 0.95
+      }
+    },
+    {
+      "id": "transportation-attraction-icons",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "==",
+          "class",
+          "transit"
+        ],
+        [
+          "in",
+          "subclass",
+          "track",
+          "roller_coaster"
+        ]
+      ],
+      "minzoom": 12,
+      "layout": {
+        "symbol-placement": "line-center",
+        "icon-image": "roller-coaster",
+        "icon-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          12,
+          0.75,
+          16,
+          1.05
+        ],
+        "icon-allow-overlap": false,
+        "icon-ignore-placement": false,
+        "symbol-sort-key": [
+          "coalesce",
+          [
+            "get",
+            "layer"
+          ],
+          0
+        ]
+      }
+    },
+    {
+      "id": "transportation-attraction-labels",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "==",
+          "class",
+          "transit"
+        ],
+        [
+          "has",
+          "name"
+        ]
+      ],
+      "minzoom": 13,
+      "layout": {
+        "symbol-placement": "line",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
+        "text-font": [
+          "KlokanTech Noto Sans Bold"
+        ],
+        "text-size": {
+          "stops": [
+            [
+              13,
+              10
+            ],
+            [
+              16,
+              12
+            ]
+          ]
+        },
+        "text-max-angle": 30,
+        "text-padding": 3,
+        "symbol-sort-key": [
+          "coalesce",
+          [
+            "get",
+            "layer"
+          ],
+          0
+        ]
+      },
+      "paint": {
+        "text-color": "#ffe0d3",
+        "text-halo-color": "#1b1418",
+        "text-halo-width": 1.2
       }
     },
     {
@@ -579,7 +1639,7 @@
       ],
       "minzoom": 11,
       "paint": {
-        "line-color": "#d7a47a",
+        "line-color": "#c49a6c",
         "line-width": {
           "stops": [
             [
@@ -596,10 +1656,39 @@
             ]
           ]
         },
-        "line-dasharray": [
-          1.6,
-          1.0
-        ]
+        "line-opacity": 0.9
+      }
+    },
+    {
+      "id": "transportation-construction-icons",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "==",
+        "class",
+        "construction"
+      ],
+      "minzoom": 12,
+      "layout": {
+        "symbol-placement": "line",
+        "symbol-spacing": 180,
+        "icon-image": "construction-cone",
+        "icon-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          12,
+          0.65,
+          16,
+          0.95
+        ],
+        "icon-allow-overlap": false,
+        "icon-ignore-placement": false
       }
     },
     {
@@ -609,7 +1698,7 @@
       "source-layer": "building",
       "minzoom": 14,
       "paint": {
-        "fill-extrusion-color": "#7c8988",
+        "fill-extrusion-color": "#425067",
         "fill-extrusion-height": 12,
         "fill-extrusion-base": 0,
         "fill-extrusion-opacity": 0.9
@@ -622,7 +1711,7 @@
       "source-layer": "building",
       "minzoom": 14,
       "paint": {
-        "fill-color": "#2c3040",
+        "fill-color": "#334155",
         "fill-opacity": 0.9
       }
     },
@@ -640,8 +1729,8 @@
         "text-size": 10
       },
       "paint": {
-        "text-color": "#f0e5cf",
-        "text-halo-color": "#0f1722",
+        "text-color": "#c6d0df",
+        "text-halo-color": "#101722",
         "text-halo-width": 1.2
       }
     },
@@ -657,7 +1746,21 @@
         "housenumber"
       ],
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -672,8 +1775,8 @@
         "text-justify": "center"
       },
       "paint": {
-        "text-color": "#f0efe8",
-        "text-halo-color": "#10151d",
+        "text-color": "#e5c07b",
+        "text-halo-color": "#101722",
         "text-halo-width": 1.4
       }
     },
@@ -689,7 +1792,21 @@
         "attraction"
       ],
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -701,8 +1818,8 @@
         "text-anchor": "top"
       },
       "paint": {
-        "text-color": "#ffb38a",
-        "text-halo-color": "#10151d",
+        "text-color": "#f7a072",
+        "text-halo-color": "#101722",
         "text-halo-width": 1.2
       }
     },
@@ -719,7 +1836,21 @@
         "motorway_junction"
       ],
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -742,8 +1873,8 @@
         "text-anchor": "top"
       },
       "paint": {
-        "text-color": "#8ec0ff",
-        "text-halo-color": "#10151d",
+        "text-color": "#c6d0df",
+        "text-halo-color": "#101722",
         "text-halo-width": 1.4
       }
     },
@@ -753,7 +1884,21 @@
       "source": "openmaptiles",
       "source-layer": "water_name",
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -772,8 +1917,8 @@
         "symbol-placement": "point"
       },
       "paint": {
-        "text-color": "#8bc3e4",
-        "text-halo-color": "#10151d",
+        "text-color": "#8dd9ff",
+        "text-halo-color": "#101722",
         "text-halo-width": 1.2
       }
     },
@@ -788,7 +1933,21 @@
       ],
       "minzoom": 9,
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -807,8 +1966,8 @@
         "symbol-placement": "line"
       },
       "paint": {
-        "text-color": "#8bc3e4",
-        "text-halo-color": "#10151d",
+        "text-color": "#8dd9ff",
+        "text-halo-color": "#101722",
         "text-halo-width": 1.1
       }
     },
@@ -827,7 +1986,21 @@
       ],
       "minzoom": 15,
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -837,8 +2010,8 @@
         "text-padding": 5
       },
       "paint": {
-        "text-color": "#f6e7c7",
-        "text-halo-color": "#0f1722",
+        "text-color": "#c6d0df",
+        "text-halo-color": "#101722",
         "text-halo-width": 1.4
       }
     },
@@ -855,7 +2028,21 @@
       ],
       "minzoom": 13,
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -864,8 +2051,8 @@
         "text-max-angle": 30
       },
       "paint": {
-        "text-color": "#f6e7c7",
-        "text-halo-color": "#0f1722",
+        "text-color": "#e8edf5",
+        "text-halo-color": "#101722",
         "text-halo-width": 1.4
       }
     },
@@ -883,7 +2070,21 @@
       ],
       "minzoom": 10,
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -892,8 +2093,8 @@
         "text-max-angle": 30
       },
       "paint": {
-        "text-color": "#f6e7c7",
-        "text-halo-color": "#0f1722",
+        "text-color": "#e8edf5",
+        "text-halo-color": "#101722",
         "text-halo-width": 1.5
       }
     },
@@ -959,9 +2160,124 @@
         ]
       },
       "paint": {
-        "text-color": "#ffd8a8",
-        "text-halo-color": "#241b12",
+        "text-color": "#fff7ef",
+        "text-halo-color": "#df7b45",
         "text-halo-width": 1.4
+      }
+    },
+    {
+      "id": "road-oneway-icons",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "==",
+          "class",
+          "road_annotation"
+        ],
+        [
+          "has",
+          "oneway"
+        ]
+      ],
+      "minzoom": 14,
+      "layout": {
+        "symbol-placement": "line",
+        "symbol-spacing": 160,
+        "icon-image": "oneway-arrow",
+        "icon-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          14,
+          0.55,
+          16,
+          0.85
+        ],
+        "icon-rotate": [
+          "case",
+          [
+            "==",
+            [
+              "get",
+              "oneway"
+            ],
+            -1
+          ],
+          180,
+          0
+        ],
+        "icon-allow-overlap": false,
+        "icon-ignore-placement": false
+      }
+    },
+    {
+      "id": "road-maxspeed-signs",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "==",
+          "class",
+          "road_annotation"
+        ],
+        [
+          "has",
+          "maxspeed_display"
+        ]
+      ],
+      "minzoom": 14,
+      "layout": {
+        "symbol-placement": "line-center",
+        "icon-image": "speed-limit-base",
+        "icon-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          14,
+          0.85,
+          16,
+          1.0
+        ],
+        "text-field": [
+          "get",
+          "maxspeed_display"
+        ],
+        "text-font": [
+          "KlokanTech Noto Sans Bold"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          14,
+          8,
+          16,
+          10
+        ],
+        "text-anchor": "center",
+        "text-allow-overlap": false,
+        "icon-allow-overlap": false,
+        "icon-ignore-placement": false
+      },
+      "paint": {
+        "text-color": "#242424"
       }
     },
     {
@@ -993,9 +2309,9 @@
         "text-rotation-alignment": "viewport"
       },
       "paint": {
-        "text-color": "#f7f3ea",
-        "text-halo-color": "#1f4d77",
-        "text-halo-width": 2.5
+        "text-color": "#fff7f1",
+        "text-halo-color": "#e4753f",
+        "text-halo-width": 2.2
       }
     },
     {
@@ -1028,9 +2344,9 @@
         "text-rotation-alignment": "viewport"
       },
       "paint": {
-        "text-color": "#f7f3ea",
-        "text-halo-color": "#6b4c10",
-        "text-halo-width": 2.2
+        "text-color": "#fff8ec",
+        "text-halo-color": "#c8964f",
+        "text-halo-width": 2.0
       }
     },
     {
@@ -1044,7 +2360,21 @@
         "country"
       ],
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1066,8 +2396,8 @@
         }
       },
       "paint": {
-        "text-color": "#f0efe8",
-        "text-halo-color": "#10151d",
+        "text-color": "#f4f7fb",
+        "text-halo-color": "#101722",
         "text-halo-width": 1.8
       }
     },
@@ -1084,7 +2414,21 @@
       "minzoom": 5,
       "maxzoom": 12,
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1102,8 +2446,8 @@
         }
       },
       "paint": {
-        "text-color": "#d8d3c6",
-        "text-halo-color": "#10151d",
+        "text-color": "#f4f7fb",
+        "text-halo-color": "#101722",
         "text-halo-width": 1.5
       }
     },
@@ -1118,7 +2462,21 @@
         "city"
       ],
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1140,8 +2498,8 @@
         }
       },
       "paint": {
-        "text-color": "#f7f1e4",
-        "text-halo-color": "#10151d",
+        "text-color": "#f4f7fb",
+        "text-halo-color": "#101722",
         "text-halo-width": 1.8
       }
     },
@@ -1157,7 +2515,21 @@
       ],
       "minzoom": 8,
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1179,8 +2551,8 @@
         }
       },
       "paint": {
-        "text-color": "#ece4d3",
-        "text-halo-color": "#10151d",
+        "text-color": "#dae3f2",
+        "text-halo-color": "#101722",
         "text-halo-width": 1.5
       }
     },
@@ -1196,7 +2568,21 @@
       ],
       "minzoom": 10,
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
@@ -1214,8 +2600,8 @@
         }
       },
       "paint": {
-        "text-color": "#d8d3c6",
-        "text-halo-color": "#10151d",
+        "text-color": "#dae3f2",
+        "text-halo-color": "#101722",
         "text-halo-width": 1.4
       }
     },
@@ -1233,17 +2619,32 @@
       ],
       "minzoom": 12,
       "layout": {
-        "text-field": "{name}",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:de"
+          ],
+          [
+            "get",
+            "name:en"
+          ],
+          [
+            "get",
+            "name"
+          ]
+        ],
         "text-font": [
           "KlokanTech Noto Sans Regular"
         ],
         "text-size": 11
       },
       "paint": {
-        "text-color": "#d8d3c6",
-        "text-halo-color": "#10151d",
+        "text-color": "#dae3f2",
+        "text-halo-color": "#101722",
         "text-halo-width": 1.4
       }
     }
-  ]
+  ],
+  "sprite": "sprite"
 }

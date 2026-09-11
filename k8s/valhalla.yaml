@@ -191,7 +191,52 @@ spec:
       - name: valhalla
         image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
         imagePullPolicy: Always
-        command: ["/valhalla/scripts/run.sh", "build_tiles"]
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -euo pipefail
+          BOOTSTRAP_CONFIG=/tmp/valhalla-traffic-bootstrap.json
+          BOOTSTRAP_LOCK=/shared-data/active/.traffic-bootstrap.lock
+          BOOTSTRAP_LOCK_HELD=0
+          cleanup() {
+            if [ "${BOOTSTRAP_LOCK_HELD}" = "1" ]; then
+              rmdir "${BOOTSTRAP_LOCK}" 2>/dev/null || true
+            fi
+            if [ -n "${UPDATER_PID:-}" ]; then
+              kill "${UPDATER_PID}" 2>/dev/null || true
+              wait "${UPDATER_PID}" 2>/dev/null || true
+            fi
+          }
+          trap cleanup EXIT INT TERM
+          if [ ! -f /shared-data/active/traffic.tar ]; then
+            while true; do
+              if mkdir "${BOOTSTRAP_LOCK}" 2>/dev/null; then
+                BOOTSTRAP_LOCK_HELD=1
+                break
+              fi
+              if [ -f /shared-data/active/traffic.tar ]; then
+                break
+              fi
+              sleep 2
+            done
+            if [ ! -f /shared-data/active/traffic.tar ] && [ "${BOOTSTRAP_LOCK_HELD}" = "1" ]; then
+              sed \
+                -e 's|/data/tiles|/shared-data/active/tiles|g' \
+                -e 's|/data/valhalla_tiles.tar|/shared-data/active/valhalla_tiles.tar|g' \
+                -e 's|/data/traffic.tar|/shared-data/active/traffic.tar|g' \
+                -e 's|/data/timezone.sqlite|/shared-data/active/timezone.sqlite|g' \
+                -e 's|/data/admin.sqlite|/shared-data/active/admin.sqlite|g' \
+                /custom_files/valhalla.json > "${BOOTSTRAP_CONFIG}"
+              valhalla_build_extract -c "${BOOTSTRAP_CONFIG}" -e /shared-data/active/valhalla_tiles.tar -t -O
+            fi
+            if [ "${BOOTSTRAP_LOCK_HELD}" = "1" ]; then
+              rmdir "${BOOTSTRAP_LOCK}" 2>/dev/null || true
+              BOOTSTRAP_LOCK_HELD=0
+            fi
+          fi
+          python3 /traffic-updater/roadworks_updater.py &
+          UPDATER_PID="$!"
+          exec /valhalla/scripts/run.sh build_tiles
         env:
         - name: use_tiles_ignore_pbf
           value: "True"
@@ -201,6 +246,18 @@ spec:
           value: "False"
         - name: server_threads
           value: "6"
+        - name: VALHALLA_URL_LOCAL
+          value: "http://127.0.0.1:8002"
+        - name: ROADWORKS_URL
+          value: "https://verkehr.autobahn.de/o/autobahn/A1/services/roadworks"
+        - name: ROADWORKS_REFRESH_SECONDS
+          value: "3600"
+        - name: TRAFFIC_TAR_PATH
+          value: "/shared-data/active/traffic.tar"
+        - name: ROADWORKS_STATE_FILE
+          value: "/shared-data/active/roadworks-state.json"
+        - name: ROADWORKS_LOCK_DIR
+          value: "/shared-data/active/.roadworks-update.lock"
         - name: SSL_CERT_FILE
           value: /ca-certs/ca.crt
         - name: CURL_CA_BUNDLE
@@ -223,9 +280,11 @@ spec:
           mountPath: /custom_files
         - name: valhalla-data
           mountPath: /shared-data
-          readOnly: true
         - name: ca-certs
           mountPath: /ca-certs
+          readOnly: true
+        - name: valhalla-traffic-updater
+          mountPath: /traffic-updater
           readOnly: true
       volumes:
       - name: valhalla-data
@@ -236,6 +295,9 @@ spec:
       - name: valhalla-config
         configMap:
           name: osm-valhalla-config
+      - name: valhalla-traffic-updater
+        configMap:
+          name: osm-valhalla-traffic-updater
       - name: ca-certs
         emptyDir: {}
 ---

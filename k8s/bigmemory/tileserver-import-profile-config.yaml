@@ -13,6 +13,8 @@ data:
     import com.onthegomap.planetiler.Planetiler;
     import com.onthegomap.planetiler.reader.SourceFeature;
     import java.nio.file.Path;
+    import java.util.regex.Matcher;
+    import java.util.regex.Pattern;
     import org.openmaptiles.OpenMapTilesProfile;
     import org.openmaptiles.generated.OpenMapTilesSchema;
 
@@ -23,23 +25,88 @@ data:
      * Freizeitpark-Attraktionen, Schienen-/Parkbahnen und Baustellen.
      */
     public class CustomProfile extends OpenMapTilesProfile {
+      private static final Pattern MAXSPEED_PATTERN = Pattern.compile("(\\d{1,3})");
+
       public CustomProfile(Planetiler planetiler) {
         super(planetiler);
       }
 
+      private static String rollerCoasterValue(SourceFeature feature) {
+        return feature.getString("roller_coaster", "").trim();
+      }
+
+      private static boolean isAttractionTransit(SourceFeature feature) {
+        String rollerCoaster = rollerCoasterValue(feature);
+        return (!rollerCoaster.isEmpty() && !"no".equalsIgnoreCase(rollerCoaster))
+          || feature.hasTag("attraction", "roller_coaster", "water_slide")
+          || feature.hasTag("railway", "coaster", "narrow_gauge", "monorail", "miniature");
+      }
+
+      private static String attractionTransitSubclass(SourceFeature feature) {
+        String rollerCoaster = rollerCoasterValue(feature);
+        return !rollerCoaster.isEmpty() && !"no".equalsIgnoreCase(rollerCoaster) ? rollerCoaster :
+          feature.getString("attraction", feature.getString("railway", "roller_coaster"));
+      }
+
+      private static String extractMaxspeedDisplay(SourceFeature feature) {
+        String raw = feature.getString("maxspeed", "").trim();
+        if (raw.isEmpty()) {
+          return null;
+        }
+        Matcher matcher = MAXSPEED_PATTERN.matcher(raw);
+        return matcher.find() ? matcher.group(1) : null;
+      }
+
+      private static Long normalizedOneway(SourceFeature feature) {
+        String raw = feature.getString("oneway", "").trim();
+        if (raw.isEmpty()) {
+          return null;
+        }
+        if ("-1".equals(raw) || "reverse".equalsIgnoreCase(raw)) {
+          return -1L;
+        }
+        if ("1".equals(raw) || "yes".equalsIgnoreCase(raw) || "true".equalsIgnoreCase(raw)) {
+          return 1L;
+        }
+        return null;
+      }
+
+      private static boolean isRoadAnnotation(SourceFeature feature) {
+        return feature.canBeLine()
+          && feature.hasTag("highway")
+          && !feature.hasTag("highway", "construction")
+          && (extractMaxspeedDisplay(feature) != null || normalizedOneway(feature) != null);
+      }
+
       @Override
       public void processFeature(SourceFeature feature, FeatureCollector features) {
+        boolean attractionTransit = feature.canBeLine() && isAttractionTransit(feature);
         super.processFeature(feature, features);
 
-        if (feature.canBeLine()) {
-          boolean isCoasterLine = feature.hasTag("attraction", "roller_coaster", "water_slide")
-            || feature.hasTag("railway", "coaster", "narrow_gauge", "monorail", "miniature");
-          if (isCoasterLine) {
-            features.line("transportation")
-              .setBufferPixels(4)
-              .setAttr("class", "transit")
-              .setAttr("subclass", feature.getString("attraction", feature.getString("railway", "transit")))
-              .setMinZoom(11);
+        if (attractionTransit) {
+          var line = features.line("transportation")
+            .setBufferPixels(4)
+            .setAttr("class", "transit")
+            .setAttr("subclass", attractionTransitSubclass(feature))
+            .setMinZoom(11);
+          String colour = feature.getString("colour", feature.getString("color", null));
+          if (colour != null && !colour.isBlank()) {
+            line.setAttr("colour", colour);
+          }
+          String name = feature.getString("name", null);
+          if (name != null && !name.isBlank()) {
+            line.setAttr("name", name);
+          }
+          String nameDe = feature.getString("name:de", null);
+          if (nameDe != null && !nameDe.isBlank()) {
+            line.setAttr("name:de", nameDe);
+          }
+          String nameEn = feature.getString("name:en", null);
+          if (nameEn != null && !nameEn.isBlank()) {
+            line.setAttr("name:en", nameEn);
+          }
+          if (feature.hasTag("layer")) {
+            line.setAttr("layer", feature.getLong("layer"));
           }
         }
 
@@ -54,11 +121,22 @@ data:
           }
 
           if (feature.isPoint()) {
-            features.point("poi")
+            var poi = features.point("poi")
               .setAttr("class", "attraction")
               .setAttr("subclass", feature.getString("attraction", "generic"))
-              .setAttr("name", feature.getString("name"))
               .setMinZoom(12);
+            String name = feature.getString("name", null);
+            if (name != null && !name.isBlank()) {
+              poi.setAttr("name", name);
+            }
+            String nameDe = feature.getString("name:de", null);
+            if (nameDe != null && !nameDe.isBlank()) {
+              poi.setAttr("name:de", nameDe);
+            }
+            String nameEn = feature.getString("name:en", null);
+            if (nameEn != null && !nameEn.isBlank()) {
+              poi.setAttr("name:en", nameEn);
+            }
           }
         }
 
@@ -80,6 +158,22 @@ data:
           features.polygon("landuse")
             .setAttr("class", "construction")
             .setMinZoom(10);
+        }
+
+        if (isRoadAnnotation(feature)) {
+          var line = features.line("transportation")
+            .setBufferPixels(4)
+            .setAttr("class", "road_annotation")
+            .setAttr("subclass", feature.getString("highway", "road"))
+            .setMinZoom(12);
+          String maxspeedDisplay = extractMaxspeedDisplay(feature);
+          if (maxspeedDisplay != null) {
+            line.setAttr("maxspeed_display", maxspeedDisplay);
+          }
+          Long oneway = normalizedOneway(feature);
+          if (oneway != null) {
+            line.setAttr("oneway", oneway);
+          }
         }
       }
 

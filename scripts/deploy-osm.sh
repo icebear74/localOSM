@@ -221,6 +221,7 @@ for manifest in \
   nominatim.yaml \
   valhalla.yaml \
   valhalla-config.yaml \
+  valhalla-traffic-config.yaml \
   valhalla-import-config.yaml \
   valhalla-import-job.yaml \
   photon-config.yaml \
@@ -248,29 +249,7 @@ done
 ${SUDO} cp "${REPO_ROOT}/scripts/import-orchestrator.sh" "${BASE_DIR}/scripts/import-orchestrator.sh"
 ${SUDO} chmod +x "${BASE_DIR}/scripts/import-orchestrator.sh"
 
-if [ -d "${REPO_ROOT}/fonts" ]; then
-  ${SUDO} mkdir -p "${BASE_DIR}/tileserver/bootstrap/fonts"
-  ${SUDO} find "${BASE_DIR}/tileserver/bootstrap/fonts" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-  ${SUDO} cp -a "${REPO_ROOT}/fonts/." "${BASE_DIR}/tileserver/bootstrap/fonts/"
-fi
-
-if [ -f "${REPO_ROOT}/k8s/style.json" ]; then
-  ${SUDO} cp "${REPO_ROOT}/k8s/style.json" "${BASE_DIR}/tileserver/bootstrap/style.json"
-fi
-if [ -f "${REPO_ROOT}/k8s/dark_style.json" ]; then
-  ${SUDO} cp "${REPO_ROOT}/k8s/dark_style.json" "${BASE_DIR}/tileserver/bootstrap/dark_style.json"
-else
-  ${SUDO} rm -f "${BASE_DIR}/tileserver/bootstrap/dark_style.json"
-fi
-if [ -f "${BASE_DIR}/tileserver/bootstrap/dark_style.json" ]; then
-  cat <<'EOF' | ${SUDO} tee "${BASE_DIR}/tileserver/bootstrap/config.json" >/dev/null
-{"options":{"paths":{"root":"/","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true,"cors":true},"styles":{"osm":{"style":"/data/style.json"},"osm-dark":{"style":"/data/dark_style.json"}},"data":{"v3":{"mbtiles":"/data/planet.mbtiles"}}}
-EOF
-else
-  cat <<'EOF' | ${SUDO} tee "${BASE_DIR}/tileserver/bootstrap/config.json" >/dev/null
-{"options":{"paths":{"root":"/","fonts":"/data/fonts","sprites":"","icons":""},"serveAllFonts":true,"cors":true},"styles":{"osm":{"style":"/data/style.json"}},"data":{"v3":{"mbtiles":"/data/planet.mbtiles"}}}
-EOF
-fi
+bash "${REPO_ROOT}/scripts/prepare-tileserver-bootstrap.sh" --base-dir "${BASE_DIR}" --namespace "${NAMESPACE}" --apply-configmap
 
 CONFIG_PATH="${BASE_DIR}/status/config.json"
 if [ ! -f "${CONFIG_PATH}" ]; then
@@ -325,17 +304,9 @@ if [ ! -f "${CA_BUNDLE_SRC}" ]; then
 fi
 kubectl apply -f "${CA_BUNDLE_SRC}"
 
-if [ -f "${REPO_ROOT}/k8s/style.json" ]; then
-  style_files=("--from-file=style.json=${REPO_ROOT}/k8s/style.json")
-  if [ -f "${REPO_ROOT}/k8s/dark_style.json" ]; then
-    style_files+=("--from-file=dark_style.json=${REPO_ROOT}/k8s/dark_style.json")
-  fi
-  kubectl -n "${NAMESPACE}" create configmap tileserver-style "${style_files[@]}" --dry-run=client -o yaml | kubectl apply -f -
-fi
-
 kubectl -n "${NAMESPACE}" create configmap osm-status-config --from-file=config.json="${CONFIG_PATH}" --dry-run=client -o yaml | kubectl apply -f -
 
-for manifest in osm-persistentvolumeclaims.yaml planetiler-rbac.yaml tileserver-gl-deployment.yaml nominatim.yaml nominatim-promotion-job.yaml nominatim-postgres-tuning-config.yaml valhalla-config.yaml valhalla.yaml valhalla-import-config.yaml photon-config.yaml photon.yaml pelias-config.yaml pelias.yaml pelias-import-job.yaml pelias-cleanup-job.yaml status.yaml status-deployment.yaml nominatim-import-config.yaml tileserver-import-config.yaml tileserver-import-profile-config.yaml import-orchestrator.yaml web.yaml style-editor.yaml; do
+for manifest in osm-persistentvolumeclaims.yaml planetiler-rbac.yaml tileserver-gl-deployment.yaml nominatim.yaml nominatim-promotion-job.yaml nominatim-postgres-tuning-config.yaml valhalla-config.yaml valhalla-traffic-config.yaml valhalla.yaml valhalla-import-config.yaml photon-config.yaml photon.yaml pelias-config.yaml pelias.yaml pelias-import-job.yaml pelias-cleanup-job.yaml status.yaml status-deployment.yaml nominatim-import-config.yaml tileserver-import-config.yaml tileserver-import-profile-config.yaml import-orchestrator.yaml web.yaml style-editor.yaml; do
   echo ">>> Applying ${manifest}"
   kubectl apply -f "${BASE_DIR}/manifests/${manifest}"
 done

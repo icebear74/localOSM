@@ -73,6 +73,21 @@ Important scratch paths under the shared Kubernetes temp PVC mounted inside the 
 bash scripts/deploy-osm.sh
 ```
 
+If you only changed TileServer styles/fonts/bootstrap assets, refresh just the
+TileServer bootstrap payload without re-running the full deploy:
+
+```bash
+bash scripts/prepare-tileserver-bootstrap.sh --apply-configmap
+```
+
+Then rerun only the TileServer asset bootstrap job to copy those prepared files
+into the live TileServer PVC:
+
+```bash
+kubectl -n osm delete job tileserver-init-assets --ignore-not-found
+kubectl apply -f /mnt/OSM/manifests/tileserver-init-assets-job.yaml
+```
+
 On a fresh cluster/PVC setup, run the one-shot asset bootstrap once before the
 first TileServer import:
 

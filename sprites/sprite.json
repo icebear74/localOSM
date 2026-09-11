@@ -1,0 +1,74 @@
+{
+  "construction-stripes": {
+    "width": 16,
+    "height": 16,
+    "x": 0,
+    "y": 0,
+    "pixelRatio": 1,
+    "visible": true
+  },
+  "woodland-texture": {
+    "width": 16,
+    "height": 16,
+    "x": 18,
+    "y": 0,
+    "pixelRatio": 1,
+    "visible": true
+  },
+  "grass-texture": {
+    "width": 16,
+    "height": 16,
+    "x": 36,
+    "y": 0,
+    "pixelRatio": 1,
+    "visible": true
+  },
+  "construction-cone": {
+    "width": 24,
+    "height": 24,
+    "x": 54,
+    "y": 0,
+    "pixelRatio": 1,
+    "visible": true
+  },
+  "roller-coaster": {
+    "width": 24,
+    "height": 24,
+    "x": 80,
+    "y": 0,
+    "pixelRatio": 1,
+    "visible": true
+  },
+  "oneway-arrow": {
+    "width": 24,
+    "height": 24,
+    "x": 106,
+    "y": 0,
+    "pixelRatio": 1,
+    "visible": true
+  },
+  "speed-limit-base": {
+    "width": 24,
+    "height": 24,
+    "x": 132,
+    "y": 0,
+    "pixelRatio": 1,
+    "visible": true
+  },
+  "rail-sleepers": {
+    "width": 24,
+    "height": 12,
+    "x": 158,
+    "y": 0,
+    "pixelRatio": 1,
+    "visible": true
+  },
+  "coaster-sleepers": {
+    "width": 24,
+    "height": 12,
+    "x": 184,
+    "y": 0,
+    "pixelRatio": 1,
+    "visible": true
+  }
+}
