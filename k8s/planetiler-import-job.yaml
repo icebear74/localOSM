@@ -431,7 +431,7 @@ spec:
               --tmpdir="${TEMP_DIR}" \
               --output="${OUTPUT_NEW}" \
               --force \
-              --download=false \
+              --download=true \
               --fetch-wikidata \
               --nodemap-type=sparsearray \
               --nodemap-storage=ram \
@@ -446,7 +446,7 @@ spec:
               --tmpdir="${TEMP_DIR}" \
               --output="${OUTPUT_NEW}" \
               --force \
-              --download=false \
+              --download=true \
               --fetch-wikidata \
               --nodemap-type=sparsearray \
               --nodemap-storage=ram \

@@ -431,7 +431,7 @@ spec:
               --tmpdir="${TEMP_DIR}" \
               --output="${OUTPUT_NEW}" \
               --force \
-              --download=false \
+              --download=true \
               --nodemap-type=sparsearray \
               --nodemap-storage=ram \
               --mmap-temp-nodes=false \
@@ -447,13 +447,12 @@ spec:
               --tmpdir="${TEMP_DIR}" \
               --output="${OUTPUT_NEW}" \
               --force \
-              --download=false \
+              --download=true \
               --nodemap-type=sparsearray \
               --nodemap-storage=ram \
               --mmap-temp-nodes=false \
               --mmap-temp-features=false \
               --threads=36 \
-              --arguments=journal_mode=WAL,synchronous=OFF \
               --arguments=journal_mode=WAL,synchronous=OFF,mmap_size=268435456 \
               --minzoom=0 \
               --maxzoom=16 \
