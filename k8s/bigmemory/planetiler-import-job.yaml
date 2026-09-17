@@ -367,6 +367,25 @@ spec:
             done
           }
 
+          detect_java_truststore_type() {
+            if [ -s /ca-certs/java-truststore-type ]; then
+              JAVA_TRUSTSTORE_TYPE="$(tr -d '[:space:]' < /ca-certs/java-truststore-type)"
+            else
+              JAVA_TRUSTSTORE_TYPE=""
+            fi
+            if [ -z "${JAVA_TRUSTSTORE_TYPE}" ]; then
+              if keytool -list -keystore /ca-certs/cacerts -storepass changeit -storetype PKCS12 >/dev/null 2>&1; then
+                JAVA_TRUSTSTORE_TYPE="PKCS12"
+              elif keytool -list -keystore /ca-certs/cacerts -storepass changeit -storetype JKS >/dev/null 2>&1; then
+                JAVA_TRUSTSTORE_TYPE="JKS"
+              else
+                echo "[ERROR] Unable to determine Java truststore type for /ca-certs/cacerts" >&2
+                exit 1
+              fi
+            fi
+            export JAVA_TOOL_OPTIONS="-Djavax.net.ssl.trustStore=/ca-certs/cacerts -Djavax.net.ssl.trustStoreType=${JAVA_TRUSTSTORE_TYPE} -Djavax.net.ssl.trustStorePassword=changeit"
+          }
+
           PROFILE_SOURCE_ROOT="${TEMP_DIR}/profile"
           PROFILE_SOURCE="${PROFILE_SOURCE_ROOT}/com/onthegomap/planetiler/custom/CustomProfile.java"
           USE_JAVA="true"
@@ -374,17 +393,7 @@ spec:
           if [ -f /config/use_java ]; then
             USE_JAVA="$(tr '[:upper:]' '[:lower:]' < /config/use_java | tr -d '[:space:]')"
           fi
-          if [ ! -s /ca-certs/java-truststore-type ]; then
-            echo "[ERROR] Missing Java truststore type metadata: /ca-certs/java-truststore-type" >&2
-            exit 1
-          fi
-          JAVA_TRUSTSTORE_TYPE="$(tr -d '[:space:]' < /ca-certs/java-truststore-type)"
-          if [ -z "${JAVA_TRUSTSTORE_TYPE}" ]; then
-            echo "[ERROR] Java truststore type metadata is empty" >&2
-            exit 1
-          fi
-          export JAVA_TOOL_OPTIONS="-Djavax.net.ssl.trustStore=/ca-certs/cacerts -Djavax.net.ssl.trustStoreType=${JAVA_TRUSTSTORE_TYPE} -Djavax.net.ssl.trustStorePassword=changeit"
-
+          detect_java_truststore_type
           check_required_sources
 
           if [ "${USE_JAVA}" = "true" ] && [ -f /config/CustomProfile.java ]; then
