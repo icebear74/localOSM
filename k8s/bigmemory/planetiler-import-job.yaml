@@ -431,7 +431,7 @@ spec:
               --tmpdir="${TEMP_DIR}" \
               --output="${OUTPUT_NEW}" \
               --force \
-              --download=true \
+              --download=false \
               --nodemap-type=sparsearray \
               --nodemap-storage=ram \
               --mmap-temp-nodes=false \
@@ -447,7 +447,7 @@ spec:
               --tmpdir="${TEMP_DIR}" \
               --output="${OUTPUT_NEW}" \
               --force \
-              --download=true \
+              --download=false \
               --nodemap-type=sparsearray \
               --nodemap-storage=ram \
               --mmap-temp-nodes=false \
