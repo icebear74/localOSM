@@ -99,8 +99,12 @@ spec:
             JAVA_CACERTS=$(find / -path /proc -prune -o -name cacerts -type f -print 2>/dev/null | head -1)
           fi
           if [ -z "${JAVA_CACERTS}" ]; then
-            echo "[java-ca-injector] ERROR: No system cacerts found" >&2
-            exit 1
+            if [ "${CA_ENABLED}" = "true" ] && [ -f /ca-certs/ca-enabled ] && [ -s /ca-certs/custom-ca.crt ]; then
+              echo "[java-ca-injector] ERROR: No system cacerts found for custom CA import" >&2
+              exit 1
+            fi
+            echo "[java-ca-injector] No system cacerts found; using container default truststore"
+            exit 0
           fi
           # Copy system truststore so JAVA_TOOL_OPTIONS always points to a valid file.
           cp "${JAVA_CACERTS}" /ca-certs/cacerts
