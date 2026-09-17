@@ -322,6 +322,7 @@ spec:
 
           rm -f "${OUTPUT_NEW}"
           mkdir -p "${TEMP_DIR}"
+          cd /osm-temp/tileserver
 
           PROFILE_SOURCE_ROOT="${TEMP_DIR}/profile"
           PROFILE_SOURCE="${PROFILE_SOURCE_ROOT}/com/onthegomap/planetiler/custom/CustomProfile.java"

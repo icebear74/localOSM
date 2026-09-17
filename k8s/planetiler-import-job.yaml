@@ -322,6 +322,7 @@ spec:
 
           rm -f "${OUTPUT_NEW}"
           mkdir -p "${TEMP_DIR}"
+          cd /osm-temp/tileserver
 
           PROFILE_SOURCE_ROOT="${TEMP_DIR}/profile"
           PROFILE_SOURCE="${PROFILE_SOURCE_ROOT}/com/onthegomap/planetiler/custom/CustomProfile.java"
@@ -352,7 +353,7 @@ spec:
               --tmpdir="${TEMP_DIR}" \
               --output="${OUTPUT_NEW}" \
               --force \
-              --download=false \
+              --download=true \
               --fetch-wikidata \
               --nodemap-type=sparsearray \
               --nodemap-storage=ram \
@@ -367,7 +368,7 @@ spec:
               --tmpdir="${TEMP_DIR}" \
               --output="${OUTPUT_NEW}" \
               --force \
-              --download=false \
+              --download=true \
               --fetch-wikidata \
               --nodemap-type=sparsearray \
               --nodemap-storage=ram \
