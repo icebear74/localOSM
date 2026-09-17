@@ -135,7 +135,7 @@ spec:
           set -eu
           echo '=== Planetiler Tile Generation ==='
           test -f /planet/europa.osm.pbf
-          mkdir -p /tileserver-gl /osm-temp/tileserver/work /osm-temp/tileserver/downloads /tools /osm-status
+          mkdir -p /tileserver-gl /osm-temp/tileserver/work /tools /osm-status
         resources:
           requests:
             cpu: "50m"
@@ -214,15 +214,15 @@ spec:
         args:
         - |
           set -eu
-          mkdir -p /osm-temp/tileserver/downloads /osm-temp/tileserver/work
-          if [ ! -s /osm-temp/tileserver/downloads/lake_centerline.shp.zip ]; then
-            wget -q -O /osm-temp/tileserver/downloads/lake_centerline.shp.zip https://github.com/acalcutt/osm-lakelines/releases/latest/download/lake_centerline.shp.zip
+          mkdir -p /osm-temp/tileserver/data/sources /osm-temp/tileserver/work
+          if [ ! -s /osm-temp/tileserver/data/sources/lake_centerline.shp.zip ]; then
+            wget -q -O /osm-temp/tileserver/data/sources/lake_centerline.shp.zip https://github.com/acalcutt/osm-lakelines/releases/latest/download/lake_centerline.shp.zip
           fi
-          if [ ! -s /osm-temp/tileserver/downloads/water-polygons-split-3857.zip ]; then
-            wget -q -O /osm-temp/tileserver/downloads/water-polygons-split-3857.zip https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip
+          if [ ! -s /osm-temp/tileserver/data/sources/water-polygons-split-3857.zip ]; then
+            wget -q -O /osm-temp/tileserver/data/sources/water-polygons-split-3857.zip https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip
           fi
-          if [ ! -s /osm-temp/tileserver/downloads/natural_earth_vector.sqlite.zip ]; then
-            wget -q -O /osm-temp/tileserver/downloads/natural_earth_vector.sqlite.zip https://naciscdn.org/naturalearth/packages/natural_earth_vector.sqlite.zip
+          if [ ! -s /osm-temp/tileserver/data/sources/natural_earth_vector.sqlite.zip ]; then
+            wget -q -O /osm-temp/tileserver/data/sources/natural_earth_vector.sqlite.zip https://naciscdn.org/naturalearth/packages/natural_earth_vector.sqlite.zip
           fi
         resources:
           requests:
@@ -273,7 +273,7 @@ spec:
           PLANETILER_JAR=/tools/planetiler.jar
           SOURCE_OSM=/planet/europa.osm.pbf
           TEMP_DIR=/osm-temp/tileserver/work
-          TEMP_SOURCES=/osm-temp/tileserver/downloads
+          SOURCE_DIR=/osm-temp/tileserver/data/sources
           OUTPUT_NEW=/tileserver-gl/planet-NEW.mbtiles
           OUTPUT_ACTIVE=/tileserver-gl/planet.mbtiles
           SCALED_DOWN=0
@@ -321,7 +321,8 @@ spec:
           trap cleanup EXIT
 
           rm -f "${OUTPUT_NEW}"
-          mkdir -p "${TEMP_DIR}" "${TEMP_SOURCES}" data/sources
+          mkdir -p "${TEMP_DIR}"
+          cd /osm-temp/tileserver
 
           PROFILE_SOURCE_ROOT="${TEMP_DIR}/profile"
           PROFILE_SOURCE="${PROFILE_SOURCE_ROOT}/com/onthegomap/planetiler/custom/CustomProfile.java"
@@ -330,6 +331,19 @@ spec:
           if [ -f /config/use_java ]; then
             USE_JAVA="$(tr '[:upper:]' '[:lower:]' < /config/use_java | tr -d '[:space:]')"
           fi
+
+          for source_file in \
+            "${SOURCE_DIR}/lake_centerline.shp.zip" \
+            "${SOURCE_DIR}/water-polygons-split-3857.zip" \
+            "${SOURCE_DIR}/natural_earth_vector.sqlite.zip"; do
+            if [ -s "${source_file}" ]; then
+              size=$(du -h "${source_file}" | cut -f1)
+              echo "[OK] Source ready: ${source_file} (${size})"
+            else
+              echo "[ERROR] Missing or empty source: ${source_file}" >&2
+              exit 1
+            fi
+          done
 
           if [ "${USE_JAVA}" = "true" ] && [ -f /config/CustomProfile.java ]; then
             cp /config/CustomProfile.java "${PROFILE_SOURCE}"
@@ -345,9 +359,6 @@ spec:
               --nodemap-storage=ram \
               --threads=18 \
               --arguments=journal_mode=WAL,synchronous=OFF,mmap_size=268435456 \
-              --lake_centerlines_path="${TEMP_SOURCES}/lake_centerline.shp.zip" \
-              --water_polygons_path="${TEMP_SOURCES}/water-polygons-split-3857.zip" \
-              --natural_earth_path="${TEMP_SOURCES}/natural_earth_vector.sqlite.zip" \
               --minzoom=0 \
               --maxzoom=16 \
               --extra-osm-tags=shop,building,construction,name,name:de,name:en,wheelchair,amenity,highway,landuse,tourism,attraction,railway,roller_coaster,colour,color,layer,maxspeed,oneway
@@ -363,9 +374,6 @@ spec:
               --nodemap-storage=ram \
               --threads=18 \
               --arguments=journal_mode=WAL,synchronous=OFF,mmap_size=268435456 \
-              --lake_centerlines_path="${TEMP_SOURCES}/lake_centerline.shp.zip" \
-              --water_polygons_path="${TEMP_SOURCES}/water-polygons-split-3857.zip" \
-              --natural_earth_path="${TEMP_SOURCES}/natural_earth_vector.sqlite.zip" \
               --minzoom=0 \
               --maxzoom=16 \
               --extra-osm-tags=shop,building,construction,name,name:de,name:en,wheelchair,amenity,highway,landuse,tourism,attraction,railway,roller_coaster,colour,color,layer,maxspeed,oneway
