@@ -431,7 +431,7 @@ spec:
               --mmap-temp-nodes=false \
               --mmap-temp-features=false \
               --threads=36 \
-              --arguments=journal_mode=WAL,synchronous=OFF \
+              --arguments=journal_mode=WAL,synchronous=OFF,mmap_size=0 \
               --minzoom=0 \
               --maxzoom=16 \
               --extra-osm-tags=shop,building,construction,name,name:de,name:en,wheelchair,amenity,highway,landuse,tourism,attraction,railway,roller_coaster,colour,color,layer,maxspeed,oneway
@@ -447,7 +447,7 @@ spec:
               --mmap-temp-nodes=false \
               --mmap-temp-features=false \
               --threads=36 \
-              --arguments=journal_mode=WAL,synchronous=OFF,mmap_size=268435456 \
+              --arguments=journal_mode=WAL,synchronous=OFF,mmap_size=0 \
               --minzoom=0 \
               --maxzoom=16 \
               --extra-osm-tags=shop,building,construction,name,name:de,name:en,wheelchair,amenity,highway,landuse,tourism,attraction,railway,roller_coaster,colour,color,layer,maxspeed,oneway
