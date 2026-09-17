@@ -142,7 +142,8 @@ spec:
               exit 1
             fi
           elif [ "${CA_ENABLED}" = "true" ]; then
-            echo "[java-ca-injector] CA enabled but /ca-certs/custom-ca.crt is missing or empty; skipping custom import"
+            echo "[java-ca-injector] ERROR: CA enabled but /ca-certs/custom-ca.crt is missing or empty" >&2
+            exit 1
           else
             echo "[java-ca-injector] CA disabled; system cacerts at /ca-certs/cacerts"
           fi
