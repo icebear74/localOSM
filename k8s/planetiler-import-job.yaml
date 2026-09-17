@@ -368,6 +368,10 @@ spec:
           }
 
           detect_java_truststore_type() {
+            if [ ! -s /ca-certs/cacerts ]; then
+              echo "[INFO] /ca-certs/cacerts not present; using container default truststore"
+              return 0
+            fi
             if [ -s /ca-certs/java-truststore-type ]; then
               JAVA_TRUSTSTORE_TYPE="$(tr -d '[:space:]' < /ca-certs/java-truststore-type)"
             else
