@@ -387,7 +387,12 @@ spec:
                 exit 1
               fi
             fi
-            export JAVA_TOOL_OPTIONS="-Djavax.net.ssl.trustStore=/ca-certs/cacerts -Djavax.net.ssl.trustStoreType=${JAVA_TRUSTSTORE_TYPE} -Djavax.net.ssl.trustStorePassword=changeit"
+            JAVA_TRUSTSTORE_OPTIONS="-Djavax.net.ssl.trustStore=/ca-certs/cacerts -Djavax.net.ssl.trustStoreType=${JAVA_TRUSTSTORE_TYPE} -Djavax.net.ssl.trustStorePassword=changeit"
+            if [ -n "${JAVA_TOOL_OPTIONS:-}" ]; then
+              export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS} ${JAVA_TRUSTSTORE_OPTIONS}"
+            else
+              export JAVA_TOOL_OPTIONS="${JAVA_TRUSTSTORE_OPTIONS}"
+            fi
           }
 
           PROFILE_SOURCE_ROOT="${TEMP_DIR}/profile"
