@@ -5,8 +5,8 @@ metadata:
   namespace: osm
 spec:
   accessModes:
-    - ReadWriteOnce
-  storageClassName: cephfs-ec-2-4-zone
+    - ReadWriteMany
+  storageClassName: csi-cephfs-ec
   resources:
     requests:
       storage: 300Gi
@@ -19,7 +19,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: cephfs-temp
+  storageClassName: csi-cephfs-temp
   resources:
     requests:
       storage: 800Gi
@@ -31,8 +31,8 @@ metadata:
   namespace: osm
 spec:
   accessModes:
-    - ReadWriteOnce
-  storageClassName: cephfs-ec-2-4-zone
+    - ReadWriteMany
+  storageClassName: csi-cephfs-ec
   resources:
     requests:
       storage: 200Gi
@@ -45,7 +45,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: cephfs-ec-2-4-zone
+  storageClassName: csi-cephfs-ec
   resources:
     requests:
       storage: 500Gi
@@ -58,7 +58,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: cephfs-rp-4-zone
+  storageClassName: csi-cephfs-ec
   resources:
     requests:
       storage: 200Gi
@@ -71,7 +71,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: cephfs-rp-4-zone
+  storageClassName: csi-cephfs-ec
   resources:
     requests:
       storage: 100Gi
@@ -84,7 +84,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: cephfs-rp-4-zone
+  storageClassName: csi-cephfs-ec
   resources:
     requests:
       storage: 100Mi

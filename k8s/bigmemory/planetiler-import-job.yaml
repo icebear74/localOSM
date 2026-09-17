@@ -214,16 +214,13 @@ spec:
         args:
         - |
           set -eu
+          echo "Downloading"
           mkdir -p /osm-temp/tileserver/downloads /osm-temp/tileserver/work
-          if [ ! -s /osm-temp/tileserver/downloads/lake_centerline.shp.zip ]; then
-            wget -q -O /osm-temp/tileserver/downloads/lake_centerline.shp.zip https://github.com/acalcutt/osm-lakelines/releases/latest/download/lake_centerline.shp.zip
-          fi
-          if [ ! -s /osm-temp/tileserver/downloads/water-polygons-split-3857.zip ]; then
-            wget -q -O /osm-temp/tileserver/downloads/water-polygons-split-3857.zip https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip
-          fi
-          if [ ! -s /osm-temp/tileserver/downloads/natural_earth_vector.sqlite.zip ]; then
-            wget -q -O /osm-temp/tileserver/downloads/natural_earth_vector.sqlite.zip https://naciscdn.org/naturalearth/packages/natural_earth_vector.sqlite.zip
-          fi
+          mkdir data/sources -p
+          wget -O data/sources/lake_centerline.shp.zip https://github.com/acalcutt/osm-lakelines/releases/latest/download/lake_centerline.shp.zip
+          wget -O data/sources/water-polygons-split-3857.zip https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip
+          wget -O data/sources/natural_earth_vector.sqlite.zip https://naciscdn.org/naturalearth/packages/natural_earth_vector.sqlite.zip
+          ls data/sources
         resources:
           requests:
             cpu: "50m"
@@ -339,14 +336,16 @@ spec:
               --tmpdir="${TEMP_DIR}" \
               --output="${OUTPUT_NEW}" \
               --force \
-              --download=true \
+              --download=false \
               --nodemap-type=sparsearray \
               --nodemap-storage=ram \
+              --mmap-temp-nodes=false \      
+              --mmap-temp-features=false \              
               --threads=36 \
-              --arguments=journal_mode=WAL,synchronous=OFF,mmap_size=268435456 \
-              --lake_centerlines_path="${TEMP_SOURCES}/lake_centerline.shp.zip" \
-              --water_polygons_path="${TEMP_SOURCES}/water-polygons-split-3857.zip" \
-              --natural_earth_path="${TEMP_SOURCES}/natural_earth_vector.sqlite.zip" \
+              --arguments=journal_mode=WAL,synchronous=OFF \
+              --source="${TEMP_SOURCES}/lake_centerline.shp.zip" \
+              --water-polygons-path="${TEMP_SOURCES}/water-polygons-split-3857.zip" \
+              --natural-earth-path="${TEMP_SOURCES}/natural_earth_vector.sqlite.zip" \
               --minzoom=0 \
               --maxzoom=16 \
               --extra-osm-tags=shop,building,construction,name,name:de,name:en,wheelchair,amenity,highway,landuse,tourism,attraction,railway,roller_coaster,colour,color,layer,maxspeed,oneway
@@ -356,14 +355,17 @@ spec:
               --tmpdir="${TEMP_DIR}" \
               --output="${OUTPUT_NEW}" \
               --force \
-              --download=true \
+              --download=false \
               --nodemap-type=sparsearray \
               --nodemap-storage=ram \
+              --mmap-temp-nodes=false \      
+              --mmap-temp-features=false \              
               --threads=36 \
+              --arguments=journal_mode=WAL,synchronous=OFF \
               --arguments=journal_mode=WAL,synchronous=OFF,mmap_size=268435456 \
-              --lake_centerlines_path="${TEMP_SOURCES}/lake_centerline.shp.zip" \
-              --water_polygons_path="${TEMP_SOURCES}/water-polygons-split-3857.zip" \
-              --natural_earth_path="${TEMP_SOURCES}/natural_earth_vector.sqlite.zip" \
+              --source="${TEMP_SOURCES}/lake_centerline.shp.zip" \
+              --water-polygons-path="${TEMP_SOURCES}/water-polygons-split-3857.zip" \
+              --natural-earth-path="${TEMP_SOURCES}/natural_earth_vector.sqlite.zip" \
               --minzoom=0 \
               --maxzoom=16 \
               --extra-osm-tags=shop,building,construction,name,name:de,name:en,wheelchair,amenity,highway,landuse,tourism,attraction,railway,roller_coaster,colour,color,layer,maxspeed,oneway
