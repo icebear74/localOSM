@@ -392,8 +392,22 @@ spec:
               fi
             fi
             JAVA_TRUSTSTORE_OPTIONS="-Djavax.net.ssl.trustStore=/ca-certs/cacerts -Djavax.net.ssl.trustStoreType=${JAVA_TRUSTSTORE_TYPE} -Djavax.net.ssl.trustStorePassword=changeit"
-            if [ -n "${JAVA_TOOL_OPTIONS:-}" ]; then
-              export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS} ${JAVA_TRUSTSTORE_OPTIONS}"
+            JAVA_TOOL_OPTIONS_BASE=""
+            for java_opt in ${JAVA_TOOL_OPTIONS:-}; do
+              case "${java_opt}" in
+                -Djavax.net.ssl.trustStore=*|-Djavax.net.ssl.trustStoreType=*|-Djavax.net.ssl.trustStorePassword=*)
+                  ;;
+                *)
+                  if [ -n "${JAVA_TOOL_OPTIONS_BASE}" ]; then
+                    JAVA_TOOL_OPTIONS_BASE="${JAVA_TOOL_OPTIONS_BASE} ${java_opt}"
+                  else
+                    JAVA_TOOL_OPTIONS_BASE="${java_opt}"
+                  fi
+                  ;;
+              esac
+            done
+            if [ -n "${JAVA_TOOL_OPTIONS_BASE}" ]; then
+              export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS_BASE} ${JAVA_TRUSTSTORE_OPTIONS}"
             else
               export JAVA_TOOL_OPTIONS="${JAVA_TRUSTSTORE_OPTIONS}"
             fi
