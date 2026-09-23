@@ -1,0 +1,224 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: osm-import-promotion-config
+  namespace: osm
+data:
+  promote.sh: |
+    #!/bin/sh
+    set -eu
+
+    NAMESPACE="${OSM_NAMESPACE:-osm}"
+    KUBECTL_BIN="${KUBECTL_BIN:-kubectl}"
+    FAILURES=""
+
+    mark_failure() {
+      area="$1"
+      msg="$2"
+      echo "[ERROR][${area}] ${msg}" >&2
+      if [ -z "${FAILURES}" ]; then
+        FAILURES="${area}"
+      else
+        FAILURES="${FAILURES},${area}"
+      fi
+    }
+
+    dir_size_bytes() {
+      du -sb "$1" | awk '{print $1}'
+    }
+
+    free_bytes() {
+      df -PB1 "$1" | awk 'NR==2 {print $4}'
+    }
+
+    scale_down_if_running() {
+      dep="$1"
+      replicas=$(${KUBECTL_BIN} -n "${NAMESPACE}" get deployment "${dep}" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
+      replicas="${replicas:-0}"
+      if [ "${replicas}" -gt 0 ] 2>/dev/null; then
+        echo "[INFO] scaling deployment/${dep} -> 0" >&2
+        ${KUBECTL_BIN} -n "${NAMESPACE}" scale deployment "${dep}" --replicas=0 >/dev/null
+        waited=0
+        while ${KUBECTL_BIN} -n "${NAMESPACE}" get pods -l app="${dep}" --no-headers 2>/dev/null | grep -q .; do
+          if [ "${waited}" -ge 600 ]; then
+            echo "[ERROR] timeout waiting for ${dep} pods to terminate" >&2
+            return 1
+          fi
+          sleep 3
+          waited=$((waited + 3))
+        done
+        echo "${replicas}"
+        return 0
+      fi
+      echo "0"
+    }
+
+    scale_restore() {
+      dep="$1"
+      replicas="$2"
+      if [ "${replicas}" -gt 0 ] 2>/dev/null; then
+        echo "[INFO] scaling deployment/${dep} -> ${replicas}"
+        ${KUBECTL_BIN} -n "${NAMESPACE}" scale deployment "${dep}" --replicas="${replicas}" >/dev/null || true
+        ${KUBECTL_BIN} -n "${NAMESPACE}" rollout status deployment/"${dep}" --timeout=600s >/dev/null || true
+      fi
+    }
+
+    copy_tree_filewise() {
+      src="$1"
+      dst="$2"
+      mkdir -p "${dst}"
+      find "${src}" -type d -mindepth 1 -exec sh -eu -c '
+        src_root="$1"
+        dst_root="$2"
+        dir_path="$3"
+        rel="${dir_path#${src_root}/}"
+        mkdir -p "${dst_root}/${rel}"
+      ' sh "${src}" "${dst}" {} \;
+      find "${src}" -type f -exec sh -eu -c '
+        src_root="$1"
+        dst_root="$2"
+        file_path="$3"
+        rel="${file_path#${src_root}/}"
+        target="${dst_root}/${rel}"
+        target_dir=$(dirname "${target}")
+        tmp_target="${target}.tmp.$$"
+        mkdir -p "${target_dir}"
+        cp -a "${file_path}" "${tmp_target}"
+        cmp -s "${file_path}" "${tmp_target}"
+        mv -f "${tmp_target}" "${target}"
+        rm -f "${file_path}"
+      ' sh "${src}" "${dst}" {} \;
+      find "${src}" -depth -type d -empty -delete || true
+      return 0
+    }
+
+    promote_tree_area() {
+      area="$1"
+      src="$2"
+      dest_root="$3"
+      active_name="$4"
+      deployment="$5"
+
+      if [ ! -d "${src}" ] || [ -z "$(find "${src}" -mindepth 1 -print -quit 2>/dev/null)" ]; then
+        echo "[INFO][${area}] no source data at ${src}; skipping"
+        return 0
+      fi
+
+      src_bytes=$(dir_size_bytes "${src}")
+      free=$(free_bytes "${dest_root}")
+      echo "[INFO][${area}] source=${src_bytes}B free=${free}B"
+      if [ "${src_bytes}" -gt "${free}" ]; then
+        mark_failure "${area}" "insufficient free space on ${dest_root}"
+        return 0
+      fi
+
+      staged="${dest_root}/staging-${area}"
+      active="${dest_root}/${active_name}"
+      previous="${dest_root}/previous"
+
+      rm -rf "${staged}" "${previous}.tmp" 2>/dev/null || true
+      mkdir -p "${staged}"
+
+      if ! copy_tree_filewise "${src}" "${staged}"; then
+        rm -rf "${staged}" 2>/dev/null || true
+        mark_failure "${area}" "file-wise copy/validation failed"
+        return 0
+      fi
+
+      if ! replicas=$(scale_down_if_running "${deployment}"); then
+        mark_failure "${area}" "could not fully scale down ${deployment}"
+        rm -rf "${staged}" 2>/dev/null || true
+        return 0
+      fi
+      restored=0
+      restore_once() {
+        if [ "${restored}" -eq 0 ]; then
+          scale_restore "${deployment}" "${replicas}"
+          restored=1
+        fi
+      }
+      trap restore_once EXIT
+      if [ -d "${active}" ]; then
+        rm -rf "${previous}.tmp" 2>/dev/null || true
+        if ! mv "${active}" "${previous}.tmp"; then
+          mark_failure "${area}" "could not move active directory to backup staging"
+          restore_once
+          trap - EXIT
+          return 0
+        fi
+      fi
+      rm -rf "${active}" 2>/dev/null || true
+
+      if mv "${staged}" "${active}"; then
+        rm -rf "${dest_root}/previous" 2>/dev/null || true
+        mv "${previous}.tmp" "${dest_root}/previous" 2>/dev/null || true
+        echo "[INFO][${area}] activated ${active}"
+      else
+        rm -rf "${active}" 2>/dev/null || true
+        mv "${previous}.tmp" "${active}" 2>/dev/null || true
+        mark_failure "${area}" "activation move failed"
+      fi
+
+      restore_once
+      trap - EXIT
+    }
+
+    promote_file_area() {
+      area="$1"
+      src_file="$2"
+      dst_file="$3"
+      deployment="$4"
+
+      if [ ! -s "${src_file}" ]; then
+        echo "[INFO][${area}] no source file ${src_file}; skipping"
+        return 0
+      fi
+
+      dst_dir=$(dirname "${dst_file}")
+      src_bytes=$(wc -c < "${src_file}" | tr -d '[:space:]')
+      free=$(free_bytes "${dst_dir}")
+      echo "[INFO][${area}] source=${src_bytes}B free=${free}B"
+      if [ "${src_bytes}" -gt "${free}" ]; then
+        mark_failure "${area}" "insufficient free space on ${dst_dir}"
+        return 0
+      fi
+
+      tmp_file="${dst_file}.tmp.$$"
+      mkdir -p "${dst_dir}"
+      cp -a "${src_file}" "${tmp_file}"
+      if ! cmp -s "${src_file}" "${tmp_file}"; then
+        rm -f "${tmp_file}"
+        mark_failure "${area}" "copied file validation failed"
+        return 0
+      fi
+
+      if ! replicas=$(scale_down_if_running "${deployment}"); then
+        mark_failure "${area}" "could not fully scale down ${deployment}"
+        rm -f "${tmp_file}" 2>/dev/null || true
+        return 0
+      fi
+      restored=0
+      restore_once() {
+        if [ "${restored}" -eq 0 ]; then
+          scale_restore "${deployment}" "${replicas}"
+          restored=1
+        fi
+      }
+      trap restore_once EXIT
+      mv -f "${tmp_file}" "${dst_file}"
+      rm -f "${src_file}"
+      restore_once
+      trap - EXIT
+      echo "[INFO][${area}] activated ${dst_file}"
+    }
+
+    promote_tree_area "nominatim" "/osm-temp/nominatim/work/current" "/nominatim" "current" "nominatim"
+    promote_tree_area "valhalla" "/osm-temp/valhalla/work" "/valhalla" "active" "valhalla"
+    promote_tree_area "photon" "/osm-temp/photon/work" "/photon" "active" "photon"
+    promote_file_area "tileserver" "/osm-temp/tileserver/work/planet.mbtiles" "/tileserver-gl/planet.mbtiles" "tileserver-gl"
+
+    if [ -n "${FAILURES}" ]; then
+      echo "[ERROR] promotion finished with failures in: ${FAILURES}" >&2
+      exit 1
+    fi
+    echo "[INFO] promotion finished successfully"

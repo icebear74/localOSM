@@ -10,10 +10,11 @@ PRESERVE_PATHS=("${BASE_DIR}/library" "${BASE_DIR}/status")
 CLEAN=false
 PRESERVE_DOWNLOADS=false
 NODE_URL=""
+MANIFEST_SOURCE_DIR="${REPO_ROOT}/k8s"
 
 usage() {
   cat <<EOF
-Usage: $0 [--clean] [--preserve-downloads] [--node-url <url>] [--temp-dir <path>]
+Usage: $0 [--clean] [--preserve-downloads] [--node-url <url>] [--temp-dir <path>] [--bigmemory]
 EOF
 }
 
@@ -23,6 +24,7 @@ while [[ $# -gt 0 ]]; do
     --preserve-downloads) PRESERVE_DOWNLOADS=true; shift ;;
     --node-url) NODE_URL="$2"; shift 2 ;;
     --temp-dir) TEMP_BASE_DIR="$2"; shift 2 ;;
+    --bigmemory) MANIFEST_SOURCE_DIR="${REPO_ROOT}/k8s/bigmemory"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -239,12 +241,15 @@ for manifest in \
   nominatim-postgres-tuning-config.yaml \
   tileserver-import-config.yaml \
   tileserver-import-profile-config.yaml \
+  import-promotion-config.yaml \
+  import-promotion-job.yaml \
   planetiler-import-job.yaml \
   tileserver-init-assets-job.yaml \
   import-orchestrator.yaml \
   web.yaml \
-  style-editor.yaml; do
-  sed "s|__OSM_TEMP_DIR__|${TEMP_BASE_DIR}|g" "${REPO_ROOT}/k8s/${manifest}" | ${SUDO} tee "${BASE_DIR}/manifests/${manifest}" >/dev/null
+  style-editor.yaml \
+  mc-admin.yaml; do
+  sed "s|__OSM_TEMP_DIR__|${TEMP_BASE_DIR}|g" "${MANIFEST_SOURCE_DIR}/${manifest}" | ${SUDO} tee "${BASE_DIR}/manifests/${manifest}" >/dev/null
 done
 ${SUDO} cp "${REPO_ROOT}/scripts/import-orchestrator.sh" "${BASE_DIR}/scripts/import-orchestrator.sh"
 ${SUDO} chmod +x "${BASE_DIR}/scripts/import-orchestrator.sh"
@@ -306,7 +311,7 @@ kubectl apply -f "${CA_BUNDLE_SRC}"
 
 kubectl -n "${NAMESPACE}" create configmap osm-status-config --from-file=config.json="${CONFIG_PATH}" --dry-run=client -o yaml | kubectl apply -f -
 
-for manifest in osm-persistentvolumeclaims.yaml planetiler-rbac.yaml tileserver-gl-deployment.yaml nominatim.yaml nominatim-promotion-job.yaml nominatim-postgres-tuning-config.yaml valhalla-config.yaml valhalla-traffic-config.yaml valhalla.yaml valhalla-import-config.yaml photon-config.yaml photon.yaml pelias-config.yaml pelias.yaml pelias-import-job.yaml pelias-cleanup-job.yaml status.yaml status-deployment.yaml nominatim-import-config.yaml tileserver-import-config.yaml tileserver-import-profile-config.yaml import-orchestrator.yaml web.yaml style-editor.yaml; do
+for manifest in osm-persistentvolumeclaims.yaml planetiler-rbac.yaml tileserver-gl-deployment.yaml nominatim.yaml nominatim-promotion-job.yaml nominatim-postgres-tuning-config.yaml valhalla-config.yaml valhalla-traffic-config.yaml valhalla.yaml valhalla-import-config.yaml photon-config.yaml photon.yaml pelias-config.yaml pelias.yaml pelias-import-job.yaml pelias-cleanup-job.yaml status.yaml status-deployment.yaml nominatim-import-config.yaml tileserver-import-config.yaml tileserver-import-profile-config.yaml import-promotion-config.yaml import-promotion-job.yaml import-orchestrator.yaml web.yaml style-editor.yaml mc-admin.yaml; do
   echo ">>> Applying ${manifest}"
   kubectl apply -f "${BASE_DIR}/manifests/${manifest}"
 done

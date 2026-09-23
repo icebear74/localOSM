@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mc-admin
+  namespace: osm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mc-admin
+  template:
+    metadata:
+      labels:
+        app: mc-admin
+    spec:
+      nodeSelector:
+        osm: "true"
+      securityContext:
+        fsGroup: 0
+      containers:
+      - name: mc
+        image: alpine:3.20
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -eu
+          apk add --no-cache mc >/dev/null
+          echo "Midnight Commander ready. Attach with: kubectl -n osm exec -it deploy/mc-admin -- mc"
+          sleep infinity
+        volumeMounts:
+        - name: planet
+          mountPath: /pvc/planet
+        - name: osm-temp
+          mountPath: /pvc/osm-temp
+        - name: tileserver-gl
+          mountPath: /pvc/tileserver-gl
+        - name: nominatim
+          mountPath: /pvc/nominatim
+        - name: valhalla
+          mountPath: /pvc/valhalla
+        - name: photon
+          mountPath: /pvc/photon
+        - name: osm-status
+          mountPath: /pvc/osm-status
+      volumes:
+      - name: planet
+        persistentVolumeClaim:
+          claimName: planet
+      - name: osm-temp
+        persistentVolumeClaim:
+          claimName: osm-temp
+      - name: tileserver-gl
+        persistentVolumeClaim:
+          claimName: tileserver-gl
+      - name: nominatim
+        persistentVolumeClaim:
+          claimName: nominatim
+      - name: valhalla
+        persistentVolumeClaim:
+          claimName: valhalla
+      - name: photon
+        persistentVolumeClaim:
+          claimName: photon
+      - name: osm-status
+        persistentVolumeClaim:
+          claimName: osm-status

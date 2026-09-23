@@ -64,7 +64,7 @@ if [ -d "${REPO_ROOT}/icons" ]; then
   ${SUDO} cp -a "${REPO_ROOT}/icons/." "${BOOTSTRAP_DIR}/icons/"
 fi
 
-for style_file in style.json dark_style.json blue_style.json futuristic_style.json; do
+for style_file in style.json dark_style.json blue_style.json futuristic_style.json pink_style.json; do
   if [ -f "${REPO_ROOT}/k8s/${style_file}" ]; then
     ${SUDO} cp "${REPO_ROOT}/k8s/${style_file}" "${BOOTSTRAP_DIR}/${style_file}"
   else
@@ -81,6 +81,9 @@ if [ -f "${BOOTSTRAP_DIR}/blue_style.json" ]; then
 fi
 if [ -f "${BOOTSTRAP_DIR}/futuristic_style.json" ]; then
   styles_json="${styles_json},\"osm-futuristic\":{\"style\":\"/data/futuristic_style.json\"}"
+fi
+if [ -f "${BOOTSTRAP_DIR}/pink_style.json" ]; then
+  styles_json="${styles_json},\"osm-pink\":{\"style\":\"/data/pink_style.json\"}"
 fi
 printf '%s\n' "{\"options\":{\"paths\":{\"root\":\"/data\",\"fonts\":\"fonts\",\"sprites\":\"sprites\",\"icons\":\"icons\"},\"serveAllFonts\":true,\"cors\":true},\"styles\":{${styles_json}},\"data\":{\"v3\":{\"mbtiles\":\"planet.mbtiles\"}}}" | ${SUDO} tee "${BOOTSTRAP_DIR}/config.json" >/dev/null
 
@@ -103,6 +106,9 @@ if [ "${APPLY_CONFIGMAP}" = true ]; then
     fi
     if [ -f "${REPO_ROOT}/k8s/futuristic_style.json" ]; then
       style_files+=("--from-file=futuristic_style.json=${REPO_ROOT}/k8s/futuristic_style.json")
+    fi
+    if [ -f "${REPO_ROOT}/k8s/pink_style.json" ]; then
+      style_files+=("--from-file=pink_style.json=${REPO_ROOT}/k8s/pink_style.json")
     fi
     kubectl -n "${NAMESPACE}" create configmap tileserver-style "${style_files[@]}" --dry-run=client -o yaml | kubectl apply -f -
   fi

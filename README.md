@@ -101,13 +101,14 @@ kubectl apply -f /mnt/OSM/manifests/tileserver-init-assets-job.yaml
 bash scripts/run-import.sh --url https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf
 ```
 
-The script downloads the extract and writes an import request. The orchestrator pod processes requests strictly in sequence. Import jobs are intended to be autonomous: the orchestrator only submits them, while each job should manage its own deployment lifecycle (scale/rollout/restart) and data promotion steps internally.
+The script downloads the extract and writes an import request. The orchestrator pod processes requests strictly in sequence.
 
 1. Nominatim
 2. Valhalla
 3. TileServer
 
-Each step uses a dedicated Kubernetes Job. The shared `osm-temp` PVC keeps the reusable merged/downloaded inputs and per-service work directories, while every import job now copies/promotes its finished output into the active directory itself and then cleans its own work directory.
+Each step uses a dedicated Kubernetes Job. The shared `osm-temp` PVC keeps the reusable merged/downloaded inputs and per-service work directories.  
+After successful build steps, a **central `import-promotion` job** (`k8s/import-promotion-job.yaml`) activates all available outputs in a fixed order (Nominatim, Valhalla, Photon, TileServer), checks free disk space per area first, copies file-by-file with per-file validation, then removes each source file only after successful target write.
 
 ### Tuning the Nominatim import
 
@@ -200,6 +201,22 @@ data:
 2. All containers mount `/ca-certs` read-only and have these env vars set automatically:
    `SSL_CERT_FILE`, `CURL_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`.
 3. Java containers (`eclipse-temurin`, `pelias/elasticsearch`) additionally get a **`java-ca-injector`** that creates a JKS keystore at `/ca-certs/cacerts` and sets `JAVA_TOOL_OPTIONS` to use it.
+
+For download tools that do not reliably honor environment variables, manifests now pass CA paths explicitly (for example `wget --ca-certificate=/ca-certs/ca.crt`, `curl --cacert /ca-certs/ca.crt`).
+
+## Admin Pod (Midnight Commander)
+
+- Standard storage profile: `k8s/mc-admin.yaml`
+- Big-memory storage profile: `k8s/bigmemory/mc-admin.yaml`
+
+Both manifests provide a dedicated `mc-admin` deployment with all relevant PVCs mounted under `/pvc/*`.
+
+## Styles / Routing
+
+- Added new style: `k8s/pink_style.json` (mirrored in `k8s/bigmemory/`).
+- Rail/rollercoaster line widths/dash patterns were adjusted for better readability across zoom levels.
+- Construction street names are explicitly labeled in all styles (`road-label-construction`).
+- Style metadata `metadata.localosm_route_style` defines routing line appearance per style; WebUI reads this and falls back to safe defaults when missing.
 
 If `ca-bundle-config.yaml` is absent when `deploy-osm.sh` runs, a disabled placeholder is created automatically from the example file.
 

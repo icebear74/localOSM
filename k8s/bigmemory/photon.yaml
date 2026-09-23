@@ -59,8 +59,9 @@ spec:
           if [ "${CA_ENABLED}" = "true" ] && [ -n "${CA_CRT}" ]; then
             # Append the custom Root CA to the bundle so public CAs stay trusted too.
             printf '\n%s\n' "${CA_CRT}" >> /ca-certs/ca.crt
+            printf '\n%s\n' "${CA_CRT}" > /ca-certs/custom-ca.crt
             touch /ca-certs/ca-enabled
-            echo "[ca-injector] Custom CA appended to bundle at /ca-certs/ca.crt"
+            echo "[ca-injector] Custom CA appended to bundle at /ca-certs/ca.crt and staged at /ca-certs/custom-ca.crt"
           else
             echo "[ca-injector] CA injection disabled; system bundle at /ca-certs/ca.crt"
           fi
@@ -102,19 +103,51 @@ spec:
             JAVA_CACERTS=$(find / -path /proc -prune -o -name cacerts -type f -print 2>/dev/null | head -1)
           fi
           if [ -z "${JAVA_CACERTS}" ]; then
-            echo "[java-ca-injector] No system cacerts found; skipping."
+            if [ "${CA_ENABLED}" = "true" ] && [ -f /ca-certs/ca-enabled ] && [ -s /ca-certs/custom-ca.crt ]; then
+              echo "[java-ca-injector] ERROR: No system cacerts found for custom CA import" >&2
+              exit 1
+            fi
+            echo "[java-ca-injector] No system cacerts found; using container default truststore"
             exit 0
           fi
           # Copy system truststore so JAVA_TOOL_OPTIONS always points to a valid file.
           cp "${JAVA_CACERTS}" /ca-certs/cacerts
-          if [ "${CA_ENABLED}" = "true" ] && [ -f /ca-certs/ca-enabled ]; then
+          chmod 0644 /ca-certs/cacerts
+
+          STORE_TYPE=""
+          if keytool -list -keystore /ca-certs/cacerts -storepass changeit -storetype PKCS12 >/dev/null 2>&1; then
+            STORE_TYPE="PKCS12"
+          elif keytool -list -keystore /ca-certs/cacerts -storepass changeit -storetype JKS >/dev/null 2>&1; then
+            STORE_TYPE="JKS"
+          else
+            echo "[java-ca-injector] ERROR: Unable to open /ca-certs/cacerts as PKCS12 or JKS" >&2
+            exit 1
+          fi
+          echo "${STORE_TYPE}" > /ca-certs/java-truststore-type
+          echo "[java-ca-injector] Detected truststore type: ${STORE_TYPE}"
+
+          if [ "${CA_ENABLED}" = "true" ] && [ -f /ca-certs/ca-enabled ] && [ -s /ca-certs/custom-ca.crt ]; then
+            if keytool -list -keystore /ca-certs/cacerts -storepass changeit -storetype "${STORE_TYPE}" -alias osm-root-ca >/dev/null 2>&1; then
+              keytool -delete -alias osm-root-ca \
+                -keystore /ca-certs/cacerts \
+                -storepass changeit \
+                -storetype "${STORE_TYPE}"
+            fi
             keytool -noprompt -importcert -alias osm-root-ca \
-              -file /ca-certs/ca.crt \
+              -file /ca-certs/custom-ca.crt \
               -keystore /ca-certs/cacerts \
               -storepass changeit \
-              -storetype PKCS12 \
-              -trustcacerts 2>&1 || true
-            echo "[java-ca-injector] Custom CA imported into /ca-certs/cacerts"
+              -storetype "${STORE_TYPE}" \
+              -trustcacerts
+            if keytool -list -keystore /ca-certs/cacerts -storepass changeit -storetype "${STORE_TYPE}" -alias osm-root-ca >/dev/null 2>&1; then
+              echo "[java-ca-injector] Custom CA imported into /ca-certs/cacerts as alias osm-root-ca"
+            else
+              echo "[java-ca-injector] ERROR: Alias osm-root-ca not found after import" >&2
+              exit 1
+            fi
+          elif [ "${CA_ENABLED}" = "true" ]; then
+            echo "[java-ca-injector] ERROR: CA enabled but /ca-certs/custom-ca.crt is missing or empty" >&2
+            exit 1
           else
             echo "[java-ca-injector] CA disabled; system cacerts at /ca-certs/cacerts"
           fi
@@ -351,11 +384,16 @@ spec:
         - name: NODE_EXTRA_CA_CERTS
           value: /ca-certs/ca.crt
         - name: JAVA_TOOL_OPTIONS
-          value: -Djavax.net.ssl.trustStore=/ca-certs/cacerts -Djavax.net.ssl.trustStoreType=PKCS12 -Djavax.net.ssl.trustStorePassword=changeit
+          value: -Djavax.net.ssl.trustStore=/ca-certs/cacerts -Djavax.net.ssl.trustStorePassword=changeit
         command: ["/bin/sh", "-c"]
         args:
         - |
           set -e
+          JAVA_TRUSTSTORE_TYPE="$(tr -d '[:space:]' < /ca-certs/java-truststore-type 2>/dev/null || true)"
+          if [ -z "${JAVA_TRUSTSTORE_TYPE}" ]; then
+            JAVA_TRUSTSTORE_TYPE="PKCS12"
+          fi
+          export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS} -Djavax.net.ssl.trustStoreType=${JAVA_TRUSTSTORE_TYPE}"
           exec java -jar "/photon-store/bin/photon-${PHOTON_VERSION}.jar" serve \
             -listen-ip 0.0.0.0 -listen-port 2322 -cors-any -data-dir /photon-ram/active
         ports:

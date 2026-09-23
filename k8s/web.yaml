@@ -48,6 +48,7 @@ data:
         ("osm-dark", "Dunkel"),
         ("osm-blue", "Blau"),
         ("osm-futuristic", "Futuristisch"),
+        ("osm-pink", "Pink"),
     )
     PLANET_UPDATE_REQUEST_FILE = os.environ.get("PLANET_UPDATE_REQUEST_FILE", "/state/planet-update-request.flag")
     PLANET_UPDATE_STATUS_FILE = os.environ.get("PLANET_UPDATE_STATUS_FILE", "/status/planet-update.json")
@@ -419,7 +420,41 @@ data:
     var DEFAULT_STYLE_ID = 'osm';
     var MAP_STYLE_STORAGE_KEY = 'localosm.mapStyleId';
     var routeGeojson = null;
+    var routeStyleConfig = {
+      lineColor: '#2c7ab5',
+      outlineColor: '#ffffff',
+      lineWidth: 6,
+      outlineWidth: 2,
+      lineOpacity: 0.9,
+      outlineOpacity: 0.85
+    };
     var availableMapStyles = [{id: 'osm', label: 'Standard'}];
+
+    function applyRouteStyleFromMetadata(styleJson) {
+      var defaults = {
+        lineColor: '#2c7ab5',
+        outlineColor: '#ffffff',
+        lineWidth: 6,
+        outlineWidth: 2,
+        lineOpacity: 0.9,
+        outlineOpacity: 0.85
+      };
+      function clampOpacity(value, fallback) {
+        if (typeof value !== 'number' || !isFinite(value)) return fallback;
+        if (value < 0) return 0;
+        if (value > 1) return 1;
+        return value;
+      }
+      var cfg = (styleJson && styleJson.metadata && styleJson.metadata.localosm_route_style) || {};
+      routeStyleConfig = {
+        lineColor: (typeof cfg.lineColor === 'string' && cfg.lineColor) ? cfg.lineColor : defaults.lineColor,
+        outlineColor: (typeof cfg.outlineColor === 'string' && cfg.outlineColor) ? cfg.outlineColor : defaults.outlineColor,
+        lineWidth: (typeof cfg.lineWidth === 'number' && isFinite(cfg.lineWidth) && cfg.lineWidth > 0) ? cfg.lineWidth : defaults.lineWidth,
+        outlineWidth: (typeof cfg.outlineWidth === 'number' && isFinite(cfg.outlineWidth) && cfg.outlineWidth >= 0) ? cfg.outlineWidth : defaults.outlineWidth,
+        lineOpacity: clampOpacity(cfg.lineOpacity, defaults.lineOpacity),
+        outlineOpacity: clampOpacity(cfg.outlineOpacity, defaults.outlineOpacity)
+      };
+    }
 
     function ensureRouteLayer() {
       if (!routeGeojson || !map || !map.isStyleLoaded()) return;
@@ -430,7 +465,27 @@ data:
       }
       if (!map.getLayer('route-line')) {
         map.addLayer({id:'route-line',type:'line',source:'route',
-          paint:{'line-color':'#2c7ab5','line-width':5,'line-opacity':0.8}});
+          paint:{
+            'line-color':routeStyleConfig.lineColor,
+            'line-width':routeStyleConfig.lineWidth,
+            'line-opacity':routeStyleConfig.lineOpacity
+          }});
+      } else {
+        map.setPaintProperty('route-line', 'line-color', routeStyleConfig.lineColor);
+        map.setPaintProperty('route-line', 'line-width', routeStyleConfig.lineWidth);
+        map.setPaintProperty('route-line', 'line-opacity', routeStyleConfig.lineOpacity);
+      }
+      if (!map.getLayer('route-outline')) {
+        map.addLayer({id:'route-outline',type:'line',source:'route',
+          paint:{
+            'line-color':routeStyleConfig.outlineColor,
+            'line-width':routeStyleConfig.lineWidth + routeStyleConfig.outlineWidth,
+            'line-opacity':routeStyleConfig.outlineOpacity
+          }}, 'route-line');
+      } else {
+        map.setPaintProperty('route-outline', 'line-color', routeStyleConfig.outlineColor);
+        map.setPaintProperty('route-outline', 'line-width', routeStyleConfig.lineWidth + routeStyleConfig.outlineWidth);
+        map.setPaintProperty('route-outline', 'line-opacity', routeStyleConfig.outlineOpacity);
       }
     }
 
@@ -465,6 +520,7 @@ data:
       var resp = await fetch('/api/style?style=' + encodeURIComponent(styleId));
       if (!resp.ok) throw new Error('style fetch failed: ' + resp.status);
       var styleJson = await resp.json();
+      applyRouteStyleFromMetadata(styleJson);
       map.setStyle(styleJson);
       saveMapStyleId(styleId);
     }
@@ -1945,13 +2001,13 @@ spec:
           mkdir -p /data/static
           if [ ! -f /data/static/maplibre-gl.js ]; then
             echo "Downloading maplibre-gl.js v${MLGL_VERSION} (one-time setup)..."
-            wget -q -O /data/static/maplibre-gl.js \
+            wget --ca-certificate=/ca-certs/ca.crt -q -O /data/static/maplibre-gl.js \
               "https://unpkg.com/maplibre-gl@${MLGL_VERSION}/dist/maplibre-gl.js" \
               || { rm -f /data/static/maplibre-gl.js; echo "ERROR: maplibre-gl.js download failed"; exit 1; }
           fi
           if [ ! -f /data/static/maplibre-gl.css ]; then
             echo "Downloading maplibre-gl.css v${MLGL_VERSION} (one-time setup)..."
-            wget -q -O /data/static/maplibre-gl.css \
+            wget --ca-certificate=/ca-certs/ca.crt -q -O /data/static/maplibre-gl.css \
               "https://unpkg.com/maplibre-gl@${MLGL_VERSION}/dist/maplibre-gl.css" \
               || { rm -f /data/static/maplibre-gl.css; echo "ERROR: maplibre-gl.css download failed"; exit 1; }
           fi
