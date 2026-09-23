@@ -90,7 +90,7 @@ spec:
           fi
 
           styles_json=''
-          for style_path in $(find /data -maxdepth 1 -type f -name 'style_*.json' | sort); do
+          while IFS= read -r style_path; do
             style_file="$(basename "${style_path}")"
             style_id="${style_file%.json}"
             style_entry="\"${style_id}\":{\"style\":\"/data/${style_file}\"}"
@@ -99,7 +99,7 @@ spec:
             else
               styles_json="${style_entry}"
             fi
-          done
+          done < <(find /data -maxdepth 1 -type f -name 'style_*.json' | sort)
           if [ -z "${styles_json}" ]; then
             styles_json='"style_vibrant":{"style":"/data/style_vibrant.json"}'
           fi

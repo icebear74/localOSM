@@ -1444,7 +1444,8 @@ data:
                     styles = []
                 if not styles:
                     styles = [{"id": "style_vibrant", "label": "Vibrant"}]
-                self._send_json({"styles": styles, "default": styles[0]["id"]})
+                default_style = next((item["id"] for item in styles if item.get("id") == "style_vibrant"), styles[0]["id"])
+                self._send_json({"styles": styles, "default": default_style})
                 return
 
             if self.path == "/api/style" or self.path.startswith("/api/style?"):
