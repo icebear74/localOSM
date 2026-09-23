@@ -421,7 +421,7 @@ data:
       lineOpacity: 0.9,
       outlineOpacity: 0.85
     };
-    var availableMapStyles = [{id: 'osm', label: 'Standard'}];
+    var availableMapStyles = [{id: 'style_vibrant', label: 'Vibrant'}];
 
     function applyRouteStyleFromMetadata(styleJson) {
       var defaults = {
