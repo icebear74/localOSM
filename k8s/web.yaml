@@ -43,13 +43,6 @@ data:
     PHOTON_URL = os.environ.get("PHOTON_URL", "http://photon.osm.svc.cluster.local:2322")
     TILESERVER_URL = os.environ.get("TILESERVER_URL", "http://tileserver-gl.osm.svc.cluster.local")
     STATUS_URL = os.environ.get("STATUS_URL", "")
-    STYLE_CANDIDATES = (
-        ("osm", "Standard"),
-        ("osm-dark", "Dunkel"),
-        ("osm-blue", "Blau"),
-        ("osm-futuristic", "Futuristisch"),
-        ("osm-pink", "Pink"),
-    )
     PLANET_UPDATE_REQUEST_FILE = os.environ.get("PLANET_UPDATE_REQUEST_FILE", "/state/planet-update-request.flag")
     PLANET_UPDATE_STATUS_FILE = os.environ.get("PLANET_UPDATE_STATUS_FILE", "/status/planet-update.json")
     FAVICON_GIF = (
@@ -1418,20 +1411,39 @@ data:
 
             if self.path == "/api/styles":
                 styles = []
-                for style_id, label in STYLE_CANDIDATES:
-                    try:
-                        req = urllib.request.Request(
-                            f"{TILESERVER_URL}/styles/{style_id}/style.json",
-                            headers={"User-Agent": "localosm-web/1.0"}
-                        )
-                        with urllib.request.urlopen(req, timeout=5) as response:
-                            if response.status != 200:
-                                continue
+                try:
+                    req = urllib.request.Request(
+                        f"{TILESERVER_URL}/styles.json",
+                        headers={"User-Agent": "localosm-web/1.0"}
+                    )
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        payload = response.read().decode("utf-8")
+                    parsed = json.loads(payload)
+                    style_ids = []
+                    if isinstance(parsed, dict):
+                        if isinstance(parsed.get("styles"), dict):
+                            style_ids = [str(key) for key in parsed["styles"].keys()]
+                        elif all(isinstance(value, dict) for value in parsed.values()):
+                            style_ids = [str(key) for key in parsed.keys()]
+                    elif isinstance(parsed, list):
+                        for entry in parsed:
+                            if isinstance(entry, dict):
+                                style_id = entry.get("id") or entry.get("name")
+                                if style_id:
+                                    style_ids.append(str(style_id))
+                    seen = set()
+                    for style_id in style_ids:
+                        if len(style_id) > 64 or not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", style_id):
+                            continue
+                        if style_id in seen:
+                            continue
+                        seen.add(style_id)
+                        label = style_id.replace("style_", "", 1).replace("_", " ").strip().title() or style_id
                         styles.append({"id": style_id, "label": label})
-                    except Exception:
-                        continue
+                except Exception:
+                    styles = []
                 if not styles:
-                    styles = [{"id": "osm", "label": "Standard"}]
+                    styles = [{"id": "style_vibrant", "label": "Vibrant"}]
                 self._send_json({"styles": styles, "default": styles[0]["id"]})
                 return
 
@@ -1443,7 +1455,7 @@ data:
                 try:
                     query = self.path.split("?", 1)[1] if "?" in self.path else ""
                     params = urllib.parse.parse_qs(query)
-                    style_id = params.get("style", ["osm"])[0].strip().lower()
+                    style_id = params.get("style", ["style_vibrant"])[0].strip().lower()
                     if len(style_id) > 64 or not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", style_id):
                         self._send_json({"error": "invalid style id"}, 400)
                         return

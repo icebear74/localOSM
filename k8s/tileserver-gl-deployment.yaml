@@ -76,33 +76,34 @@ spec:
           set -eu
           mkdir -p /data/fonts /data/sprites /data/icons
 
-          for style_file in style.json dark_style.json blue_style.json futuristic_style.json pink_style.json; do
-            if [ -f "/style-source/${style_file}" ] && [ ! -f "/data/${style_file}" ]; then
-              cp "/style-source/${style_file}" "/data/${style_file}"
+          for source_style in /style-source/style_*.json; do
+            [ -f "${source_style}" ] || continue
+            style_file="$(basename "${source_style}")"
+            if [ ! -f "/data/${style_file}" ]; then
+              cp "${source_style}" "/data/${style_file}"
               echo "[INFO] TileServer: installed initial ${style_file} from ConfigMap tileserver-style"
             fi
           done
 
-          if [ ! -f /data/style.json ]; then
-            printf '%s\n' '{"version":8,"name":"LocalOSM","sources":{"openmaptiles":{"type":"vector","url":"mbtiles://{v3}"}},"glyphs":"{fontstack}/{range}.pbf","layers":[{"id":"background","type":"background","paint":{"background-color":"#f2efe9"}}]}' > /data/style.json
+          if [ ! -f /data/style_vibrant.json ]; then
+            printf '%s\n' '{"version":8,"name":"LocalOSM","sources":{"openmaptiles":{"type":"vector","url":"mbtiles://{v3}"}},"glyphs":"{fontstack}/{range}.pbf","layers":[{"id":"background","type":"background","paint":{"background-color":"#f2efe9"}}]}' > /data/style_vibrant.json
           fi
 
-          if [ ! -f /data/config.json ]; then
-            styles_json='"osm":{"style":"/data/style.json"}'
-            if [ -f /data/dark_style.json ]; then
-              styles_json="${styles_json},\"osm-dark\":{\"style\":\"/data/dark_style.json\"}"
+          styles_json=''
+          for style_path in $(find /data -maxdepth 1 -type f -name 'style_*.json' | sort); do
+            style_file="$(basename "${style_path}")"
+            style_id="${style_file%.json}"
+            style_entry="\"${style_id}\":{\"style\":\"/data/${style_file}\"}"
+            if [ -n "${styles_json}" ]; then
+              styles_json="${styles_json},${style_entry}"
+            else
+              styles_json="${style_entry}"
             fi
-            if [ -f /data/blue_style.json ]; then
-              styles_json="${styles_json},\"osm-blue\":{\"style\":\"/data/blue_style.json\"}"
-            fi
-            if [ -f /data/futuristic_style.json ]; then
-              styles_json="${styles_json},\"osm-futuristic\":{\"style\":\"/data/futuristic_style.json\"}"
-            fi
-            if [ -f /data/pink_style.json ]; then
-              styles_json="${styles_json},\"osm-pink\":{\"style\":\"/data/pink_style.json\"}"
-            fi
-            printf '%s\n' "{\"options\":{\"paths\":{\"root\":\"/data\",\"fonts\":\"fonts\",\"sprites\":\"sprites\",\"icons\":\"icons\"},\"serveAllFonts\":true,\"cors\":true},\"styles\":{${styles_json}},\"data\":{\"v3\":{\"mbtiles\":\"planet.mbtiles\"}}}" > /data/config.json
+          done
+          if [ -z "${styles_json}" ]; then
+            styles_json='"style_vibrant":{"style":"/data/style_vibrant.json"}'
           fi
+          printf '%s\n' "{\"options\":{\"paths\":{\"root\":\"/data\",\"fonts\":\"fonts\",\"sprites\":\"sprites\",\"icons\":\"icons\"},\"serveAllFonts\":true,\"cors\":true},\"styles\":{${styles_json}},\"data\":{\"v3\":{\"mbtiles\":\"planet.mbtiles\"}}}" > /data/config.json
 
           if [ -n "$(find /data/fonts -type f -name '*.pbf' -print -quit 2>/dev/null)" ]; then
             echo "[✓] Fonts verified and available"

@@ -27,7 +27,7 @@ A self-hosted OSM stack on K3s with a read-only status dashboard, a routing web 
 | `k8s/tileserver-init-assets-job.yaml` | One-shot job that copies static TileServer assets from the host bootstrap directory into the PVC |
 | `k8s/status.yaml` | Read-only status dashboard |
 | `k8s/web.yaml` | Browser routing UI |
-| `k8s/style-editor.yaml` | Maputnik style editor (edits the live TileServer-GL style.json via the status dashboard API) |
+| `k8s/style-editor.yaml` | Maputnik style editor (edits the live TileServer-GL `style_vibrant.json` via the status dashboard API) |
 | `scripts/deploy-osm.sh` | Installs manifests and stages static files on the host |
 | `scripts/run-import.sh` | Downloads a `.osm.pbf` and creates an import request |
 | `scripts/import-orchestrator.sh` | Sequential import workflow executed inside the orchestrator pod |
@@ -213,7 +213,7 @@ Both manifests provide a dedicated `mc-admin` deployment with all relevant PVCs 
 
 ## Styles / Routing
 
-- Added new style: `k8s/pink_style.json` (mirrored in `k8s/bigmemory/`).
+- Added new style: `k8s/style_pink.json` (mirrored in `k8s/bigmemory/`).
 - Rail/rollercoaster line widths/dash patterns were adjusted for better readability across zoom levels.
 - Construction street names are explicitly labeled in all styles (`road-label-construction`).
 - Style metadata `metadata.localosm_route_style` defines routing line appearance per style; WebUI reads this and falls back to safe defaults when missing.
@@ -233,14 +233,14 @@ If `ca-bundle-config.yaml` is absent when `deploy-osm.sh` runs, a disabled place
 
 The status dashboard's **Style-Editor** card opens Maputnik (pre-loaded with the currently active
 TileServer-GL style via `GET /api/style` on the status dashboard). After editing visually, export the
-style in Maputnik (Menu ▸ Export style ▸ Download) and upload the exported `style.json` back through
+style in Maputnik (Menu ▸ Export style ▸ Download) and upload the exported style JSON back through
 the "Style aktivieren" button on the status dashboard. The status app validates the style, writes it
 back into the mounted `tileserver-gl` PVC, and restarts the `tileserver-gl` deployment so the new
 style becomes active within seconds — without any manual `scp`/`kubectl` steps.
 
 ## Notes
 
-- The status dashboard mainly reports service health, data files, and orchestrator progress; the Style-Editor card is the one place it accepts a write (activating an edited style.json).
+- The status dashboard mainly reports service health, data files, and orchestrator progress; the Style-Editor card is the one place it accepts a write (activating an edited `style_vibrant.json`).
 - Set `use_java: "false"` in `k8s/tileserver-import-profile-config.yaml` to run the Planetiler import without the custom Java profile for comparison tests.
 - The routing web UI remains unchanged.
 - The orchestrator exits with code 0 when watched config maps change so Kubernetes restarts it with fresh state.
