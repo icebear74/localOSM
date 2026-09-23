@@ -1423,6 +1423,12 @@ data:
                     if isinstance(parsed, dict):
                         if isinstance(parsed.get("styles"), dict):
                             style_ids = [str(key) for key in parsed["styles"].keys()]
+                        elif isinstance(parsed.get("styles"), list):
+                            for entry in parsed["styles"]:
+                                if isinstance(entry, dict):
+                                    style_id = entry.get("id") or entry.get("name")
+                                    if style_id:
+                                        style_ids.append(str(style_id))
                         elif all(isinstance(value, dict) for value in parsed.values()):
                             style_ids = [str(key) for key in parsed.keys()]
                     elif isinstance(parsed, list):
