@@ -410,7 +410,7 @@ data:
     updateLinks();
 
     var DEFAULT_GEOCODER_PROVIDER = 'photon_nominatim';
-    var DEFAULT_STYLE_ID = 'osm';
+    var DEFAULT_STYLE_ID = 'style_vibrant';
     var MAP_STYLE_STORAGE_KEY = 'localosm.mapStyleId';
     var routeGeojson = null;
     var routeStyleConfig = {
