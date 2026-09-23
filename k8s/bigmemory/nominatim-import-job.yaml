@@ -198,8 +198,26 @@ spec:
           rm -rf "${TARGET_STAGED}" "${TARGET_PREVIOUS}" 2>/dev/null || true
           mkdir -p "${TARGET_STAGED}"
 
-          echo "Copying the database into the production staging directory..."
-          cp -a "${SOURCE_DATA_DIR}/." "${TARGET_STAGED}/"
+          echo "Copying database and removing source files step-by-step to preserve disk space..."
+          # 1. Ordnerstruktur auf dem Ziel spiegeln
+          find "${SOURCE_DATA_DIR}" -type d -mindepth 1 -exec bash -c '
+            for dir; do
+              rel="${dir#"$1/"}"
+              mkdir -p "$2/$rel"
+            done
+          ' _ "${SOURCE_DATA_DIR}" "${TARGET_STAGED}" \;
+
+          # 2. Dateien einzeln kopieren und Quelle direkt nach Erfolg löschen
+          find "${SOURCE_DATA_DIR}" -type f -exec bash -c '
+            for file; do
+              rel="${file#"$1/"}"
+              cp -a "$file" "$2/$rel" && rm -f "$file"
+            done
+          ' _ "${SOURCE_DATA_DIR}" "${TARGET_STAGED}" \;
+
+          # 3. Leere Quellordner aufräumen
+          find "${SOURCE_DATA_DIR}" -mindepth 1 -type d -empty -delete
+
           chown -R 100:100 "${TARGET_STAGED}"
           chmod 0700 "${TARGET_STAGED}" 2>/dev/null || true
           touch "${TARGET_STAGED}/import-finished"
@@ -210,7 +228,6 @@ spec:
           echo "Cleaning temporary Nominatim work directory..."
           find "${WORK_ROOT}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 
-          echo "Temporary and production volumes will be trimmed before exit."
         volumeMounts:
         - name: osm-temp
           mountPath: /osm-temp
@@ -232,9 +249,8 @@ spec:
         persistentVolumeClaim:
           claimName: planet
       - name: osm-temp
-        hostPath:
-          path: /mnt/osm-temp
-          type: DirectoryOrCreate
+        persistentVolumeClaim:
+          claimName: osm-temp
       - name: nominatim-production-data
         persistentVolumeClaim:
           claimName: nominatim

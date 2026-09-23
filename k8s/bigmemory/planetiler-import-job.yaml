@@ -22,6 +22,7 @@ spec:
       securityContext:
         fsGroup: 1000
         runAsUser: 1000
+        fsGroupChangePolicy: "OnRootMismatch"
       initContainers:
       - name: ca-injector
         image: alpine:3.20
@@ -420,7 +421,7 @@ spec:
           if [ "${USE_JAVA}" = "true" ] && [ -f /config/CustomProfile.java ]; then
             cp /config/CustomProfile.java "${PROFILE_SOURCE}"
             javac -cp "${PLANETILER_JAR}" -d "${PROFILE_SOURCE_ROOT}" "${PROFILE_SOURCE}"
-            java -Xmx150g -cp "${PLANETILER_JAR}:${PROFILE_SOURCE_ROOT}" com.onthegomap.planetiler.custom.CustomProfile \
+            java -Xmx64g -cp "${PLANETILER_JAR}:${PROFILE_SOURCE_ROOT}" com.onthegomap.planetiler.custom.CustomProfile \
               --osm-path="${SOURCE_OSM}" \
               --tmpdir="${TEMP_DIR}" \
               --output="${OUTPUT_NEW}" \
@@ -428,26 +429,24 @@ spec:
               --download=false \
               --nodemap-type=sparsearray \
               --nodemap-storage=ram \
-              --mmap-temp-nodes=false \
-              --mmap-temp-features=false \
-              --threads=36 \
-              --arguments=journal_mode=WAL,synchronous=OFF,mmap_size=0 \
+              --data-dir=/osm-temp/tileserver/data \
+              --threads=16 \
+              --arguments=journal_mode=WAL,synchronous=OFF \
               --minzoom=0 \
               --maxzoom=16 \
               --extra-osm-tags=shop,building,construction,name,name:de,name:en,wheelchair,amenity,highway,landuse,tourism,attraction,railway,roller_coaster,colour,color,layer,maxspeed,oneway
           else
-            java -Xmx150g -jar "${PLANETILER_JAR}" \
+            java -Xmx64g -jar "${PLANETILER_JAR}" \
               --osm-path="${SOURCE_OSM}" \
               --tmpdir="${TEMP_DIR}" \
               --output="${OUTPUT_NEW}" \
+              --data-dir=/osm-temp/tileserver/data \
               --force \
               --download=false \
               --nodemap-type=sparsearray \
               --nodemap-storage=ram \
-              --mmap-temp-nodes=false \
-              --mmap-temp-features=false \
-              --threads=36 \
-              --arguments=journal_mode=WAL,synchronous=OFF,mmap_size=0 \
+              --threads=16 \
+              --arguments=journal_mode=WAL,synchronous=OFF \
               --minzoom=0 \
               --maxzoom=16 \
               --extra-osm-tags=shop,building,construction,name,name:de,name:en,wheelchair,amenity,highway,landuse,tourism,attraction,railway,roller_coaster,colour,color,layer,maxspeed,oneway
@@ -509,9 +508,8 @@ spec:
         persistentVolumeClaim:
           claimName: planet
       - name: osm-temp
-        hostPath:
-          path: /mnt/osm-temp
-          type: DirectoryOrCreate
+        persistentVolumeClaim:
+          claimName: osm-temp
       - name: tileserver-gl
         persistentVolumeClaim:
           claimName: tileserver-gl

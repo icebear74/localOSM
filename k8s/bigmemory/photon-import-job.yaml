@@ -390,9 +390,8 @@ spec:
           readOnly: true
       volumes:
       - name: osm-temp
-        hostPath:
-          path: /mnt/osm-temp
-          type: DirectoryOrCreate
+        persistentVolumeClaim:
+          claimName: osm-temp
       - name: photon-root
         persistentVolumeClaim:
           claimName: photon

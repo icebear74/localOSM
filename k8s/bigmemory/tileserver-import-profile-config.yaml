@@ -4,7 +4,7 @@ metadata:
   name: osm-tileserver-import-profile-config
   namespace: osm
 data:
-  use_java: "false"
+  use_java: "true"
   CustomProfile.java: |
     package com.onthegomap.planetiler.custom;
 

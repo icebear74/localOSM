@@ -370,7 +370,7 @@ spec:
             memory: "2Gi"
             cpu: "2"
           limits:
-            memory: "24Gi"
+            memory: "48Gi"
             cpu: "16"
         startupProbe:
           httpGet:

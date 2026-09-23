@@ -6,7 +6,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: csi-cephfs-ec
+  storageClassName: odfin-fs-ec-4-2 
   resources:
     requests:
       storage: 300Gi
@@ -18,11 +18,11 @@ metadata:
   namespace: osm
 spec:
   accessModes:
-    - ReadWriteMany
-  storageClassName: csi-cephfs-temp
+    - ReadWriteOnce
+  storageClassName: csi-ceph-rbd-temp
   resources:
     requests:
-      storage: 800Gi
+      storage: 600Gi
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -32,7 +32,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: csi-cephfs-ec
+  storageClassName: odfin-fs-ec-4-2
   resources:
     requests:
       storage: 200Gi
@@ -45,7 +45,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: csi-cephfs-ec
+  storageClassName: odfin-fs-ec-4-2
   resources:
     requests:
       storage: 500Gi
@@ -58,7 +58,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: csi-cephfs-ec
+  storageClassName: odfin-fs-ec-4-2
   resources:
     requests:
       storage: 200Gi
@@ -71,7 +71,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: csi-cephfs-ec
+  storageClassName: csi-cephfs-replicated
   resources:
     requests:
       storage: 100Gi
@@ -84,7 +84,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: csi-cephfs-ec
+  storageClassName: csi-cephfs-replicated
   resources:
     requests:
       storage: 100Mi
