@@ -6,6 +6,7 @@ metadata:
 data:
   app.py: |
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import concurrent.futures
     import gzip
     import json
     import math
@@ -872,7 +873,7 @@ data:
         var btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'roadworks-item';
-        btn.innerHTML = '<b>' + esc(roadworkLabel(item)) + '</b>' + (item.startTimestamp ? '<div class="hint">Start: ' + esc(item.startTimestamp) + '</div>' : '');
+        btn.innerHTML = '<span><b>' + esc(roadworkLabel(item)) + '</b></span>' + (item.startTimestamp ? '<span class="hint" style="display:block">Start: ' + esc(item.startTimestamp) + '</span>' : '');
         btn.addEventListener('click', function() { zoomToRoadwork(idx); });
         list.appendChild(btn);
       });
@@ -1576,53 +1577,60 @@ data:
             items = []
             features = []
             failed = []
-            for road in normalized:
+            def fetch_road_entries(road):
                 details_url = ROADWORKS_DETAILS_URL_TEMPLATE.replace("{road}", urllib.parse.quote(road, safe=""))
                 try:
                     payload = Handler._http_json(details_url)
+                    entries = payload.get("roadworks") if isinstance(payload, dict) else payload
+                    if not isinstance(entries, list):
+                        entries = []
+                    return road, entries, None
                 except Exception as exc:
-                    failed.append({"road": road, "error": str(exc)})
-                    continue
-                entries = payload.get("roadworks") if isinstance(payload, dict) else payload
-                if not isinstance(entries, list):
-                    continue
-                for entry in entries:
-                    if not isinstance(entry, dict) or not Handler._is_closure(entry):
+                    return road, [], str(exc)
+
+            max_workers = max(2, min(12, len(normalized)))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                for road, entries, error in executor.map(fetch_road_entries, normalized):
+                    if error:
+                        failed.append({"road": road, "error": error})
                         continue
-                    bbox, center = Handler._extract_bbox_and_center(entry)
-                    if not bbox:
-                        continue
-                    geometry = entry.get("geometry")
-                    if not isinstance(geometry, dict):
-                        geometry = {
-                            "type": "LineString",
-                            "coordinates": [[bbox[0], bbox[1]], [bbox[2], bbox[3]]],
+                    for entry in entries:
+                        if not isinstance(entry, dict) or not Handler._is_closure(entry):
+                            continue
+                        bbox, center = Handler._extract_bbox_and_center(entry)
+                        if not bbox:
+                            continue
+                        geometry = entry.get("geometry")
+                        if not isinstance(geometry, dict):
+                            geometry = {
+                                "type": "LineString",
+                                "coordinates": [[bbox[0], bbox[1]], [bbox[2], bbox[3]]],
+                            }
+                        if geometry.get("type") != "LineString" or not isinstance(geometry.get("coordinates"), list):
+                            continue
+                        item_payload = {
+                            "id": str(entry.get("identifier") or f"{road}-{len(items)+1}"),
+                            "road": road,
+                            "title": str(entry.get("title") or "").strip(),
+                            "subtitle": str(entry.get("subtitle") or "").strip(),
+                            "description": entry.get("description") if isinstance(entry.get("description"), list) else [],
+                            "startTimestamp": entry.get("startTimestamp"),
+                            "bbox": bbox,
+                            "center": center,
                         }
-                    if geometry.get("type") != "LineString" or not isinstance(geometry.get("coordinates"), list):
-                        continue
-                    item_payload = {
-                        "id": str(entry.get("identifier") or f"{road}-{len(items)+1}"),
-                        "road": road,
-                        "title": str(entry.get("title") or "").strip(),
-                        "subtitle": str(entry.get("subtitle") or "").strip(),
-                        "description": entry.get("description") if isinstance(entry.get("description"), list) else [],
-                        "startTimestamp": entry.get("startTimestamp"),
-                        "bbox": bbox,
-                        "center": center,
-                    }
-                    items.append(item_payload)
-                    features.append(
-                        {
-                            "type": "Feature",
-                            "geometry": geometry,
-                            "properties": {
-                                "id": item_payload["id"],
-                                "road": road,
-                                "title": item_payload["title"],
-                                "subtitle": item_payload["subtitle"],
-                            },
-                        }
-                    )
+                        items.append(item_payload)
+                        features.append(
+                            {
+                                "type": "Feature",
+                                "geometry": geometry,
+                                "properties": {
+                                    "id": item_payload["id"],
+                                    "road": road,
+                                    "title": item_payload["title"],
+                                    "subtitle": item_payload["subtitle"],
+                                },
+                            }
+                        )
             payload = {
                 "items": items,
                 "geojson": {"type": "FeatureCollection", "features": features},

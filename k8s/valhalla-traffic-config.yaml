@@ -13,6 +13,7 @@ data:
     import tarfile
     import time
     import urllib.error
+    import urllib.parse
     import urllib.request
 
     VALHALLA_URL = os.environ.get("VALHALLA_URL_LOCAL", "http://127.0.0.1:8002").rstrip("/")
@@ -214,7 +215,7 @@ data:
         failed_roads = []
         successful_roads = 0
         for road in roads:
-            details_url = ROADWORKS_DETAILS_URL_TEMPLATE.replace("{road}", road)
+            details_url = ROADWORKS_DETAILS_URL_TEMPLATE.replace("{road}", urllib.parse.quote(road, safe=""))
             try:
                 payload = http_json(details_url)
                 road_entries = roadworks_from_payload(payload)
