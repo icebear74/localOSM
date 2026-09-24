@@ -1549,8 +1549,27 @@ data:
                 extent = item.get("extent")
                 if isinstance(extent, str):
                     try:
-                        lat1, lon1, lat2, lon2 = [float(part.strip()) for part in extent.split(",")]
-                        coords = [(lon1, lat1), (lon2, lat2)]
+                        a1, b1, a2, b2 = [float(part.strip()) for part in extent.split(",")]
+                        def normalize_pair(first, second):
+                            candidates = []
+                            if abs(first) <= 90 and abs(second) <= 180:
+                                candidates.append((first, second))
+                            if abs(second) <= 90 and abs(first) <= 180:
+                                candidates.append((second, first))
+                            if not candidates:
+                                return None
+                            if len(candidates) == 1:
+                                return candidates[0]
+                            for lat, lon in candidates:
+                                if abs(lat) >= abs(lon):
+                                    return (lat, lon)
+                            return candidates[0]
+                        pair1 = normalize_pair(a1, b1)
+                        pair2 = normalize_pair(a2, b2)
+                        if pair1 and pair2:
+                            lat1, lon1 = pair1
+                            lat2, lon2 = pair2
+                            coords = [(lon1, lat1), (lon2, lat2)]
                     except Exception:
                         coords = []
             if not coords:
@@ -2167,10 +2186,8 @@ data:
                 "language": payload.get("instruction_language", "de"),
             }
             use_live_traffic = payload.get("use_live_traffic", True)
-            if isinstance(use_live_traffic, str):
-                use_live_traffic = use_live_traffic.strip().lower() in {"1", "true", "yes", "ja", "on"}
-            else:
-                use_live_traffic = bool(use_live_traffic)
+            if not isinstance(use_live_traffic, bool):
+                raise ValueError("use_live_traffic must be a boolean")
             if use_live_traffic:
                 request["date_time"] = {"type": 0}
 
@@ -2242,6 +2259,8 @@ data:
                     "time_seconds": summary.get("time"),
                     "trip": data.get("trip"),
                 })
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 400)
             except Exception as exc:  # noqa: BLE001
                 self._send_json({"error": self._friendly_error(exc, "Valhalla (Routing)")}, 502)
 
@@ -2255,6 +2274,8 @@ data:
                     "time_seconds": summary.get("time"),
                     "units": payload.get("units", "km"),
                 })
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 400)
             except Exception as exc:  # noqa: BLE001
                 self._send_json({"error": self._friendly_error(exc, "Valhalla (Routing)")}, 502)
 
