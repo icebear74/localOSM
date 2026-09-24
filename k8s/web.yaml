@@ -548,18 +548,6 @@ data:
       } else {
         map.getSource('roadworks-closures').setData(roadworksGeojson);
       }
-      if (!map.getLayer('roadworks-closure-outline')) {
-        map.addLayer({
-          id: 'roadworks-closure-outline',
-          type: 'line',
-          source: 'roadworks-closures',
-          paint: {
-            'line-color': '#ffffff',
-            'line-width': ['interpolate', ['linear'], ['zoom'], 6, 3, 12, 6, 16, 10],
-            'line-opacity': 0.9
-          }
-        });
-      }
       if (!map.getLayer('roadworks-closure-line')) {
         map.addLayer({
           id: 'roadworks-closure-line',
@@ -571,6 +559,18 @@ data:
             'line-opacity': 0.95
           }
         });
+      }
+      if (!map.getLayer('roadworks-closure-outline')) {
+        map.addLayer({
+          id: 'roadworks-closure-outline',
+          type: 'line',
+          source: 'roadworks-closures',
+          paint: {
+            'line-color': '#ffffff',
+            'line-width': ['interpolate', ['linear'], ['zoom'], 6, 3, 12, 6, 16, 10],
+            'line-opacity': 0.9
+          }
+        }, 'roadworks-closure-line');
       }
     }
 
@@ -2209,7 +2209,9 @@ data:
                 "units": payload.get("units", "km"),
                 "language": payload.get("instruction_language", "de"),
             }
-            use_live_traffic = Handler._parse_optional_bool(payload.get("use_live_traffic", True), "use_live_traffic")
+            use_live_traffic = False
+            if "use_live_traffic" in payload:
+                use_live_traffic = Handler._parse_optional_bool(payload.get("use_live_traffic"), "use_live_traffic")
             if use_live_traffic:
                 request["date_time"] = {"type": 0}
 
