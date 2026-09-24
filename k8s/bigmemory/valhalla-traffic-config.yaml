@@ -23,6 +23,7 @@ data:
     TRAFFIC_TAR_PATH = os.environ.get("TRAFFIC_TAR_PATH", "/shared-data/active/traffic.tar")
     STATE_FILE = os.environ.get("ROADWORKS_STATE_FILE", "/shared-data/active/roadworks-state.json")
     LOCK_DIR = os.environ.get("ROADWORKS_LOCK_DIR", "/shared-data/active/.roadworks-update.lock")
+    RUN_ONCE = str(os.environ.get("ROADWORKS_RUN_ONCE", "")).strip().lower() in {"1", "true", "yes", "ja"}
     REFRESH_SECONDS = max(300, int(os.environ.get("ROADWORKS_REFRESH_SECONDS", "3600")))
     HTTP_TIMEOUT_SECONDS = max(5, int(os.environ.get("ROADWORKS_HTTP_TIMEOUT_SECONDS", "30")))
     STARTUP_TIMEOUT_SECONDS = max(30, int(os.environ.get("ROADWORKS_STARTUP_TIMEOUT_SECONDS", "600")))
@@ -443,10 +444,15 @@ data:
             cycle_started = time.time()
             try:
                 run_cycle()
+                if RUN_ONCE:
+                    log("ROADWORKS_RUN_ONCE enabled; stopping after one update cycle.")
+                    return
             except urllib.error.URLError as exc:
                 log(f"Roadworks update failed while fetching data: {exc}")
             except Exception as exc:
                 log(f"Roadworks update failed: {exc}")
+                if RUN_ONCE:
+                    raise
             sleep_seconds = REFRESH_SECONDS - (time.time() - cycle_started)
             if sleep_seconds > 0:
                 time.sleep(sleep_seconds)

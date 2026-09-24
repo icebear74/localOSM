@@ -1,0 +1,111 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: valhalla-traffic-updater
+  namespace: osm
+spec:
+  schedule: "0 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          nodeSelector:
+            osm: "true"
+          restartPolicy: OnFailure
+          initContainers:
+          - name: ca-injector
+            image: alpine:3.20
+            imagePullPolicy: IfNotPresent
+            env:
+            - name: CA_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-ca-bundle
+                  key: ca-enabled
+            - name: CA_CRT
+              valueFrom:
+                configMapKeyRef:
+                  name: osm-ca-bundle
+                  key: ca.crt
+            command:
+            - /bin/sh
+            - -c
+            args:
+            - |
+              set -eu
+              apk add --no-cache ca-certificates >/dev/null 2>&1 || true
+              if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+                cp /etc/ssl/certs/ca-certificates.crt /ca-certs/ca.crt
+              else
+                touch /ca-certs/ca.crt
+              fi
+              if [ "${CA_ENABLED}" = "true" ] && [ -n "${CA_CRT}" ]; then
+                printf '\n%s\n' "${CA_CRT}" >> /ca-certs/ca.crt
+              fi
+            resources:
+              requests:
+                memory: 16Mi
+                cpu: 10m
+              limits:
+                memory: 64Mi
+                cpu: 50m
+            volumeMounts:
+            - name: ca-certs
+              mountPath: /ca-certs
+          containers:
+          - name: valhalla-traffic-updater
+            image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
+            imagePullPolicy: IfNotPresent
+            command: ["python3", "/traffic-updater/roadworks_updater.py"]
+            env:
+            - name: VALHALLA_URL_LOCAL
+              value: "http://valhalla.osm.svc.cluster.local:8002"
+            - name: ROADWORKS_URL
+              value: "https://verkehr.autobahn.de/o/autobahn/A1/services/roadworks"
+            - name: ROADWORKS_REFRESH_SECONDS
+              value: "3600"
+            - name: ROADWORKS_RUN_ONCE
+              value: "true"
+            - name: TRAFFIC_TAR_PATH
+              value: "/shared-data/active/traffic.tar"
+            - name: ROADWORKS_STATE_FILE
+              value: "/shared-data/active/roadworks-state.json"
+            - name: ROADWORKS_LOCK_DIR
+              value: "/shared-data/active/.roadworks-update.lock"
+            - name: SSL_CERT_FILE
+              value: /ca-certs/ca.crt
+            - name: CURL_CA_BUNDLE
+              value: /ca-certs/ca.crt
+            - name: REQUESTS_CA_BUNDLE
+              value: /ca-certs/ca.crt
+            - name: NODE_EXTRA_CA_CERTS
+              value: /ca-certs/ca.crt
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "100m"
+              limits:
+                memory: "2Gi"
+                cpu: "2"
+            volumeMounts:
+            - name: valhalla-data
+              mountPath: /shared-data
+            - name: valhalla-traffic-updater
+              mountPath: /traffic-updater
+              readOnly: true
+            - name: ca-certs
+              mountPath: /ca-certs
+              readOnly: true
+          volumes:
+          - name: valhalla-data
+            persistentVolumeClaim:
+              claimName: valhalla
+          - name: valhalla-traffic-updater
+            configMap:
+              name: osm-valhalla-traffic-updater
+          - name: ca-certs
+            emptyDir: {}

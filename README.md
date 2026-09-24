@@ -129,6 +129,22 @@ The script downloads the extract and writes an import request. The orchestrator 
 Each step uses a dedicated Kubernetes Job. The shared `osm-temp` PVC keeps the reusable merged/downloaded inputs and per-service work directories.  
 After successful build steps, a **central `import-promotion` job** (`k8s/import-promotion-job.yaml`) activates all available outputs in a fixed order (Nominatim, Valhalla, Photon, TileServer), checks free disk space per area first, copies file-by-file with per-file validation, then removes each source file only after successful target write.
 
+### Valhalla traffic closures updater (hourly CronJob)
+
+Closed-road updates are applied by `valhalla-traffic-updater` CronJob (hourly) which writes to:
+
+- `/shared-data/active/traffic.tar`
+- `/shared-data/active/roadworks-state.json`
+
+Useful checks:
+
+```bash
+kubectl -n osm get cronjob valhalla-traffic-updater
+kubectl -n osm get jobs --sort-by=.metadata.creationTimestamp | tail
+kubectl -n osm logs job/<latest-valhalla-traffic-updater-job>
+kubectl -n osm create job --from=cronjob/valhalla-traffic-updater valhalla-traffic-updater-manual-$(date +%s)
+```
+
 ### Tuning the Nominatim import
 
 The `osm2pgsql` step invoked by `nominatim import` maps its worker/process count 1:1 to the
