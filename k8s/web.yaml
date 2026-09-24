@@ -1069,7 +1069,7 @@ data:
         ['costing', defaults.costing || 'auto'],
         ['units', defaults.units || 'km'],
         ['instruction-language', defaults.instruction_language || 'de'],
-        ['avoid-closures', defaults.avoid_closures !== false],
+        ['avoid-closures', defaults.use_live_traffic !== false],
         ['toll_penalty', tollValue],
         ['ferry_penalty', ferryValue],
         ['tunnel_penalty', defaults.tunnel_penalty == null ? 0 : defaults.tunnel_penalty],
@@ -1154,7 +1154,7 @@ data:
         costing: document.getElementById('costing').value,
         units:   document.getElementById('units').value,
         instruction_language: document.getElementById('instruction-language').value,
-        avoid_closures: !!(document.getElementById('avoid-closures') && document.getElementById('avoid-closures').checked),
+        use_live_traffic: !!(document.getElementById('avoid-closures') && document.getElementById('avoid-closures').checked),
         shortest: shortestValue,
         advanced_options_enabled: advancedOptionsEnabled
       };
@@ -2166,7 +2166,7 @@ data:
                 "units": payload.get("units", "km"),
                 "language": payload.get("instruction_language", "de"),
             }
-            if payload.get("avoid_closures", True):
+            if payload.get("use_live_traffic", True):
                 request["date_time"] = {"type": 0}
 
             request["costing_options"] = {}
