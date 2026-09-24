@@ -2219,7 +2219,7 @@ data:
                 "units": payload.get("units", "km"),
                 "language": payload.get("instruction_language", "de"),
             }
-            use_live_traffic = False
+            use_live_traffic = True
             if "use_live_traffic" in payload:
                 use_live_traffic = Handler._parse_optional_bool(payload.get("use_live_traffic"), "use_live_traffic")
             if use_live_traffic:
