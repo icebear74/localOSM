@@ -114,15 +114,16 @@ spec:
           cp "${JAVA_CACERTS}" /ca-certs/cacerts
           chmod 0644 /ca-certs/cacerts
 
-          STORE_TYPE=""
-          if keytool -list -keystore /ca-certs/cacerts -storepass changeit -storetype PKCS12 >/dev/null 2>&1; then
-            STORE_TYPE="PKCS12"
-          elif keytool -list -keystore /ca-certs/cacerts -storepass changeit -storetype JKS >/dev/null 2>&1; then
-            STORE_TYPE="JKS"
-          else
-            echo "[java-ca-injector] ERROR: Unable to open /ca-certs/cacerts as PKCS12 or JKS" >&2
-            exit 1
-          fi
+          STORE_TYPE="$(keytool -J-Duser.language=en -J-Duser.country=US -list -v \
+            -keystore /ca-certs/cacerts -storepass changeit 2>/dev/null \
+            | awk -F': ' '/^Keystore type:/{print toupper($2); exit}')"
+          case "${STORE_TYPE}" in
+            JKS|PKCS12) ;;
+            *)
+              echo "[java-ca-injector] ERROR: Could not determine truststore type for /ca-certs/cacerts" >&2
+              exit 1
+              ;;
+          esac
           echo "${STORE_TYPE}" > /ca-certs/java-truststore-type
           echo "[java-ca-injector] Detected truststore type: ${STORE_TYPE}"
 

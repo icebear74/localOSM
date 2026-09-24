@@ -205,11 +205,35 @@ data:
         fi
       }
       trap restore_once EXIT
-      mv -f "${tmp_file}" "${dst_file}"
-      rm -f "${src_file}"
+      backup_file="${dst_file}.previous.$$"
+      had_existing=0
+      if [ -f "${dst_file}" ]; then
+        had_existing=1
+        if ! mv -f "${dst_file}" "${backup_file}"; then
+          rm -f "${tmp_file}" 2>/dev/null || true
+          mark_failure "${area}" "could not backup existing destination file"
+          restore_once
+          trap - EXIT
+          return 0
+        fi
+      fi
+      activated=0
+      if mv -f "${tmp_file}" "${dst_file}"; then
+        activated=1
+        rm -f "${src_file}"
+        rm -f "${backup_file}" 2>/dev/null || true
+      else
+        rm -f "${tmp_file}" 2>/dev/null || true
+        if [ "${had_existing}" -eq 1 ] && [ -f "${backup_file}" ]; then
+          mv -f "${backup_file}" "${dst_file}" 2>/dev/null || true
+        fi
+        mark_failure "${area}" "activation move failed"
+      fi
       restore_once
       trap - EXIT
-      echo "[INFO][${area}] activated ${dst_file}"
+      if [ "${activated}" -eq 1 ]; then
+        echo "[INFO][${area}] activated ${dst_file}"
+      fi
     }
 
     promote_tree_area "nominatim" "/osm-temp/nominatim/work/current" "/nominatim" "current" "nominatim"
