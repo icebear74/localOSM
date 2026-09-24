@@ -27,7 +27,7 @@ A self-hosted OSM stack on K3s with a read-only status dashboard, a routing web 
 | `k8s/tileserver-init-assets-job.yaml` | One-shot job that copies static TileServer assets from the host bootstrap directory into the PVC |
 | `k8s/status.yaml` | Read-only status dashboard |
 | `k8s/web.yaml` | Browser routing UI |
-| `k8s/style-editor.yaml` | Maputnik style editor (edits the live TileServer-GL style.json via the status dashboard API) |
+| `k8s/style-editor.yaml` | Maputnik style editor (edits the live TileServer-GL `style_vibrant.json` via the status dashboard API) |
 | `scripts/deploy-osm.sh` | Installs manifests and stages static files on the host |
 | `scripts/run-import.sh` | Downloads a `.osm.pbf` and creates an import request |
 | `scripts/import-orchestrator.sh` | Sequential import workflow executed inside the orchestrator pod |
@@ -101,13 +101,49 @@ kubectl apply -f /mnt/OSM/manifests/tileserver-init-assets-job.yaml
 bash scripts/run-import.sh --url https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf
 ```
 
-The script downloads the extract and writes an import request. The orchestrator pod processes requests strictly in sequence. Import jobs are intended to be autonomous: the orchestrator only submits them, while each job should manage its own deployment lifecycle (scale/rollout/restart) and data promotion steps internally.
+## Runtime rollout without reimport
+
+For runtime/config fixes (for example Nominatim warm-up, Photon truststore handling, promotion script hardening), roll out only manifests/config and restart deployments.
+Do **not** start any import jobs and do not clear `osm-temp`/service PVC data.
+
+```bash
+bash scripts/deploy-osm.sh            # or: bash scripts/deploy-osm.sh --bigmemory
+kubectl -n osm rollout restart deployment/nominatim deployment/photon deployment/tileserver-gl
+kubectl -n osm rollout status deployment/nominatim --timeout=600s
+kubectl -n osm rollout status deployment/photon --timeout=600s
+kubectl -n osm rollout status deployment/tileserver-gl --timeout=600s
+```
+
+Quick checks after restart:
+
+- Nominatim: `kubectl -n osm logs deployment/nominatim | grep -E 'pg_prewarm|admin --warm'`
+- Photon truststore type: `kubectl -n osm logs deployment/photon | grep -E 'Detected truststore type|localosm-custom-root-ca'`
+- Promotion job behavior (rollback/copy status): `kubectl -n osm logs job/import-promotion --tail=200`
+
+The script downloads the extract and writes an import request. The orchestrator pod processes requests strictly in sequence.
 
 1. Nominatim
 2. Valhalla
 3. TileServer
 
-Each step uses a dedicated Kubernetes Job. The shared `osm-temp` PVC keeps the reusable merged/downloaded inputs and per-service work directories, while every import job now copies/promotes its finished output into the active directory itself and then cleans its own work directory.
+Each step uses a dedicated Kubernetes Job. The shared `osm-temp` PVC keeps the reusable merged/downloaded inputs and per-service work directories.  
+After successful build steps, a **central `import-promotion` job** (`k8s/import-promotion-job.yaml`) activates all available outputs in a fixed order (Nominatim, Valhalla, Photon, TileServer), checks free disk space per area first, copies file-by-file with per-file validation, then removes each source file only after successful target write.
+
+### Valhalla traffic closures updater (hourly CronJob)
+
+Closed-road updates are applied by `valhalla-traffic-updater` CronJob (hourly) which writes to:
+
+- `/shared-data/active/traffic.tar`
+- `/shared-data/active/roadworks-state.json`
+
+Useful checks:
+
+```bash
+kubectl -n osm get cronjob valhalla-traffic-updater
+kubectl -n osm get jobs --sort-by=.metadata.creationTimestamp | tail
+kubectl -n osm logs job/<latest-valhalla-traffic-updater-job>
+kubectl -n osm create job --from=cronjob/valhalla-traffic-updater valhalla-traffic-updater-manual-$(date +%s)
+```
 
 ### Tuning the Nominatim import
 
@@ -201,6 +237,22 @@ data:
    `SSL_CERT_FILE`, `CURL_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`.
 3. Java containers (`eclipse-temurin`, `pelias/elasticsearch`) additionally get a **`java-ca-injector`** that creates a JKS keystore at `/ca-certs/cacerts` and sets `JAVA_TOOL_OPTIONS` to use it.
 
+For download tools that do not reliably honor environment variables, manifests now pass CA paths explicitly (for example `wget --ca-certificate=/ca-certs/ca.crt`, `curl --cacert /ca-certs/ca.crt`).
+
+## Admin Pod (Midnight Commander)
+
+- Standard storage profile: `k8s/mc-admin.yaml`
+- Big-memory storage profile: `k8s/bigmemory/mc-admin.yaml`
+
+Both manifests provide a dedicated `mc-admin` deployment with all relevant PVCs mounted under `/pvc/*`.
+
+## Styles / Routing
+
+- Added new style: `k8s/style_pink.json` (mirrored in `k8s/bigmemory/`).
+- Rail/rollercoaster line widths/dash patterns were adjusted for better readability across zoom levels.
+- Construction street names are explicitly labeled in all styles (`road-label-construction`).
+- Style metadata `metadata.localosm_route_style` defines routing line appearance per style; WebUI reads this and falls back to safe defaults when missing.
+
 If `ca-bundle-config.yaml` is absent when `deploy-osm.sh` runs, a disabled placeholder is created automatically from the example file.
 
 ## URLs
@@ -216,14 +268,14 @@ If `ca-bundle-config.yaml` is absent when `deploy-osm.sh` runs, a disabled place
 
 The status dashboard's **Style-Editor** card opens Maputnik (pre-loaded with the currently active
 TileServer-GL style via `GET /api/style` on the status dashboard). After editing visually, export the
-style in Maputnik (Menu ▸ Export style ▸ Download) and upload the exported `style.json` back through
+style in Maputnik (Menu ▸ Export style ▸ Download) and upload the exported style JSON back through
 the "Style aktivieren" button on the status dashboard. The status app validates the style, writes it
 back into the mounted `tileserver-gl` PVC, and restarts the `tileserver-gl` deployment so the new
 style becomes active within seconds — without any manual `scp`/`kubectl` steps.
 
 ## Notes
 
-- The status dashboard mainly reports service health, data files, and orchestrator progress; the Style-Editor card is the one place it accepts a write (activating an edited style.json).
+- The status dashboard mainly reports service health, data files, and orchestrator progress; the Style-Editor card is the one place it accepts a write (activating an edited `style_vibrant.json`).
 - Set `use_java: "false"` in `k8s/tileserver-import-profile-config.yaml` to run the Planetiler import without the custom Java profile for comparison tests.
 - The routing web UI remains unchanged.
 - The orchestrator exits with code 0 when watched config maps change so Kubernetes restarts it with fresh state.

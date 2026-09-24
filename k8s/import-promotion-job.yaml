@@ -1,0 +1,56 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: import-promotion
+  namespace: osm
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      serviceAccountName: planetiler-import
+      nodeSelector:
+        osm: "true"
+      restartPolicy: Never
+      containers:
+      - name: import-promotion
+        image: bitnami/kubectl:1.30.4
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "/scripts/promote.sh"]
+        env:
+        - name: OSM_NAMESPACE
+          value: osm
+        volumeMounts:
+        - name: promotion-script
+          mountPath: /scripts
+          readOnly: true
+        - name: osm-temp
+          mountPath: /osm-temp
+        - name: nominatim
+          mountPath: /nominatim
+        - name: valhalla
+          mountPath: /valhalla
+        - name: photon
+          mountPath: /photon
+        - name: tileserver-gl
+          mountPath: /tileserver-gl
+      volumes:
+      - name: promotion-script
+        configMap:
+          name: osm-import-promotion-config
+          defaultMode: 0755
+      - name: osm-temp
+        persistentVolumeClaim:
+          claimName: osm-temp
+      - name: nominatim
+        persistentVolumeClaim:
+          claimName: nominatim
+      - name: valhalla
+        persistentVolumeClaim:
+          claimName: valhalla
+      - name: photon
+        persistentVolumeClaim:
+          claimName: photon
+      - name: tileserver-gl
+        persistentVolumeClaim:
+          claimName: tileserver-gl

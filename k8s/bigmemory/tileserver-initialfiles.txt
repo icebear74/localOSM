@@ -1,5 +1,5 @@
 - [ ] /config.json
-- [ ] /style.json
+- [ ] /style_vibrant.json
 - [ ] /fonts/{fontstack}/{range}.pbf
 - [ ] /sprites/sprite.json
 - [ ] /sprites/sprite.png

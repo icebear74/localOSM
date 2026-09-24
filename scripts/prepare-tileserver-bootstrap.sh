@@ -64,23 +64,29 @@ if [ -d "${REPO_ROOT}/icons" ]; then
   ${SUDO} cp -a "${REPO_ROOT}/icons/." "${BOOTSTRAP_DIR}/icons/"
 fi
 
-for style_file in style.json dark_style.json blue_style.json futuristic_style.json; do
-  if [ -f "${REPO_ROOT}/k8s/${style_file}" ]; then
-    ${SUDO} cp "${REPO_ROOT}/k8s/${style_file}" "${BOOTSTRAP_DIR}/${style_file}"
-  else
-    ${SUDO} rm -f "${BOOTSTRAP_DIR:?}/${style_file}"
-  fi
+${SUDO} find "${BOOTSTRAP_DIR}" -maxdepth 1 -type f -name 'style_*.json' -delete
+for source_style in "${REPO_ROOT}"/k8s/style_*.json; do
+  [ -f "${source_style}" ] || continue
+  ${SUDO} cp "${source_style}" "${BOOTSTRAP_DIR}/$(basename "${source_style}")"
 done
 
-styles_json='"osm":{"style":"/data/style.json"}'
-if [ -f "${BOOTSTRAP_DIR}/dark_style.json" ]; then
-  styles_json="${styles_json},\"osm-dark\":{\"style\":\"/data/dark_style.json\"}"
+if [ ! -f "${BOOTSTRAP_DIR}/style_vibrant.json" ]; then
+  printf '%s\n' '{"version":8,"name":"LocalOSM","sources":{"openmaptiles":{"type":"vector","url":"mbtiles://{v3}"}},"glyphs":"{fontstack}/{range}.pbf","layers":[{"id":"background","type":"background","paint":{"background-color":"#f2efe9"}}]}' | ${SUDO} tee "${BOOTSTRAP_DIR}/style_vibrant.json" >/dev/null
 fi
-if [ -f "${BOOTSTRAP_DIR}/blue_style.json" ]; then
-  styles_json="${styles_json},\"osm-blue\":{\"style\":\"/data/blue_style.json\"}"
-fi
-if [ -f "${BOOTSTRAP_DIR}/futuristic_style.json" ]; then
-  styles_json="${styles_json},\"osm-futuristic\":{\"style\":\"/data/futuristic_style.json\"}"
+
+styles_json=''
+while IFS= read -r style_path; do
+  style_file="$(basename "${style_path}")"
+  style_id="${style_file%.json}"
+  style_entry="\"${style_id}\":{\"style\":\"/data/${style_file}\"}"
+  if [ -n "${styles_json}" ]; then
+    styles_json="${styles_json},${style_entry}"
+  else
+    styles_json="${style_entry}"
+  fi
+done < <(find "${BOOTSTRAP_DIR}" -maxdepth 1 -type f -name 'style_*.json' | sort)
+if [ -z "${styles_json}" ]; then
+  styles_json='"style_vibrant":{"style":"/data/style_vibrant.json"}'
 fi
 printf '%s\n' "{\"options\":{\"paths\":{\"root\":\"/data\",\"fonts\":\"fonts\",\"sprites\":\"sprites\",\"icons\":\"icons\"},\"serveAllFonts\":true,\"cors\":true},\"styles\":{${styles_json}},\"data\":{\"v3\":{\"mbtiles\":\"planet.mbtiles\"}}}" | ${SUDO} tee "${BOOTSTRAP_DIR}/config.json" >/dev/null
 
@@ -93,17 +99,12 @@ if [ "${APPLY_CONFIGMAP}" = true ]; then
     echo "ERROR: kubectl could not reach a Kubernetes cluster" >&2
     exit 1
   fi
-  if [ -f "${REPO_ROOT}/k8s/style.json" ]; then
-    style_files=("--from-file=style.json=${REPO_ROOT}/k8s/style.json")
-    if [ -f "${REPO_ROOT}/k8s/dark_style.json" ]; then
-      style_files+=("--from-file=dark_style.json=${REPO_ROOT}/k8s/dark_style.json")
-    fi
-    if [ -f "${REPO_ROOT}/k8s/blue_style.json" ]; then
-      style_files+=("--from-file=blue_style.json=${REPO_ROOT}/k8s/blue_style.json")
-    fi
-    if [ -f "${REPO_ROOT}/k8s/futuristic_style.json" ]; then
-      style_files+=("--from-file=futuristic_style.json=${REPO_ROOT}/k8s/futuristic_style.json")
-    fi
+  style_files=()
+  for source_style in "${REPO_ROOT}"/k8s/style_*.json; do
+    [ -f "${source_style}" ] || continue
+    style_files+=("--from-file=$(basename "${source_style}")=${source_style}")
+  done
+  if [ "${#style_files[@]}" -gt 0 ]; then
     kubectl -n "${NAMESPACE}" create configmap tileserver-style "${style_files[@]}" --dry-run=client -o yaml | kubectl apply -f -
   fi
 fi

@@ -202,10 +202,6 @@ spec:
             if [ "${BOOTSTRAP_LOCK_HELD}" = "1" ]; then
               rmdir "${BOOTSTRAP_LOCK}" 2>/dev/null || true
             fi
-            if [ -n "${UPDATER_PID:-}" ]; then
-              kill "${UPDATER_PID}" 2>/dev/null || true
-              wait "${UPDATER_PID}" 2>/dev/null || true
-            fi
           }
           trap cleanup EXIT INT TERM
           if [ ! -f /shared-data/active/traffic.tar ]; then
@@ -234,8 +230,6 @@ spec:
               BOOTSTRAP_LOCK_HELD=0
             fi
           fi
-          python3 /traffic-updater/roadworks_updater.py &
-          UPDATER_PID="$!"
           exec /valhalla/scripts/run.sh build_tiles
         env:
         - name: use_tiles_ignore_pbf
@@ -248,16 +242,6 @@ spec:
           value: "6"
         - name: VALHALLA_URL_LOCAL
           value: "http://127.0.0.1:8002"
-        - name: ROADWORKS_URL
-          value: "https://verkehr.autobahn.de/o/autobahn/A1/services/roadworks"
-        - name: ROADWORKS_REFRESH_SECONDS
-          value: "3600"
-        - name: TRAFFIC_TAR_PATH
-          value: "/shared-data/active/traffic.tar"
-        - name: ROADWORKS_STATE_FILE
-          value: "/shared-data/active/roadworks-state.json"
-        - name: ROADWORKS_LOCK_DIR
-          value: "/shared-data/active/.roadworks-update.lock"
         - name: SSL_CERT_FILE
           value: /ca-certs/ca.crt
         - name: CURL_CA_BUNDLE
@@ -283,9 +267,6 @@ spec:
         - name: ca-certs
           mountPath: /ca-certs
           readOnly: true
-        - name: valhalla-traffic-updater
-          mountPath: /traffic-updater
-          readOnly: true
       volumes:
       - name: valhalla-data
         persistentVolumeClaim:
@@ -295,9 +276,6 @@ spec:
       - name: valhalla-config
         configMap:
           name: osm-valhalla-config
-      - name: valhalla-traffic-updater
-        configMap:
-          name: osm-valhalla-traffic-updater
       - name: ca-certs
         emptyDir: {}
 ---

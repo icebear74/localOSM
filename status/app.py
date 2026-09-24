@@ -49,7 +49,7 @@ COUNTRIES_FILE = os.path.join(STATUS_DIR, "countries.json")
 STATE_FILE = os.path.join(STATUS_DIR, "library-state.json")
 CONFIG_FILE = os.path.join(STATUS_DIR, "config.json")
 # Live style used by TileServer-GL (k8s/tileserver-gl-deployment.yaml mounts the same tileserver-gl PVC path).
-TILESERVER_STYLE_PATH = os.path.join(DATA_DIR, "tileserver", "active", "style.json")
+TILESERVER_STYLE_PATH = os.path.join(DATA_DIR, "tileserver", "active", "style_vibrant.json")
 IMPORT_REQUEST_FILE = os.path.join(STATUS_DIR, "import-request.json")
 IMPORT_REQUEST_QUEUE_FILE = os.path.join(STATUS_DIR, "import-request-queue.json")
 IMPORT_REQUEST_LOCK_FILE = os.path.join(STATUS_DIR, "import-request.lock")
@@ -1011,7 +1011,7 @@ INDEX_HTML = """<!doctype html>
     // no basemap was drawn and the source inspector showed empty/localhost fields.
     var tileserverLink = document.getElementById('tileserver-link');
     var tileserverPort = (tileserverLink && tileserverLink.dataset.port) || '30085';
-    var styleApiUrl = baseUrl + ':' + tileserverPort + '/styles/osm/style.json';
+    var styleApiUrl = baseUrl + ':' + tileserverPort + '/styles/style_vibrant/style.json';
     CURRENT_STYLE_API_URL = styleApiUrl;
     ['style-editor-link', 'style-editor-link-2'].forEach(function(id) {
       var styleLink = document.getElementById(id);
@@ -1498,7 +1498,7 @@ INDEX_HTML = """<!doctype html>
     var input = document.getElementById('style-upload-input');
     var statusEl = document.getElementById('style-upload-status');
     if (!input.files || !input.files.length) {
-      statusEl.textContent = 'Bitte zuerst eine exportierte style.json auswählen.';
+      statusEl.textContent = 'Bitte zuerst eine exportierte Style-JSON auswählen.';
       return;
     }
     statusEl.textContent = 'Aktiviere Style ...';
@@ -2220,7 +2220,7 @@ def promote_service(service):
         except OSError as exc:
             raise RuntimeError(
                 f"Promoted staged tileserver data but failed to restore prior "
-                f"active files (fonts, style.json, ...): {exc}"
+                f"active files (fonts, style_*.json, ...): {exc}"
             ) from exc
 
     if os.path.isdir(backup_dir):
@@ -3085,7 +3085,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/style":
             raw = read_tileserver_style()
             if raw is None:
-                self._send_json({"error": "style.json not found"}, 404)
+                self._send_json({"error": "style_vibrant.json not found"}, 404)
                 return
             self.send_response(200)
             self.send_header("Content-Type", "application/json")

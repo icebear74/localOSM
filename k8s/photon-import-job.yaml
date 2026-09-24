@@ -45,8 +45,9 @@ spec:
           if [ "${CA_ENABLED}" = "true" ] && [ -n "${CA_CRT}" ]; then
             # Append the custom Root CA to the bundle so public CAs stay trusted too.
             printf '\n%s\n' "${CA_CRT}" >> /ca-certs/ca.crt
+            printf '\n%s\n' "${CA_CRT}" > /ca-certs/custom-ca.crt
             touch /ca-certs/ca-enabled
-            echo "[ca-injector] Custom CA appended to bundle at /ca-certs/ca.crt"
+            echo "[ca-injector] Custom CA appended to bundle at /ca-certs/ca.crt and staged at /ca-certs/custom-ca.crt"
           else
             echo "[ca-injector] CA injection disabled; system bundle at /ca-certs/ca.crt"
           fi
@@ -88,19 +89,52 @@ spec:
             JAVA_CACERTS=$(find / -path /proc -prune -o -name cacerts -type f -print 2>/dev/null | head -1)
           fi
           if [ -z "${JAVA_CACERTS}" ]; then
-            echo "[java-ca-injector] No system cacerts found; skipping."
+            if [ "${CA_ENABLED}" = "true" ] && [ -f /ca-certs/ca-enabled ] && [ -s /ca-certs/custom-ca.crt ]; then
+              echo "[java-ca-injector] ERROR: No system cacerts found for custom CA import" >&2
+              exit 1
+            fi
+            echo "[java-ca-injector] No system cacerts found; using container default truststore"
             exit 0
           fi
           # Copy system truststore so JAVA_TOOL_OPTIONS always points to a valid file.
           cp "${JAVA_CACERTS}" /ca-certs/cacerts
-          if [ "${CA_ENABLED}" = "true" ] && [ -f /ca-certs/ca-enabled ]; then
-            keytool -noprompt -importcert -alias osm-root-ca \
-              -file /ca-certs/ca.crt \
+          chmod 0644 /ca-certs/cacerts
+
+          STORE_TYPE="$(keytool -J-Duser.language=en -J-Duser.country=US -list -v \
+            -keystore /ca-certs/cacerts -storepass changeit 2>/dev/null \
+            | awk -F': ' '/^Keystore type:/{print toupper($2); exit}')"
+          case "${STORE_TYPE}" in
+            JKS|PKCS12) ;;
+            *)
+              echo "[java-ca-injector] ERROR: Could not determine truststore type for /ca-certs/cacerts" >&2
+              exit 1
+              ;;
+          esac
+          echo "${STORE_TYPE}" > /ca-certs/java-truststore-type
+          echo "[java-ca-injector] Detected truststore type: ${STORE_TYPE}"
+
+          if [ "${CA_ENABLED}" = "true" ] && [ -f /ca-certs/ca-enabled ] && [ -s /ca-certs/custom-ca.crt ]; then
+            if keytool -list -keystore /ca-certs/cacerts -storepass changeit -storetype "${STORE_TYPE}" -alias localosm-custom-root-ca >/dev/null 2>&1; then
+              keytool -delete -alias localosm-custom-root-ca \
+                -keystore /ca-certs/cacerts \
+                -storepass changeit \
+                -storetype "${STORE_TYPE}"
+            fi
+            keytool -noprompt -importcert -alias localosm-custom-root-ca \
+              -file /ca-certs/custom-ca.crt \
               -keystore /ca-certs/cacerts \
               -storepass changeit \
-              -storetype PKCS12 \
-              -trustcacerts 2>&1 || true
-            echo "[java-ca-injector] Custom CA imported into /ca-certs/cacerts"
+              -storetype "${STORE_TYPE}" \
+              -trustcacerts
+            if keytool -list -keystore /ca-certs/cacerts -storepass changeit -storetype "${STORE_TYPE}" -alias localosm-custom-root-ca >/dev/null 2>&1; then
+              echo "[java-ca-injector] Custom CA imported into /ca-certs/cacerts as alias localosm-custom-root-ca"
+            else
+              echo "[java-ca-injector] ERROR: Alias localosm-custom-root-ca not found after import" >&2
+              exit 1
+            fi
+          elif [ "${CA_ENABLED}" = "true" ]; then
+            echo "[java-ca-injector] ERROR: CA enabled but /ca-certs/custom-ca.crt is missing or empty" >&2
+            exit 1
           else
             echo "[java-ca-injector] CA disabled; system cacerts at /ca-certs/cacerts"
           fi
@@ -161,7 +195,7 @@ spec:
               echo "Photon ${PHOTON_VERSION} jar was downloaded by another pod."
             else
               echo "Downloading Photon ${PHOTON_VERSION} release jar ..."
-              curl -fsSL -o "${TMP_JAR}" "https://github.com/komoot/photon/releases/download/${PHOTON_VERSION}/photon-${PHOTON_VERSION}.jar"
+              curl --cacert /ca-certs/ca.crt -fsSL -o "${TMP_JAR}" "https://github.com/komoot/photon/releases/download/${PHOTON_VERSION}/photon-${PHOTON_VERSION}.jar"
               mv "${TMP_JAR}" "${JAR}"
               echo "Downloaded Photon ${PHOTON_VERSION}."
             fi
@@ -179,42 +213,6 @@ spec:
         - name: ca-certs
           mountPath: /ca-certs
           readOnly: true
-      - name: fetch-kubectl
-        image: curlimages/curl:8.10.1
-        command: ["/bin/sh", "-c"]
-        args:
-        - |
-          set -eu
-          if [ ! -x /tools/kubectl ]; then
-            KUBECTL_VERSION=$(curl -fsSL https://dl.k8s.io/release/stable.txt 2>/dev/null || true)
-            if [ -z "${KUBECTL_VERSION}" ]; then
-              KUBECTL_VERSION="v1.30.0"
-            fi
-            curl -fsSL -o /tools/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
-            chmod 0755 /tools/kubectl
-          fi
-        resources:
-          requests:
-            cpu: "50m"
-            memory: "64Mi"
-          limits:
-            cpu: "200m"
-            memory: "256Mi"
-        volumeMounts:
-        - name: tools
-          mountPath: /tools
-        - name: ca-certs
-          mountPath: /ca-certs
-          readOnly: true
-        env:
-        - name: SSL_CERT_FILE
-          value: /ca-certs/ca.crt
-        - name: CURL_CA_BUNDLE
-          value: /ca-certs/ca.crt
-        - name: REQUESTS_CA_BUNDLE
-          value: /ca-certs/ca.crt
-        - name: NODE_EXTRA_CA_CERTS
-          value: /ca-certs/ca.crt
       containers:
       - name: photon-import
         image: eclipse-temurin:21-jre
@@ -259,7 +257,7 @@ spec:
         - name: NODE_EXTRA_CA_CERTS
           value: /ca-certs/ca.crt
         - name: JAVA_TOOL_OPTIONS
-          value: -Djavax.net.ssl.trustStore=/ca-certs/cacerts -Djavax.net.ssl.trustStoreType=PKCS12 -Djavax.net.ssl.trustStorePassword=changeit
+          value: -Djavax.net.ssl.trustStore=/ca-certs/cacerts -Djavax.net.ssl.trustStorePassword=changeit
         resources:
           requests:
             memory: "4Gi"
@@ -274,56 +272,11 @@ spec:
           echo '=== Photon Import Job ==='
           WORK_ROOT=/osm-temp/photon
           WORK_DIR="${WORK_ROOT}/work"
-          NEXT_DIR=/service-data/next
-          ACTIVE_DIR=/service-data/active
-          PREVIOUS_DIR=/service-data/previous
-          KUBECTL=/tools/kubectl
-          SCALED_DOWN=0
-          ORIGINAL_REPLICAS=0
-
-          cleanup_work_dir() {
-            mkdir -p "${WORK_DIR}"
-            find "${WORK_DIR}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-          }
-
-          trim_mount() {
-            local mountpoint="$1"
-            if command -v fstrim >/dev/null 2>&1; then
-              echo "[INFO] fstrim ${mountpoint}"
-              if ! fstrim "${mountpoint}"; then
-                echo "[WARN] fstrim failed for ${mountpoint}; continuing"
-              fi
-            else
-              echo "[INFO] fstrim not available for ${mountpoint}; continuing."
-            fi
-          }
-
-          cleanup() {
-            if [ "${SCALED_DOWN}" = "1" ]; then
-              "${KUBECTL}" scale deployment photon --replicas="${ORIGINAL_REPLICAS}" -n osm || true
-            fi
-            trim_mount /osm-temp
-            trim_mount /service-data
-            trim_mount /tools
-          }
-          trap cleanup EXIT
-
-          wait_for_pods_terminated() {
-            local waited=0
-            while "${KUBECTL}" get pods -n osm -l app=photon --no-headers 2>/dev/null | grep -q .; do
-              if [ "${waited}" -ge 600 ]; then
-                echo "ERROR: Timed out waiting for Photon pods to terminate." >&2
-                return 1
-              fi
-              sleep 3
-              waited=$((waited + 3))
-            done
-          }
 
           echo "Building the Photon full-text search index from the running Nominatim database at ${NOMINATIM_DB_HOST}:${NOMINATIM_DB_PORT}."
-          cleanup_work_dir
-          rm -rf "${NEXT_DIR}" "${PREVIOUS_DIR}" 2>/dev/null || true
-          mkdir -p "${WORK_DIR}" "${NEXT_DIR}"
+          mkdir -p "${WORK_DIR}"
+          find "${WORK_DIR}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
           cd "${WORK_DIR}"
           DB_SECRET="${PHOTON_DB_PASSWORD}"
           DB_PASSWORD_FLAG="-pass""word"
@@ -331,60 +284,19 @@ spec:
           if [ -n "${PHOTON_EXTRA_TAGS:-}" ]; then
             IMPORT_ARGS+=( -extra-tags "${PHOTON_EXTRA_TAGS}" )
           fi
-          java -Xms16g -Xmx64g -XX:+UseG1GC \
-            -Des.index.merge.scheduler.max_thread_count=12 \
-            -Des.index.merge.scheduler.max_merge_count=13 \
-            -jar "/service-data/bin/photon-${PHOTON_VERSION}.jar" import \
-            -host "${NOMINATIM_DB_HOST}" -port "${NOMINATIM_DB_PORT}" \
-            -database "${NOMINATIM_DB_NAME}" -user "${PHOTON_DB_USER}" \
-            "${DB_PASSWORD_FLAG}" "${DB_SECRET}" \
-            -languages "${PHOTON_LANGUAGES}" -data-dir "${WORK_DIR}" "${IMPORT_ARGS[@]}"
-
-          echo '=== Copying Photon data into the next active release directory ...'
-          cp -a "${WORK_DIR}/." "${NEXT_DIR}/"
-
-          ORIGINAL_REPLICAS=$("${KUBECTL}" get deployment photon -n osm -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
-          ORIGINAL_REPLICAS="${ORIGINAL_REPLICAS:-0}"
-          if [ "${ORIGINAL_REPLICAS}" -gt 0 ]; then
-            echo '=== Scaling down Photon before activating the new data ...'
-            "${KUBECTL}" scale deployment photon --replicas=0 -n osm >/dev/null
-            SCALED_DOWN=1
-            wait_for_pods_terminated
-          else
-            echo '=== Photon deployment is not running; writing data directly to active directory ...'
+          JAVA_TRUSTSTORE_TYPE="$(tr -d '[:space:]' < /ca-certs/java-truststore-type 2>/dev/null || true)"
+          if [ -z "${JAVA_TRUSTSTORE_TYPE}" ]; then
+            JAVA_TRUSTSTORE_TYPE="PKCS12"
           fi
-
-          if [ -d "${ACTIVE_DIR}" ]; then
-            mv "${ACTIVE_DIR}" "${PREVIOUS_DIR}"
-          fi
-          if ! mv "${NEXT_DIR}" "${ACTIVE_DIR}"; then
-            rm -rf "${ACTIVE_DIR}" 2>/dev/null || true
-            if [ -d "${PREVIOUS_DIR}" ]; then
-              mv "${PREVIOUS_DIR}" "${ACTIVE_DIR}" 2>/dev/null || true
-            fi
-            echo "ERROR: Failed to activate new Photon data." >&2
-            exit 1
-          fi
-          rm -rf "${PREVIOUS_DIR}" 2>/dev/null || true
-
-          if [ "${SCALED_DOWN}" = "1" ]; then
-            echo '=== Scaling Photon back up ...'
-            "${KUBECTL}" scale deployment photon --replicas="${ORIGINAL_REPLICAS}" -n osm >/dev/null
-            SCALED_DOWN=0
-            "${KUBECTL}" rollout status deployment/photon -n osm --timeout=600s >/dev/null
-          else
-            echo '=== Photon deployment was not running; active directory is ready for when the service starts. ==='
-          fi
-
-          cleanup_work_dir
-          echo '=== Photon import complete. Index promoted and temp work directory cleaned. ==='
+          export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS} -Djavax.net.ssl.trustStoreType=${JAVA_TRUSTSTORE_TYPE}"
+          java -Xms16g -Xmx64g -XX:+UseG1GC             -Des.index.merge.scheduler.max_thread_count=12             -Des.index.merge.scheduler.max_merge_count=13             -jar "/service-data/bin/photon-${PHOTON_VERSION}.jar" import             -host "${NOMINATIM_DB_HOST}" -port "${NOMINATIM_DB_PORT}"             -database "${NOMINATIM_DB_NAME}" -user "${PHOTON_DB_USER}"             "${DB_PASSWORD_FLAG}" "${DB_SECRET}"             -languages "${PHOTON_LANGUAGES}" -data-dir "${WORK_DIR}" "${IMPORT_ARGS[@]}"
+          sync
+          echo '=== Photon import build completed. Central copy/promote job will activate /osm-temp/photon/work. ==='
         volumeMounts:
         - name: photon-root
           mountPath: /service-data
         - name: osm-temp
           mountPath: /osm-temp
-        - name: tools
-          mountPath: /tools
         - name: ca-certs
           mountPath: /ca-certs
           readOnly: true
@@ -395,7 +307,5 @@ spec:
       - name: photon-root
         persistentVolumeClaim:
           claimName: photon
-      - name: tools
-        emptyDir: {}
       - name: ca-certs
         emptyDir: {}
