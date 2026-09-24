@@ -172,7 +172,7 @@ data:
         entries = []
         failed_roads = []
         for road in roads:
-            details_url = ROADWORKS_DETAILS_URL_TEMPLATE.format(road=road)
+            details_url = ROADWORKS_DETAILS_URL_TEMPLATE.replace("{road}", road)
             try:
                 payload = http_json(details_url)
                 road_entries = roadworks_from_payload(payload)
