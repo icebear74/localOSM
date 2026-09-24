@@ -101,6 +101,25 @@ kubectl apply -f /mnt/OSM/manifests/tileserver-init-assets-job.yaml
 bash scripts/run-import.sh --url https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf
 ```
 
+## Runtime rollout without reimport
+
+For runtime/config fixes (for example Nominatim warm-up, Photon truststore handling, promotion script hardening), roll out only manifests/config and restart deployments.
+Do **not** start any import jobs and do not clear `osm-temp`/service PVC data.
+
+```bash
+bash scripts/deploy-osm.sh            # or: bash scripts/deploy-osm.sh --bigmemory
+kubectl -n osm rollout restart deployment/nominatim deployment/photon deployment/tileserver-gl
+kubectl -n osm rollout status deployment/nominatim --timeout=600s
+kubectl -n osm rollout status deployment/photon --timeout=600s
+kubectl -n osm rollout status deployment/tileserver-gl --timeout=600s
+```
+
+Quick checks after restart:
+
+- Nominatim: `kubectl -n osm logs deployment/nominatim | grep -E 'pg_prewarm|admin --warm'`
+- Photon truststore type: `kubectl -n osm logs deployment/photon | grep -E 'Detected truststore type|localosm-custom-root-ca'`
+- Promotion job behavior (rollback/copy status): `kubectl -n osm logs job/import-promotion --tail=200`
+
 The script downloads the extract and writes an import request. The orchestrator pod processes requests strictly in sequence.
 
 1. Nominatim

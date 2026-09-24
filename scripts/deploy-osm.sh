@@ -11,6 +11,7 @@ CLEAN=false
 PRESERVE_DOWNLOADS=false
 NODE_URL=""
 MANIFEST_SOURCE_DIR="${REPO_ROOT}/k8s"
+BIGMEMORY_MODE=false
 
 usage() {
   cat <<EOF
@@ -24,7 +25,7 @@ while [[ $# -gt 0 ]]; do
     --preserve-downloads) PRESERVE_DOWNLOADS=true; shift ;;
     --node-url) NODE_URL="$2"; shift 2 ;;
     --temp-dir) TEMP_BASE_DIR="$2"; shift 2 ;;
-    --bigmemory) MANIFEST_SOURCE_DIR="${REPO_ROOT}/k8s/bigmemory"; shift ;;
+    --bigmemory) MANIFEST_SOURCE_DIR="${REPO_ROOT}/k8s/bigmemory"; BIGMEMORY_MODE=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -80,6 +81,15 @@ wait_for_namespace_deletion() {
     waited=$((waited + 2))
   done
   return 0
+}
+
+resolve_manifest_source() {
+  local manifest="$1"
+  if [ "${BIGMEMORY_MODE}" = true ] && [ -f "${REPO_ROOT}/k8s/bigmemory/${manifest}" ]; then
+    printf '%s\n' "${REPO_ROOT}/k8s/bigmemory/${manifest}"
+    return 0
+  fi
+  printf '%s\n' "${REPO_ROOT}/k8s/${manifest}"
 }
 
 clean_data_directory() {
@@ -249,7 +259,8 @@ for manifest in \
   web.yaml \
   style-editor.yaml \
   mc-admin.yaml; do
-  sed "s|__OSM_TEMP_DIR__|${TEMP_BASE_DIR}|g" "${MANIFEST_SOURCE_DIR}/${manifest}" | ${SUDO} tee "${BASE_DIR}/manifests/${manifest}" >/dev/null
+  manifest_source="$(resolve_manifest_source "${manifest}")"
+  sed "s|__OSM_TEMP_DIR__|${TEMP_BASE_DIR}|g" "${manifest_source}" | ${SUDO} tee "${BASE_DIR}/manifests/${manifest}" >/dev/null
 done
 ${SUDO} cp "${REPO_ROOT}/scripts/import-orchestrator.sh" "${BASE_DIR}/scripts/import-orchestrator.sh"
 ${SUDO} chmod +x "${BASE_DIR}/scripts/import-orchestrator.sh"

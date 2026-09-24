@@ -128,22 +128,22 @@ spec:
           echo "[java-ca-injector] Detected truststore type: ${STORE_TYPE}"
 
           if [ "${CA_ENABLED}" = "true" ] && [ -f /ca-certs/ca-enabled ] && [ -s /ca-certs/custom-ca.crt ]; then
-            if keytool -list -keystore /ca-certs/cacerts -storepass changeit -storetype "${STORE_TYPE}" -alias osm-root-ca >/dev/null 2>&1; then
-              keytool -delete -alias osm-root-ca \
+            if keytool -list -keystore /ca-certs/cacerts -storepass changeit -storetype "${STORE_TYPE}" -alias localosm-custom-root-ca >/dev/null 2>&1; then
+              keytool -delete -alias localosm-custom-root-ca \
                 -keystore /ca-certs/cacerts \
                 -storepass changeit \
                 -storetype "${STORE_TYPE}"
             fi
-            keytool -noprompt -importcert -alias osm-root-ca \
+            keytool -noprompt -importcert -alias localosm-custom-root-ca \
               -file /ca-certs/custom-ca.crt \
               -keystore /ca-certs/cacerts \
               -storepass changeit \
               -storetype "${STORE_TYPE}" \
               -trustcacerts
-            if keytool -list -keystore /ca-certs/cacerts -storepass changeit -storetype "${STORE_TYPE}" -alias osm-root-ca >/dev/null 2>&1; then
-              echo "[java-ca-injector] Custom CA imported into /ca-certs/cacerts as alias osm-root-ca"
+            if keytool -list -keystore /ca-certs/cacerts -storepass changeit -storetype "${STORE_TYPE}" -alias localosm-custom-root-ca >/dev/null 2>&1; then
+              echo "[java-ca-injector] Custom CA imported into /ca-certs/cacerts as alias localosm-custom-root-ca"
             else
-              echo "[java-ca-injector] ERROR: Alias osm-root-ca not found after import" >&2
+              echo "[java-ca-injector] ERROR: Alias localosm-custom-root-ca not found after import" >&2
               exit 1
             fi
           elif [ "${CA_ENABLED}" = "true" ]; then
