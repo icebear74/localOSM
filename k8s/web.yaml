@@ -402,7 +402,13 @@ data:
             </select>
             <div class="hint">Sprache der Route-Anweisungen.</div>
           </div>
-          <div></div>
+          <div>
+            <label style="display:flex;align-items:center;gap:0.35rem">
+              <input id="avoid-closures" type="checkbox" checked>
+              Gesperrte Straßen vermeiden
+            </label>
+            <div class="hint">Nutzt aktuelle Verkehrsdaten/Closures bei Routing-Anfragen.</div>
+          </div>
         </div>
         <div class="row2">
           <button class="btn btn-secondary" onclick="saveRouteDefaults()">⭐ Als Standard speichern</button>
@@ -1061,6 +1067,7 @@ data:
         ['costing', defaults.costing || 'auto'],
         ['units', defaults.units || 'km'],
         ['instruction-language', defaults.instruction_language || 'de'],
+        ['avoid-closures', defaults.avoid_closures !== false],
         ['toll_penalty', tollValue],
         ['ferry_penalty', ferryValue],
         ['tunnel_penalty', defaults.tunnel_penalty == null ? 0 : defaults.tunnel_penalty],
@@ -1145,6 +1152,7 @@ data:
         costing: document.getElementById('costing').value,
         units:   document.getElementById('units').value,
         instruction_language: document.getElementById('instruction-language').value,
+        avoid_closures: !!(document.getElementById('avoid-closures') && document.getElementById('avoid-closures').checked),
         shortest: shortestValue,
         advanced_options_enabled: advancedOptionsEnabled
       };
@@ -2149,6 +2157,8 @@ data:
                 "units": payload.get("units", "km"),
                 "language": payload.get("instruction_language", "de"),
             }
+            if payload.get("avoid_closures", True):
+                request["date_time"] = {"type": 0}
 
             request["costing_options"] = {}
             request["costing_options"][costing] = {}
