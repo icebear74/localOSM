@@ -74,22 +74,50 @@ data:
             return json.loads(response.read().decode("utf-8"))
 
 
+    def _probe_valhalla():
+        try:
+            http_json(f"{VALHALLA_URL}/status", {"verbose": False}, timeout=5)
+            return True
+        except Exception:
+            pass
+        try:
+            urllib.request.urlopen(
+                urllib.request.Request(VALHALLA_URL, headers={"User-Agent": "localosm-valhalla-roadworks/1.0"}),
+                timeout=5,
+            ).read(1)
+            return True
+        except Exception:
+            return False
+
+
     def wait_for_startup():
         deadline = time.time() + STARTUP_TIMEOUT_SECONDS
+        last_report = 0.0
         while time.time() < deadline:
-            if os.path.isfile(TRAFFIC_TAR_PATH):
-                try:
-                    urllib.request.urlopen(
-                        urllib.request.Request(VALHALLA_URL, headers={"User-Agent": "localosm-valhalla-roadworks/1.0"}),
-                        timeout=5,
-                    ).read(1)
-                    return
-                except Exception:
-                    pass
+            if os.path.isfile(TRAFFIC_TAR_PATH) and _probe_valhalla():
+                return
+            now = time.time()
+            if now - last_report >= 30:
+                log(
+                    f"Waiting for startup readiness: traffic.tar={'yes' if os.path.isfile(TRAFFIC_TAR_PATH) else 'no'}, "
+                    f"valhalla_api={'yes' if _probe_valhalla() else 'no'}"
+                )
+                last_report = now
             time.sleep(5)
         raise RuntimeError(
-            f"Valhalla or traffic.tar was not ready within {STARTUP_TIMEOUT_SECONDS} seconds."
+            f"Valhalla API and/or traffic.tar was not ready within {STARTUP_TIMEOUT_SECONDS} seconds."
         )
+
+
+    def wait_until_ready_forever():
+        while True:
+            try:
+                wait_for_startup()
+                log("Startup readiness reached; traffic updater loop is active.")
+                return
+            except Exception as exc:
+                log(f"Startup readiness check failed: {exc}. Retrying in 30 seconds.")
+                time.sleep(30)
 
 
     def parse_bool(value):
@@ -410,7 +438,7 @@ data:
 
 
     def main():
-        wait_for_startup()
+        wait_until_ready_forever()
         while True:
             cycle_started = time.time()
             try:
