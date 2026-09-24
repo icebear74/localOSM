@@ -16,9 +16,13 @@ data:
     import urllib.request
 
     VALHALLA_URL = os.environ.get("VALHALLA_URL_LOCAL", "http://127.0.0.1:8002").rstrip("/")
-    ROADWORKS_URL = os.environ.get(
-        "ROADWORKS_URL",
-        "https://verkehr.autobahn.de/o/autobahn/A1/services/roadworks",
+    ROADWORKS_LIST_URL = os.environ.get(
+        "ROADWORKS_LIST_URL",
+        "https://verkehr.autobahn.de/o/autobahn/",
+    )
+    ROADWORKS_DETAILS_URL_TEMPLATE = os.environ.get(
+        "ROADWORKS_DETAILS_URL_TEMPLATE",
+        "https://verkehr.autobahn.de/o/autobahn/{road}/services/roadworks",
     )
     TRAFFIC_TAR_PATH = os.environ.get("TRAFFIC_TAR_PATH", "/shared-data/active/traffic.tar")
     STATE_FILE = os.environ.get("ROADWORKS_STATE_FILE", "/shared-data/active/roadworks-state.json")
@@ -139,6 +143,52 @@ data:
         if isinstance(payload, list):
             return payload
         return []
+
+
+    def fetch_roads():
+        payload = http_json(ROADWORKS_LIST_URL)
+        roads = []
+        if isinstance(payload, dict):
+            candidates = payload.get("roads")
+            if isinstance(candidates, list):
+                roads = candidates
+        elif isinstance(payload, list):
+            roads = payload
+        normalized = []
+        seen = set()
+        for value in roads:
+            road = str(value).strip()
+            if not road or road in seen:
+                continue
+            seen.add(road)
+            normalized.append(road)
+        if not normalized:
+            raise RuntimeError(f"No roads found at {ROADWORKS_LIST_URL}")
+        return normalized
+
+
+    def fetch_all_roadworks():
+        roads = fetch_roads()
+        entries = []
+        failed_roads = []
+        for road in roads:
+            details_url = ROADWORKS_DETAILS_URL_TEMPLATE.format(road=road)
+            try:
+                payload = http_json(details_url)
+                road_entries = roadworks_from_payload(payload)
+                for item in road_entries:
+                    if isinstance(item, dict):
+                        enriched = dict(item)
+                        enriched.setdefault("_road", road)
+                        entries.append(enriched)
+            except Exception as exc:
+                failed_roads.append(road)
+                log(f"Roadworks fetch failed for {road} ({details_url}): {exc}")
+        log(
+            f"Roadworks fetch summary: roads_total={len(roads)} roads_failed={len(failed_roads)} "
+            f"entries_total={len(entries)}"
+        )
+        return entries
 
 
     def roadwork_text(item):
@@ -407,8 +457,7 @@ data:
 
 
     def collect_closed_graph_ids():
-        payload = http_json(ROADWORKS_URL)
-        entries = roadworks_from_payload(payload)
+        entries = fetch_all_roadworks()
         closed_graph_ids = set()
         matched_roadworks = 0
         for item in entries:

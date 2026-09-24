@@ -72,8 +72,10 @@ spec:
             env:
             - name: VALHALLA_URL_LOCAL
               value: "http://valhalla.osm.svc.cluster.local:8002"
-            - name: ROADWORKS_URL
-              value: "https://verkehr.autobahn.de/o/autobahn/A1/services/roadworks"
+            - name: ROADWORKS_LIST_URL
+              value: "https://verkehr.autobahn.de/o/autobahn/"
+            - name: ROADWORKS_DETAILS_URL_TEMPLATE
+              value: "https://verkehr.autobahn.de/o/autobahn/{road}/services/roadworks"
             - name: ROADWORKS_REFRESH_SECONDS
               value: "3600"
             - name: ROADWORKS_RUN_ONCE
