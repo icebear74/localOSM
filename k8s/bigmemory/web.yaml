@@ -1573,6 +1573,15 @@ data:
                     continue
                 seen.add(road)
                 normalized.append(road)
+            if not normalized:
+                payload = {
+                    "items": [],
+                    "geojson": {"type": "FeatureCollection", "features": []},
+                    "roads_total": 0,
+                    "roads_failed": [],
+                }
+                ROADWORKS_CACHE = {"timestamp": now, "payload": payload}
+                return payload
 
             items = []
             features = []
