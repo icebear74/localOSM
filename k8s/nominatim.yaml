@@ -445,6 +445,8 @@ spec:
         - name: ca-certs
           mountPath: /ca-certs
           readOnly: true
+        - name: dshm
+          mountPath: /dev/shm
       volumes:
       - name: nominatim-data
         persistentVolumeClaim:
@@ -460,6 +462,10 @@ spec:
             path: runtime-tuning.conf
       - name: ca-certs
         emptyDir: {}
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 2Gi
 ---
 apiVersion: v1
 kind: Service
