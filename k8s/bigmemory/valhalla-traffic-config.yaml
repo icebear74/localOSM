@@ -117,6 +117,8 @@ data:
                 log("Startup readiness reached; traffic updater loop is active.")
                 return
             except Exception as exc:
+                if RUN_ONCE:
+                    raise
                 log(f"Startup readiness check failed: {exc}. Retrying in 30 seconds.")
                 time.sleep(30)
 
