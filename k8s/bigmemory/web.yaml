@@ -531,12 +531,12 @@ data:
         map.addLayer({id:'route-outline',type:'line',source:'route',
           paint:{
             'line-color':routeStyleConfig.outlineColor,
-            'line-width':routeStyleConfig.lineWidth + routeStyleConfig.outlineWidth,
+            'line-width':routeStyleConfig.lineWidth + (2 * routeStyleConfig.outlineWidth),
             'line-opacity':routeStyleConfig.outlineOpacity
           }}, 'route-line');
       } else {
         map.setPaintProperty('route-outline', 'line-color', routeStyleConfig.outlineColor);
-        map.setPaintProperty('route-outline', 'line-width', routeStyleConfig.lineWidth + routeStyleConfig.outlineWidth);
+        map.setPaintProperty('route-outline', 'line-width', routeStyleConfig.lineWidth + (2 * routeStyleConfig.outlineWidth));
         map.setPaintProperty('route-outline', 'line-opacity', routeStyleConfig.outlineOpacity);
       }
     }
@@ -567,7 +567,7 @@ data:
           source: 'roadworks-closures',
           paint: {
             'line-color': '#ffffff',
-            'line-width': ['interpolate', ['linear'], ['zoom'], 6, 3, 12, 6, 16, 10],
+            'line-width': ['interpolate', ['linear'], ['zoom'], 6, 4, 12, 8, 16, 14],
             'line-opacity': 0.9
           }
         }, 'roadworks-closure-line');
@@ -1682,7 +1682,11 @@ data:
                                 "road": road,
                                 "title": str(entry.get("title") or "").strip(),
                                 "subtitle": str(entry.get("subtitle") or "").strip(),
-                                "description": entry.get("description") if isinstance(entry.get("description"), list) else [],
+                                "description": (
+                                    entry.get("description")
+                                    if isinstance(entry.get("description"), list)
+                                    else ([str(entry.get("description"))] if isinstance(entry.get("description"), str) else [])
+                                ),
                                 "startTimestamp": entry.get("startTimestamp"),
                                 "bbox": bbox,
                                 "center": center,
