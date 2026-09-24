@@ -198,11 +198,13 @@ data:
         roads = fetch_roads()
         entries = []
         failed_roads = []
+        successful_roads = 0
         for road in roads:
             details_url = ROADWORKS_DETAILS_URL_TEMPLATE.replace("{road}", road)
             try:
                 payload = http_json(details_url)
                 road_entries = roadworks_from_payload(payload)
+                successful_roads += 1
                 for item in road_entries:
                     if isinstance(item, dict):
                         enriched = dict(item)
@@ -215,6 +217,10 @@ data:
             f"Roadworks fetch summary: roads_total={len(roads)} roads_failed={len(failed_roads)} "
             f"entries_total={len(entries)}"
         )
+        if successful_roads == 0:
+            raise RuntimeError(
+                f"Roadworks fetch failed for all roads ({len(roads)} total); keeping previous traffic state."
+            )
         return entries
 
 
