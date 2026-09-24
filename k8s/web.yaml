@@ -1516,6 +1516,23 @@ data:
             return str(value).strip().lower() in {"1", "true", "yes", "ja"}
 
         @staticmethod
+        def _parse_optional_bool(value, field_name):
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                if value == 1:
+                    return True
+                if value == 0:
+                    return False
+            if isinstance(value, str):
+                normalized = value.strip().lower()
+                if normalized in {"1", "true", "yes", "ja", "on"}:
+                    return True
+                if normalized in {"0", "false", "no", "nein", "off"}:
+                    return False
+            raise ValueError(f"{field_name} must be a boolean")
+
+        @staticmethod
         def _is_closure(item):
             if Handler._parse_bool(item.get("isBlocked")):
                 return True
@@ -1635,7 +1652,14 @@ data:
 
                 max_workers = max(2, min(12, len(normalized)))
                 with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    for road, entries, error in executor.map(fetch_road_entries, normalized):
+                    future_to_road = {executor.submit(fetch_road_entries, road): road for road in normalized}
+                    for future in concurrent.futures.as_completed(future_to_road):
+                        road = future_to_road[future]
+                        try:
+                            _road, entries, error = future.result()
+                        except Exception as exc:
+                            failed.append({"road": road, "error": str(exc)})
+                            continue
                         if error:
                             failed.append({"road": road, "error": error})
                             continue
@@ -2185,9 +2209,7 @@ data:
                 "units": payload.get("units", "km"),
                 "language": payload.get("instruction_language", "de"),
             }
-            use_live_traffic = payload.get("use_live_traffic", True)
-            if not isinstance(use_live_traffic, bool):
-                raise ValueError("use_live_traffic must be a boolean")
+            use_live_traffic = Handler._parse_optional_bool(payload.get("use_live_traffic", True), "use_live_traffic")
             if use_live_traffic:
                 request["date_time"] = {"type": 0}
 
