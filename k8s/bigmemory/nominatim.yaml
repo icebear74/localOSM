@@ -87,6 +87,28 @@ spec:
         volumeMounts:
         - name: ca-certs
           mountPath: /ca-certs
+      - name: fix-pgdata-permissions
+        image: busybox:1.36
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -eu
+          for data_dir in /nominatim-data/current /nominatim-data/staging; do
+            if [ -d "${data_dir}" ]; then
+              chown -R 100:100 "${data_dir}" 2>/dev/null || true
+              chmod 0700 "${data_dir}" 2>/dev/null || true
+            fi
+          done
+        resources:
+          requests:
+            cpu: "10m"
+            memory: "16Mi"
+          limits:
+            cpu: "50m"
+            memory: "64Mi"
+        volumeMounts:
+        - name: nominatim-data
+          mountPath: /nominatim-data
       - name: wait-for-data
         image: busybox:1.36
         env:
