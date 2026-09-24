@@ -55,7 +55,34 @@ data:
     INDEX_ENTRY_STRUCT = struct.Struct("<QLL")
     TRAFFIC_SPEED_STRUCT = struct.Struct("<Q")
 
-    CLOSURE_TEXT_RE = re.compile(r"\b(vollsperr\w*|voll gesperrt|gesperrt)\b", re.IGNORECASE)
+    FULL_CLOSURE_PATTERNS = [
+        re.compile(pattern, re.IGNORECASE)
+        for pattern in (
+            r"\bvollsperr\w*\b",
+            r"\bvoll\s+gesperrt\b",
+            r"\bausfahrt\b.*\bgesperrt\b",
+            r"\bauffahrt\b.*\bgesperrt\b",
+            r"\banschlussstelle\b.*\bgesperrt\b",
+            r"\bverbindungsfahrbahn\b.*\bgesperrt\b",
+            r"\brichtungsfahrbahn\b.*\bgesperrt\b",
+            r"\bgesperrt\b.*\bkeine\s+durchfahrt\b",
+            r"\bgesperrt\b.*\bumleitung\b",
+            r"\bsperrung\s+as\b",
+            r"\b(as|anschlussstelle|ausfahrt|auffahrt)\b.*\bsperrung\b",
+        )
+    ]
+    PARTIAL_CLOSURE_PATTERNS = [
+        re.compile(pattern, re.IGNORECASE)
+        for pattern in (
+            r"\bfahrstreifen\b",
+            r"\bfahrspur\b",
+            r"\bseitenstreifen\b",
+            r"\bstandstreifen\b",
+            r"\bspur\s+gesperrt\b",
+            r"\b\d+\s+von\s+\d+\b",
+            r"\bteilsperr\w*\b",
+        )
+    ]
 
 
     def log(message):
@@ -231,7 +258,12 @@ data:
     def should_close_roadwork(item):
         if parse_bool(item.get("isBlocked")):
             return True
-        return bool(CLOSURE_TEXT_RE.search(roadwork_text(item)))
+        text = roadwork_text(item).strip()
+        if not text:
+            return False
+        if any(pattern.search(text) for pattern in PARTIAL_CLOSURE_PATTERNS):
+            return False
+        return any(pattern.search(text) for pattern in FULL_CLOSURE_PATTERNS)
 
 
     def sample_locations(extent):
