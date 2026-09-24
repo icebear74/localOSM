@@ -89,6 +89,20 @@ data:
         print(f"[roadworks-updater] {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {message}", flush=True)
 
 
+    def format_exception(exc):
+        detail = str(exc).strip()
+        if isinstance(exc, urllib.error.HTTPError):
+            code = getattr(exc, "code", None)
+            reason = getattr(exc, "reason", None)
+            return f"{exc.__class__.__name__}(status={code}, reason={reason!r})"
+        if isinstance(exc, urllib.error.URLError):
+            reason = getattr(exc, "reason", None)
+            return f"{exc.__class__.__name__}(reason={reason!r})"
+        if detail:
+            return f"{exc.__class__.__name__}: {detail}"
+        return repr(exc)
+
+
     def ensure_parent_dir(path):
         parent = os.path.dirname(path)
         if parent:
@@ -212,7 +226,7 @@ data:
                         entries.append(enriched)
             except Exception as exc:
                 failed_roads.append(road)
-                log(f"Roadworks fetch failed for {road} ({details_url}): {exc}")
+                log(f"Roadworks fetch failed for {road} ({details_url}): {format_exception(exc)}")
         log(
             f"Roadworks fetch summary: roads_total={len(roads)} roads_failed={len(failed_roads)} "
             f"entries_total={len(entries)}"
