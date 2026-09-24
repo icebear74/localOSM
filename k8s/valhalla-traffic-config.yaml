@@ -337,12 +337,43 @@ data:
         return None
 
 
+    def extract_graph_id_from_edge(edge):
+        candidates = [
+            edge.get("graph_id"),
+            edge.get("id"),
+            edge.get("edge_id"),
+            edge.get("directed_edge_id"),
+            edge.get("edge"),
+            edge.get("graphid"),
+        ]
+        for candidate in candidates:
+            graph_id = parse_graph_id(candidate)
+            if graph_id is not None:
+                return graph_id
+        if all(key in edge for key in ("level", "tile_id", "id")):
+            graph_id = parse_graph_id(
+                {"level": edge.get("level"), "tile_id": edge.get("tile_id"), "id": edge.get("id")}
+            )
+            if graph_id is not None:
+                return graph_id
+        nested = edge.get("graph")
+        if isinstance(nested, dict):
+            graph_id = parse_graph_id(nested.get("graph_id"))
+            if graph_id is not None:
+                return graph_id
+            graph_id = parse_graph_id(nested)
+            if graph_id is not None:
+                return graph_id
+        return None
+
+
     def locate_graph_ids(points):
         payload = {"locations": points, "verbose": True}
         response = http_json(f"{VALHALLA_URL}/locate", payload)
         if isinstance(response, dict):
             response = response.get("locations") or response.get("results") or []
         graph_ids = set()
+        debug_logged = getattr(locate_graph_ids, "_debug_logged", False)
         for entry in response if isinstance(response, list) else []:
             edges = entry.get("edges") or entry.get("correlated_edges") or []
             for edge in edges:
@@ -356,9 +387,18 @@ data:
                     bool(access.get(key)) for key in ("car", "auto", "taxi", "truck")
                 ):
                     continue
-                graph_id = parse_graph_id(edge.get("graph_id"))
+                graph_id = extract_graph_id_from_edge(edge)
                 if graph_id is not None:
                     graph_ids.add(graph_id)
+                    continue
+                if not debug_logged:
+                    log(
+                        "Valhalla locate edge had no parseable graph id; "
+                        f"keys={sorted(edge.keys())[:20]}, "
+                        f"graph_id={edge.get('graph_id')!r}, id={edge.get('id')!r}"
+                    )
+                    debug_logged = True
+                    locate_graph_ids._debug_logged = True
         return graph_ids
 
 
