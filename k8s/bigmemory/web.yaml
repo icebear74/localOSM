@@ -2166,7 +2166,12 @@ data:
                 "units": payload.get("units", "km"),
                 "language": payload.get("instruction_language", "de"),
             }
-            if payload.get("use_live_traffic", True):
+            use_live_traffic = payload.get("use_live_traffic", True)
+            if isinstance(use_live_traffic, str):
+                use_live_traffic = use_live_traffic.strip().lower() in {"1", "true", "yes", "ja", "on"}
+            else:
+                use_live_traffic = bool(use_live_traffic)
+            if use_live_traffic:
                 request["date_time"] = {"type": 0}
 
             request["costing_options"] = {}
