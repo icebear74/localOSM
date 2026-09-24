@@ -25,6 +25,10 @@ spec:
           - name: ca-injector
             image: alpine:3.20
             imagePullPolicy: IfNotPresent
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 1000
+              runAsGroup: 1000
             env:
             - name: CA_ENABLED
               valueFrom:
