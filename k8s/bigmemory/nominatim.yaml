@@ -96,8 +96,6 @@ spec:
           for data_dir in /nominatim-data/current /nominatim-data/staging; do
             if [ -d "${data_dir}" ]; then
               chown -R 100:100 "${data_dir}"
-              find "${data_dir}" -type d -exec chmod 0700 {} \;
-              find "${data_dir}" -type f -exec chmod 0600 {} \;
               chmod 0700 "${data_dir}"
             fi
           done
