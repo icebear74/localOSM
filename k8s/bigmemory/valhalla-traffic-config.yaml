@@ -205,7 +205,8 @@ data:
             seen.add(road)
             normalized.append(road)
         if not normalized:
-            raise RuntimeError(f"No roads found at {ROADWORKS_LIST_URL}")
+            log(f"Roadworks road list at {ROADWORKS_LIST_URL} returned no roads; treating as empty update.")
+            return []
         return normalized
 
 
@@ -232,7 +233,7 @@ data:
             f"Roadworks fetch summary: roads_total={len(roads)} roads_failed={len(failed_roads)} "
             f"entries_total={len(entries)}"
         )
-        if successful_roads == 0:
+        if roads and successful_roads == 0:
             raise RuntimeError(
                 f"Roadworks fetch failed for all roads ({len(roads)} total); keeping previous traffic state."
             )
