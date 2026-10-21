@@ -26,6 +26,11 @@ spec:
           if [ "$(cat /custom-ca/ca-enabled 2>/dev/null || true)" = true ]; then
             cat /custom-ca/ca.crt >> /run/pelias-ca.crt
           fi
+          case "$PELIAS_AUTOMATIC" in
+            true) python3 -c 'import json; p=json.load(open("/policy/policy.json")); assert p.get("auto_promote") is True, "automatic promotion is disabled"' ;;
+            false) ;;
+            *) echo "PELIAS_AUTOMATIC must be true or false" >&2; exit 2 ;;
+          esac
           case "$PELIAS_ACTION" in
             promote) test -n "$PELIAS_GENERATION"
               exec python3 /runtime/controller.py promote --policy /policy/policy.json --generation "$PELIAS_GENERATION" ;;
@@ -33,6 +38,7 @@ spec:
             *) echo "PELIAS_ACTION must be promote or rollback" >&2; exit 2 ;;
           esac
         env:
+        - {name: PELIAS_AUTOMATIC, value: "false"}
         - {name: PELIAS_ACTION, value: promote}
         - {name: PELIAS_GENERATION, value: ""}
         - {name: SSL_CERT_FILE, value: /run/pelias-ca.crt}

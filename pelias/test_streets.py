@@ -46,7 +46,9 @@ class StreetEncodingTest(unittest.TestCase):
 <node id="1" lat="52.5" lon="13.4" version="1"/>
 <node id="2" lat="52.5001" lon="13.4001" version="1"/>
 <way id="3" version="1"><nd ref="1"/><nd ref="2"/>
-<tag k="highway" v="residential"/><tag k="name" v="Teststraße"/></way></osm>""")
+<tag k="highway" v="residential"/><tag k="name" v="Teststraße"/></way>
+<way id="4" version="1"><nd ref="1"/><nd ref="999"/>
+<tag k="highway" v="residential"/><tag k="name" v="Incomplete"/></way></osm>""")
             pbf = root / "fixture.osm.pbf"
             subprocess.run(["osmium", "cat", str(xml), "-o", str(pbf)], check=True)
             output = root / "extract.0sv"

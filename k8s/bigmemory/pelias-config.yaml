@@ -11,9 +11,9 @@ data:
         "hosts": [{"host": "pelias-elasticsearch", "port": 9200}],
         "requestTimeout": 120000
       },
-      "elasticsearch": {"indexName": "pelias-disabled"},
-      "schema": {"indexName": "pelias-disabled", "typeName": "_doc"},
+      "schema": {"indexName": "pelias-disabled"},
       "api": {
+        "indexName": "pelias-disabled",
         "host": "0.0.0.0",
         "port": 4000,
         "services": {
@@ -32,11 +32,6 @@ data:
         },
         "whosonfirst": {"datapath": "/data/aux/whosonfirst"},
         "polyline": {"datapath": "/data/aux/polylines"}
-      },
-      "services": {
-        "placeholder": {"datapath": "/data/aux/placeholder", "port": 4100},
-        "pip": {"datapath": "/data/aux/whosonfirst", "port": 4200},
-        "interpolation": {"datapath": "/data/aux/interpolation", "port": 4300}
       }
     }
 ---
@@ -52,6 +47,13 @@ data:
       "auto_update": false,
       "auto_promote": false,
       "alias": "pelias",
+      "serving": {
+        "mode": "kubernetes",
+        "namespace": "osm",
+        "service": "pelias",
+        "deployment_template": "pelias-generation-template",
+        "container": "pelias"
+      },
       "min_documents": 1000,
       "retain_generations": 2,
       "startup_timeout": 900,

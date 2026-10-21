@@ -5,10 +5,12 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import unittest
 import uuid
 from unittest.mock import patch
 
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("osm_status", ROOT / "status/app.py")
@@ -34,6 +36,7 @@ class PeliasIntegrationTests(unittest.TestCase):
             "IMPORT_REQUEST_QUEUE_FILE": self.state / "import-request-queue.json",
             "IMPORT_REQUEST_LOCK_FILE": self.state / "import-request.lock",
             "PELIAS_STATE_FILE": self.state / "pelias.json",
+            "ABORT_FLAG_FILE": self.state / "import-abort.flag",
         }.items():
             p = patch.object(app, name, str(value))
             p.start()
@@ -122,6 +125,13 @@ kubectl() {
             app.queue_pelias_action("rollback", "older")
             with self.assertRaises(ValueError):
                 app.queue_pelias_action("rollback", "")
+            with self.assertRaises(ValueError):
+                app.queue_pelias_action("promote", "Invalid_Generation")
+            with self.assertRaises(ValueError):
+                app.queue_pelias_action("promote", "g" * 64)
+            for invalid in ("trailing-", "g-"):
+                with self.assertRaises(ValueError):
+                    app.queue_pelias_action("promote", invalid)
         queue = app.load_import_request_queue()
         self.assertEqual([(r["action"], r["generation"]) for r in queue],
                          [("promote", "new"), ("rollback", "older")])
@@ -166,8 +176,9 @@ run_pelias_step
         job = json.loads((self.state / "submitted.json").read_text())
         container = job["spec"]["template"]["spec"]["containers"][0]
         self.assertIn({"name": "PELIAS_EXPECTED_SOURCE_SHA256", "value": "c" * 64}, container["env"])
-        self.assertNotIn("--manual", container["args"][0])
-        self.assertIn("--generation osm-", container["args"][0])
+        env = {item["name"]: item["value"] for item in container["env"]}
+        self.assertEqual(env["PELIAS_AUTOMATIC"], "true")
+        self.assertTrue(env["PELIAS_GENERATION"].startswith("osm-"))
         self.assertTrue((self.state / "import-completed-steps").read_text().endswith("pelias-build\n"))
 
     def test_rollback_submits_targeted_job_not_a_build(self):
@@ -190,10 +201,26 @@ run_pelias_step
         self.assertEqual(result.returncode, 0, result.stderr)
         job = json.loads((self.state / "submitted.json").read_text())
         container = job["spec"]["template"]["spec"]["containers"][0]
-        self.assertIn("--generation \"$PELIAS_GENERATION\" --manual", container["args"][0])
+        self.assertIn({"name": "PELIAS_AUTOMATIC", "value": "false"}, container["env"])
         self.assertIn({"name": "PELIAS_ACTION", "value": "rollback"}, container["env"])
         self.assertIn({"name": "PELIAS_GENERATION", "value": "previous-good"}, container["env"])
         self.assertIn("WAIT pelias-promote", result.stdout)
+
+    def test_generation_label_length_boundary_in_status_and_shell(self):
+        with patch.object(app, "pelias_policy", return_value=self.policy):
+            request = app.queue_pelias_action("promote", "g" * 63)
+            self.assertEqual(request["generation"], "g" * 63)
+            with self.assertRaises(ValueError):
+                app.queue_pelias_action("promote", "g" * 64)
+        for invalid in ("g" * 64, "g-"):
+            self.request(steps=["pelias"], action="promote", generation=invalid)
+            result = self.shell("""
+kubectl() { echo 'UNEXPECTED JOB RENDER'; return 1; }
+pelias_policy() { echo '{"enabled":true}'; }
+run_pelias_step
+""")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn("UNEXPECTED JOB RENDER", result.stdout)
 
     def test_resume_reuses_identical_job_without_deleting_it(self):
         result = self.shell("""
@@ -211,6 +238,49 @@ printf '%s' "$job" | submit_pelias_job pelias-import
 """)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.state / "deletions").read_text().splitlines(), ["DELETE"])
+
+    def test_actual_job_shells_consume_generation_action_and_manual_mode(self):
+        smoke_spec = importlib.util.spec_from_file_location("pelias_smoke", ROOT / "pelias/smoke.py")
+        smoke = importlib.util.module_from_spec(smoke_spec)
+        smoke_spec.loader.exec_module(smoke)
+        controller_spec = importlib.util.spec_from_file_location("pelias_cli", ROOT / "pelias/controller.py")
+        controller = importlib.util.module_from_spec(controller_spec)
+        with patch.dict(sys.modules, {"smoke": smoke}):
+            controller_spec.loader.exec_module(controller)
+        class CapturedArgs(Exception):
+            pass
+        bindir = self.work / "commands"
+        bindir.mkdir()
+        for name, body in {"cp": "exit 0", "python3": '[ "$1" = "-c" ] && exit 0\nprintf "%s\\n" "$@"'}.items():
+            command = bindir / name
+            command.write_text("#!/bin/sh\n" + body + "\n")
+            command.chmod(0o755)
+        for profile in ("k8s", "k8s/bigmemory"):
+            for action in ("build", "promote", "rollback"):
+                manifest = "pelias-import-job.yaml" if action == "build" else "pelias-promote-job.yaml"
+                job = yaml.safe_load((ROOT / profile / manifest).read_text())
+                container = job["spec"]["template"]["spec"]["containers"][0]
+                for automatic in ("false", "true"):
+                    with self.subTest(profile=profile, action=action, automatic=automatic):
+                        env = dict(self.env, PATH=str(bindir) + ":" + os.environ["PATH"],
+                                   PELIAS_GENERATION="target-generation", PELIAS_ACTION=action,
+                                   PELIAS_AUTOMATIC=automatic)
+                        result = subprocess.run(container["command"] + container["args"],
+                                                env=env, cwd=ROOT, capture_output=True, text=True)
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        args = result.stdout.splitlines()
+                        self.assertEqual(args[:2], ["/runtime/controller.py", action])
+                        self.assertEqual(args[args.index("--policy") + 1], "/policy/policy.json")
+                        captured = []
+                        def capture(parsed):
+                            captured.append(parsed)
+                            raise CapturedArgs
+                        with patch.dict(os.environ, env), patch.object(controller, "Controller", side_effect=capture):
+                            with self.assertRaises(CapturedArgs):
+                                controller.main(args[1:])
+                        self.assertEqual(captured[0].generation, "target-generation")
+                        if action == "build":
+                            self.assertEqual("--manual" in args, automatic == "false")
 
     def test_run_import_cli_pelias_only_queues_without_download(self):
         result = subprocess.run(["bash", "scripts/run-import.sh", "--pelias-only"],
@@ -230,20 +300,50 @@ printf '%s' "$job" | submit_pelias_job pelias-import
         fake = bindir / "kubectl"
         fake.write_text("""#!/usr/bin/env python3
 import json, os, sys
+from pathlib import Path
+import yaml
 args = sys.argv[1:]
 with open(os.environ["TEST_KUBE_LOG"], "a") as f:
     f.write(json.dumps(args) + "\\n")
 if "get" in args and "configmap" in args:
     print(json.dumps({"data": {"policy.json": '{"enabled":true,"auto_update":true}'}}))
+elif "get" in args and "nodes" in args:
+    nodes = [{"metadata":{"name":"node-"+str(i),"labels":{"osm":"true","kubernetes.io/hostname":"node-"+str(i)}},
+              "spec":{}, "status":{"conditions":[{"type":"Ready","status":"True"}]}}
+             for i in range(1, int(os.environ.get("TEST_NODE_COUNT", "1")) + 1)]
+    print(json.dumps({"items":nodes}))
+elif "get" in args and "service" in args:
+    path = Path(os.environ["TEST_SERVICE_STATE"])
+    if path.exists():
+        print(path.read_text())
+elif "get" in args and "jobs" in args:
+    items = [{"metadata":{"name":"pelias-import"},"status":{"active":1}}] if os.environ.get("TEST_ACTIVE_JOBS") else []
+    print(json.dumps({"items":items}))
+elif "exec" in args and os.environ.get("TEST_IMPORT_RUNNING"):
+    sys.exit("An import is running or queued.")
 elif "create" in args and "--dry-run=client" in args and "-f" in args:
-    print(json.dumps({"apiVersion":"v1","kind":"List","items":[
-        {"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"osm-pelias-config"}},
-        {"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"osm-pelias-policy"}}]}))
+    source = args[args.index("-f") + 1]
+    raw = sys.stdin.read() if source == "-" else Path(source).read_text()
+    documents = []
+    for doc in yaml.safe_load_all(raw):
+        documents.extend(doc["items"] if doc.get("kind") == "List" else [doc])
+    print(json.dumps(documents[0] if len(documents) == 1 else {"apiVersion":"v1","kind":"List","items":documents}))
 elif "apply" in args and args[-1] == "-":
-    sys.stdin.read()
+    raw = sys.stdin.read()
+    if raw:
+        obj = json.loads(raw)
+        items = obj.get("items", [obj])
+        with open(os.environ["TEST_KUBE_APPLIED"], "a") as f:
+            for item in items:
+                f.write(json.dumps(item) + "\\n")
+                if item.get("kind") == "Service" and item["metadata"]["name"] == "pelias":
+                    Path(os.environ["TEST_SERVICE_STATE"]).write_text(json.dumps(item))
 """)
         fake.chmod(0o755)
         log = self.work / "kubectl.log"
+        applied = self.work / "applied.jsonl"
+        service_state = self.work / "live-service.json"
+        self.env.update(TEST_SERVICE_STATE=str(service_state), TEST_KUBE_APPLIED=str(applied))
         result = subprocess.run(["bash", "scripts/deploy-osm.sh", "--pelias-only"],
                                 cwd=ROOT, text=True, capture_output=True,
                                 env=dict(self.env, PATH=str(bindir) + ":" + os.environ["PATH"],
@@ -251,14 +351,108 @@ elif "apply" in args and args[-1] == "-":
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = [json.loads(line) for line in log.read_text().splitlines()]
         self.assertFalse(any("scale" in args or "delete" in args for args in calls))
-        applied = [args[-1] for args in calls if "apply" in args and args[-1] != "-"]
-        self.assertTrue(any(path.endswith("pelias-elasticsearch.yaml") for path in applied))
-        self.assertFalse(any("job.yaml" in path for path in applied))
+        applied_paths = [args[-1] for args in calls if "apply" in args and args[-1] != "-"]
+        self.assertTrue(any(path.endswith("pelias-elasticsearch.yaml") for path in applied_paths))
+        self.assertFalse(any("job.yaml" in path for path in applied_paths))
         self.assertTrue(any("osm-pelias-runtime" in args for args in calls))
+        self.assertTrue(any("osm-status-app" in args for args in calls))
+        self.assertTrue((self.work / "data/scripts/import-orchestrator.sh").exists())
+        self.assertIn("--rollout-management", result.stdout)
+        documents = [json.loads(line) for line in applied.read_text().splitlines()]
+        role = next(doc for doc in documents if doc.get("kind") == "Role" and doc["metadata"]["name"] == "status-manager")
+        policy_rules = [rule for rule in role["rules"] if "configmaps" in rule["resources"]]
+        self.assertEqual(policy_rules, [{"apiGroups": [""], "resources": ["configmaps"],
+                                         "resourceNames": ["osm-pelias-policy"], "verbs": ["get"]}])
+        self.assertTrue(service_state.exists(), "Initial install must create the Pelias Service")
+
+        live = json.loads(service_state.read_text())
+        live["spec"]["selector"] = {"app": "pelias-generation", "generation": "live-good"}
+        live["spec"]["ports"][0]["nodePort"] = 30999
+        service_state.write_text(json.dumps(live))
+        for profile_args in ([], ["--bigmemory"]):
+            applied.write_text("")
+            result = subprocess.run(["bash", "scripts/deploy-osm.sh", "--pelias-only"] + profile_args,
+                                    cwd=ROOT, text=True, capture_output=True,
+                                    env=dict(self.env, PATH=str(bindir) + ":" + os.environ["PATH"],
+                                             TEST_KUBE_LOG=str(log)))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(service_state.read_text()), live)
+            documents = [json.loads(line) for line in applied.read_text().splitlines()]
+            self.assertFalse(any(doc.get("kind") == "Service" and doc["metadata"]["name"] == "pelias"
+                                 for doc in documents))
+            self.assertTrue(any(doc.get("kind") == "Deployment" for doc in documents))
+
+        log.write_text("")
+        env = dict(self.env, PATH=str(bindir) + ":" + os.environ["PATH"],
+                   TEST_KUBE_LOG=str(log))
+        result = subprocess.run(["bash", "scripts/deploy-osm.sh", "--pelias-only", "--rollout-management"],
+                                cwd=ROOT, text=True, capture_output=True, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = [json.loads(line) for line in log.read_text().splitlines()]
+        restarts = [args[-1] for args in calls if "restart" in args]
+        self.assertEqual(restarts, ["deployment/status", "deployment/import-orchestrator"])
+        self.assertTrue(any("exec" in args and "/state/import-request.lock" in args[-1] for args in calls))
+
+        for refusal in ("TEST_ACTIVE_JOBS", "TEST_IMPORT_RUNNING"):
+            log.write_text("")
+            result = subprocess.run(["bash", "scripts/deploy-osm.sh", "--pelias-only", "--rollout-management"],
+                                    cwd=ROOT, text=True, capture_output=True,
+                                    env=dict(env, **{refusal: "1"}))
+            self.assertNotEqual(result.returncode, 0)
+            calls = [json.loads(line) for line in log.read_text().splitlines()]
+            self.assertFalse(any("restart" in args for args in calls))
+
+        for count in ("0", "2"):
+            applied.write_text("")
+            result = subprocess.run(["bash", "scripts/deploy-osm.sh", "--pelias-only"],
+                                    cwd=ROOT, text=True, capture_output=True,
+                                    env=dict(env, TEST_NODE_COUNT=count))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("placement", result.stderr)
+            self.assertEqual(applied.read_text(), "", "Placement must fail before applying resources")
+
+        result = subprocess.run(["bash", "scripts/deploy-osm.sh", "--pelias-only", "--pelias-node", "node-2"],
+                                cwd=ROOT, text=True, capture_output=True,
+                                env=dict(env, TEST_NODE_COUNT="2"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        job = yaml.safe_load((self.work / "data/manifests/pelias-import-job.yaml").read_text())
+        self.assertEqual(job["spec"]["template"]["spec"]["nodeSelector"]["kubernetes.io/hostname"], "node-2")
+
+        log.write_text("")
+        result = subprocess.run(["bash", "scripts/deploy-osm.sh", "--pelias-only", "--bigmemory"],
+                                cwd=ROOT, text=True, capture_output=True,
+                                env=dict(env, TEST_NODE_COUNT="2"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertFalse(any("nodes" in args for args in calls), "RWX profile must not impose standard RWO placement")
+
+    def test_embedded_status_profiles_exactly_match_source(self):
+        source = (ROOT / "status/app.py").read_text()
+        for profile in ("k8s", "k8s/bigmemory"):
+            path = ROOT / profile / "status.yaml"
+            documents = list(yaml.safe_load_all(path.read_text()))
+            app_config = next(doc for doc in documents if doc.get("metadata", {}).get("name") == "osm-status-app")
+            role = next(doc for doc in documents if doc.get("kind") == "Role" and doc["metadata"]["name"] == "status-manager")
+            self.assertIn({"apiGroups": [""], "resources": ["configmaps"],
+                           "resourceNames": ["osm-pelias-policy"], "verbs": ["get"]}, role["rules"])
+            embedded = app_config["data"]["app.py"]
+            self.assertEqual(embedded, source, str(path))
+            compile(embedded, str(path), "exec")
+            code = {}
+            exec(compile(embedded, str(path), "exec"), code)
+            self.assertEqual(code["PELIAS_STATE_FILE"],
+                             os.path.join(code["DATA_DIR"], "status", "pelias.json"))
 
     def test_abort_includes_both_lifecycle_jobs(self):
-        self.assertIn("pelias-import", app.IMPORT_JOB_NAMES)
-        self.assertIn("pelias-promote", app.IMPORT_JOB_NAMES)
+        self.request(steps=["pelias"])
+        with patch.object(app, "read_orchestrator_state", return_value={"running": True}), \
+             patch.object(app, "write_workflow_state"), \
+             patch.object(app.KUBE, "delete_job") as delete:
+            app.abort_import_workflow()
+        deleted = [call.args[0] for call in delete.call_args_list]
+        self.assertIn("pelias-import", deleted)
+        self.assertIn("pelias-promote", deleted)
+        self.assertTrue(Path(app.ABORT_FLAG_FILE).exists())
 
 
 if __name__ == "__main__":

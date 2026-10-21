@@ -2,9 +2,14 @@
 
 import io
 import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
+import time
 import unittest
 from unittest import mock
+import uuid
 
 import yaml
 
@@ -55,6 +60,16 @@ class PeliasManifestsTest(unittest.TestCase):
             for key in ("enabled", "auto_update", "auto_promote"):
                 self.assertIs(False, lifecycle[key])
                 self.assertNotIn(key, config)
+            self.assertNotIn("typeName", config["schema"])
+            self.assertEqual("kubernetes", lifecycle["serving"]["mode"])
+            self.assertEqual(
+                "pelias-generation-template",
+                lifecycle["serving"]["deployment_template"],
+            )
+            self.assertEqual(
+                {"search", "autocomplete", "search/structured", "reverse"},
+                {case["endpoint"] for case in lifecycle["smoke"]},
+            )
 
     def test_jobs_have_persistent_data_status_bounded_resources_and_ca(self):
         for profile in PROFILES:
@@ -84,6 +99,29 @@ class PeliasManifestsTest(unittest.TestCase):
                     mounts = {m["mountPath"]: m for m in pod["containers"][0]["volumeMounts"]}
                     self.assertTrue(mounts["/planet"]["readOnly"])
 
+    def test_manual_builds_and_queued_automatic_promotions_remain_distinct(self):
+        for profile in PROFILES:
+            build = find(profile, "Job", "pelias-import")["spec"]["template"]["spec"]["containers"][0]
+            env = {entry["name"]: entry["value"] for entry in build["env"]}
+            self.assertEqual("true", env["PELIAS_AUTOMATIC"])
+            self.assertIn("false) exec python3", build["args"][0])
+            self.assertIn("--manual", build["args"][0])
+            promote = find(profile, "Job", "pelias-promote")["spec"]["template"]["spec"]["containers"][0]
+            self.assertIn('p.get("auto_promote") is True', promote["args"][0])
+            self.assertIn('test -n "$PELIAS_GENERATION"', promote["args"][0])
+
+    def test_embedded_shell_commands_parse(self):
+        for profile in PROFILES:
+            for doc in documents(profile):
+                if doc["kind"] not in ("Deployment", "Job", "StatefulSet"):
+                    continue
+                for container in doc["spec"]["template"]["spec"]["containers"]:
+                    if container.get("command", [None])[0] == "/bin/sh":
+                        subprocess.run(
+                            ["/bin/sh", "-n"], input=container["args"][0],
+                            text=True, capture_output=True, check=True,
+                        )
+
     def test_elasticsearch_has_one_writer_and_no_public_port(self):
         for profile in PROFILES:
             claim = find(profile, "PersistentVolumeClaim", "pelias-elasticsearch")
@@ -93,6 +131,8 @@ class PeliasManifestsTest(unittest.TestCase):
             pod = statefulset["spec"]["template"]["spec"]
             container = pod["containers"][0]
             self.assertRegex(container["image"], r"elasticsearch:7\.17\.\d+$")
+            lock = json.loads((ROOT / "pelias/images.lock.json").read_text())
+            self.assertTrue(container["image"].endswith(":" + lock["elasticsearch"]))
             self.assertIn("startupProbe", container)
             self.assertIn("readinessProbe", container)
             self.assertIn("livenessProbe", container)
@@ -146,6 +186,12 @@ class PeliasManifestsTest(unittest.TestCase):
                 deployment["spec"]["template"]["metadata"]["labels"],
                 service["spec"]["selector"],
             )
+            self.assertEqual("disabled", service["spec"]["selector"]["pelias-generation"])
+            volumes = {v["name"]: v for v in pod["volumes"]}
+            self.assertEqual(
+                {"osm-pelias-config", "osm-pelias-policy"},
+                {source["configMap"]["name"] for source in volumes["config"]["projected"]["sources"]},
+            )
             for other in documents(profile):
                 if other["kind"] == "Service" and other["metadata"]["name"] != "pelias":
                     self.assertNotEqual("NodePort", other["spec"].get("type"))
@@ -180,12 +226,181 @@ class PeliasManifestsTest(unittest.TestCase):
     def test_lock_has_exact_git_revisions_and_no_latest_base(self):
         lock = json.loads((ROOT / "pelias/images.lock.json").read_text())
         self.assertTrue(lock["repositories"])
+        self.assertTrue({
+            "api", "schema", "openstreetmap", "whosonfirst", "polylines",
+            "placeholder", "pip-service", "interpolation", "csv-importer",
+            "libpostal-server",
+        }.issubset(lock["repositories"]))
         for name, repo in lock["repositories"].items():
             self.assertRegex(repo["commit"], r"^[a-f0-9]{40}$", name)
             self.assertTrue(repo["url"].startswith("https://github.com/"))
         for image in lock["bases"].values():
             self.assertNotIn(":latest", image)
             self.assertRegex(image, r"@sha256:[a-f0-9]{64}$")
+
+
+@unittest.skipUnless(os.environ.get("PELIAS_REAL_SMOKE") == "1", "opt-in real Docker import")
+class PeliasRealSmokeTest(unittest.TestCase):
+    def test_tiny_upstream_fixtures_import_and_all_four_api_endpoints(self):
+        work = ROOT / "tests" / (".pelias-real-" + uuid.uuid4().hex)
+        work.mkdir()
+        self.addCleanup(shutil.rmtree, work)
+
+        def run(*args, input=None, timeout=300):
+            result = subprocess.run(
+                list(args), input=input, text=True, capture_output=True, timeout=timeout,
+            )
+            self.assertEqual(0, result.returncode, (result.stdout + result.stderr)[-14000:])
+            return result.stdout.strip()
+
+        def start(*args):
+            identifier = run("docker", "run", "-d", *args)
+            self.addCleanup(
+                subprocess.run, ["docker", "rm", "-f", identifier],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            return identifier
+
+        es = start(
+            "--memory=2g", "-e", "discovery.type=single-node",
+            "-e", "xpack.security.enabled=false", "-e", "node.store.allow_mmap=false",
+            "-e", "ES_JAVA_OPTS=-Xms512m -Xmx512m",
+            "localosm/pelias-elasticsearch:7.17.27",
+        )
+        runtime = start(
+            "--network", "container:" + es, "-v", str(work) + ":/data",
+            "-v", str(ROOT / "pelias") + ":/runtime:ro",
+            "--user", "%s:%s" % (os.getuid(), os.getgid()),
+            "--entrypoint", "sleep", "localosm/pelias-runtime:2026-10-21", "infinity",
+        )
+        start(
+            "--network", "container:" + es,
+            "localosm/pelias-libpostal:2026-10-21",
+        )
+        for _ in range(90):
+            ready = subprocess.run(
+                ["docker", "exec", runtime, "curl", "-fsS",
+                 "http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow"],
+                capture_output=True, timeout=10,
+            )
+            if ready.returncode == 0:
+                break
+            time.sleep(2)
+        else:
+            self.fail(run("docker", "logs", es))
+        native = json.loads(
+            find(PROFILES[0], "ConfigMap", "osm-pelias-config")["data"]["pelias.json"],
+        )
+        native["esclient"]["hosts"][0]["host"] = "127.0.0.1"
+        native["api"]["services"]["libpostal"]["url"] = "http://127.0.0.1:4400"
+        (work / "native.json").write_text(json.dumps(native))
+        policy = {
+            "enabled": True, "auto_update": False, "auto_promote": False,
+            "min_documents": 1, "startup_timeout": 60,
+            "aux": {"version": "tiny-fixtures", "countries": ["FRA"]},
+            "smoke": [
+                {"endpoint": "search", "params": {"text": "900 Burrard Street"}},
+                {"endpoint": "autocomplete", "params": {"text": "Burrard Str"}},
+                {"endpoint": "search/structured", "params": {"address": "900 Burrard Street"}},
+                {"endpoint": "reverse", "params": {"point.lat": 49.2819978, "point.lon": -123.1243463}},
+            ],
+        }
+        (work / "policy.json").write_text(json.dumps(policy))
+        run("docker", "exec", "-i", runtime, "node", input=r"""
+const fs = require('fs');
+const root = '/data/aux/tiny-fixtures';
+const directory = root + '/whosonfirst/sqlite';
+fs.mkdirSync(directory, {recursive:true});
+fs.mkdirSync('/data/source', {recursive:true});
+const entries = require('/code/whosonfirst/test/resources/france.json').tavel;
+for (const entry of entries) {
+  const bbox = entry.properties['geom:bbox'].split(',').map(Number);
+  const [w,s,e,n] = bbox;
+  entry.geometry = {type:'Polygon',coordinates:[[[w,s],[e,s],[e,n],[w,n],[w,s]]]};
+}
+const db = require('/code/whosonfirst/test/generateWOFDB')(
+  directory + '/whosonfirst-data-admin-fr.db', entries);
+db.exec('CREATE TABLE ancestors (id INTEGER, ancestor_id INTEGER)');
+for (const entry of entries) {
+  for (const ancestor of entry.properties['wof:belongsto']) {
+    db.prepare('INSERT INTO ancestors VALUES (?,?)').run(entry.id,ancestor);
+  }
+  db.prepare('UPDATE spr SET is_current=1, country=?, repo=? WHERE id=?')
+    .run('FR','whosonfirst-data-admin-fr',entry.id);
+}
+db.close();
+fs.copyFileSync('/code/openstreetmap/test/vancouver_canada.osm.pbf',
+  '/data/source/official.osm.pbf');
+fs.writeFileSync('/data/source/.pelias-source.lock','');
+""")
+        run(
+            "docker", "exec", runtime, "osmium", "extract", "/data/source/official.osm.pbf",
+            "--bbox", "-123.127,49.280,-123.122,49.284", "--strategy", "complete_ways",
+            "-o", "/data/source/europa.osm.pbf",
+        )
+        result = run("docker", "exec", "-i", runtime, "python3", input=r"""
+import json, sys
+from pathlib import Path
+from types import SimpleNamespace
+sys.path.insert(0, '/runtime')
+from controller import Controller, digest
+args = SimpleNamespace(
+    command='build', config='/data/native.json', policy='/data/policy.json',
+    data='/data', status='/data/status.json', modules='/code', manual=True,
+    source='/data/source/europa.osm.pbf', source_lock='/data/source/.pelias-source.lock',
+)
+controller = Controller(args)
+with controller.locked():
+    root = Path('/data/generations/tiny')
+    root.mkdir(parents=True)
+    record = {'id':'tiny','index':'pelias-tiny','aux_version':'tiny-fixtures'}
+    controller.state['generations']['tiny'] = record
+    config = controller.make_config(root,'pelias-tiny',Path('/data/aux/tiny-fixtures'))
+    try:
+        controller.pipeline(root,config)
+        controller.check_index(record)
+        result = controller.candidate_smoke('tiny')
+        record.update(phase='built', config_sha256=digest(config))
+        (root / '.serving.lock').touch()
+        controller.save()
+        print('REAL_PELIAS_SMOKE=' + json.dumps(result))
+    except BaseException:
+        for error_log in root.rglob('*.err'):
+            print(str(error_log) + '\n' + error_log.read_text(errors='replace')[-8000:])
+        raise
+    finally:
+        controller.processes.close()
+""", timeout=600)
+        self.assertIn("REAL_PELIAS_SMOKE=", result)
+        print(result[result.index("REAL_PELIAS_SMOKE="):])
+        serving = start(
+            "--network", "container:" + es, "-v", str(work) + ":/data:ro",
+            "-v", str(ROOT / "pelias") + ":/runtime:ro",
+            "--tmpfs", "/scratch:rw,mode=1777",
+            "--user", "%s:%s" % (os.getuid(), os.getgid()),
+            "localosm/pelias-runtime:2026-10-21",
+            "python3", "/runtime/controller.py", "serve", "--generation", "tiny",
+            "--config", "/data/native.json", "--policy", "/data/policy.json",
+        )
+        for _ in range(60):
+            ready = subprocess.run(
+                ["docker", "exec", runtime, "curl", "-fsS",
+                 "http://127.0.0.1:4000/v1/search?text=Burrard%20Street"],
+                capture_output=True, timeout=10,
+            )
+            if ready.returncode == 0:
+                break
+            time.sleep(1)
+        else:
+            self.fail(run("docker", "logs", serving))
+        production = run(
+            "docker", "exec", runtime, "python3", "-c",
+            "import json,sys; sys.path.insert(0,'/runtime'); import smoke; "
+            "p=json.load(open('/data/policy.json')); "
+            "print(json.dumps(smoke.run('http://127.0.0.1:4000',p['smoke'])))",
+        )
+        self.assertEqual(4, len(json.loads(production)))
+        print("READONLY_GENERATION_SMOKE=" + production)
 
 
 if __name__ == "__main__":

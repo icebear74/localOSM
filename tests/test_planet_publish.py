@@ -32,6 +32,15 @@ elif name == 'mapshaper':
 
 
 class PlanetPublishTest(unittest.TestCase):
+    def test_manual_and_cron_profiles_require_new_publish_protocol_image(self):
+        for profile in ("k8s", "k8s/bigmemory"):
+            manifest = (ROOT / profile / "planet-update-job.yaml").read_text()
+            images = [line.strip().split("image:", 1)[1].strip()
+                      for line in manifest.splitlines()
+                      if "image:" in line and "planet-update" in line]
+            self.assertEqual(len(images), 2)
+            self.assertTrue(all(image.endswith(":pelias-source-v1") for image in images))
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

@@ -31,6 +31,7 @@ PY
 test "${#LOCK[@]}" = 6 || { echo "Invalid Pelias image lock" >&2; exit 1; }
 docker build --file "$ROOT/pelias/Dockerfile" \
   --build-arg "NODE_IMAGE=${LOCK[0]}" \
+  --build-arg "LIBPOSTAL_IMAGE=${LOCK[2]}" \
   --tag "$REGISTRY/pelias-runtime:$TAG" "$ROOT"
 docker build --file "$ROOT/pelias/Dockerfile.libpostal" \
   --build-arg "GO_IMAGE=${LOCK[1]}" \

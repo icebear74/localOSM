@@ -273,7 +273,8 @@ import sys
 
 pending, destination, lock_path, status_dir = sys.argv[1:]
 with open(lock_path, "a+b") as lock:
-    os.chmod(lock_path, 0o664)
+    if os.fstat(lock.fileno()).st_uid == os.geteuid():
+        os.fchmod(lock.fileno(), 0o664)
     fcntl.flock(lock, fcntl.LOCK_EX)
     digest = hashlib.sha256()
     with open(pending, "rb") as source:

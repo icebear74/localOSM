@@ -40,6 +40,21 @@ TEMP_DIR = os.environ.get("OSM_TEMP_DIR", "/mnt/OSM/TempDir")
 NAMESPACE = os.environ.get("OSM_NAMESPACE", "osm")
 OSM_NODE_URL = os.environ.get("OSM_NODE_URL", "").strip()
 
+
+def _load_service_targets():
+    raw = os.environ.get("SERVICE_TARGETS_JSON", "")
+    try:
+        payload = json.loads(raw) if raw else {}
+    except ValueError:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {key: value.strip() for key, value in payload.items()
+            if isinstance(value, str) and value.strip()}
+
+
+SERVICE_TARGETS = _load_service_targets()
+
 STATUS_DIR = os.path.join(DATA_DIR, "status")
 LIBRARY_DIR = os.path.join(DATA_DIR, "library")
 IMPORT_DIR = os.path.join(TEMP_DIR, "import")
@@ -993,8 +1008,13 @@ INDEX_HTML = """<!doctype html>
     </div>
   </div>
 
+  <script id="service-targets-json" type="application/json">{{SERVICE_TARGETS_JSON}}</script>
   <script>
   var NODE_URL = "{{NODE_URL}}";
+  var SERVICE_TARGETS = {};
+  try {
+    SERVICE_TARGETS = JSON.parse(document.getElementById('service-targets-json').textContent || '{}');
+  } catch (e) {}
   var ALL_COUNTRIES = [];
   var refreshTimer = null;
   var WORKFLOW_RUNNING = false;
@@ -1002,9 +1022,20 @@ INDEX_HTML = """<!doctype html>
 
   function updateLinks() {
     var baseUrl = (NODE_URL || (location.protocol + '//' + location.hostname)).replace(/\\/+$/, '');
+    function resolveServiceTarget(key, fallbackBase) {
+      var configured = (SERVICE_TARGETS && SERVICE_TARGETS[key]) || '';
+      return (configured || fallbackBase).replace(/\\/+$/, '');
+    }
+    var tileserverUrl = resolveServiceTarget('tileserver', baseUrl + ':30085');
+    var targets = {
+      'web-link': resolveServiceTarget('web', baseUrl + ':30084'),
+      'valhalla-link': resolveServiceTarget('valhalla', baseUrl + ':30082'),
+      'nominatim-link': resolveServiceTarget('nominatim', baseUrl + ':30081'),
+      'tileserver-link': tileserverUrl
+    };
     ['web-link','valhalla-link','nominatim-link','tileserver-link'].forEach(function(id) {
       var a = document.getElementById(id);
-      if (a && a.dataset.port) a.href = baseUrl + ':' + a.dataset.port + '/';
+      if (a) a.href = targets[id] + '/';
     });
     // Point Maputnik at TileServer-GL's own resolved style endpoint, not the raw
     // stored style.json (served via /api/style): the stored file's source uses
@@ -1012,9 +1043,7 @@ INDEX_HTML = """<!doctype html>
     // itself rewrites into real tile/TileJSON URLs when serving /styles/<id>/style.json.
     // Loading the raw file directly left Maputnik with an unresolvable source, so
     // no basemap was drawn and the source inspector showed empty/localhost fields.
-    var tileserverLink = document.getElementById('tileserver-link');
-    var tileserverPort = (tileserverLink && tileserverLink.dataset.port) || '30085';
-    var styleApiUrl = baseUrl + ':' + tileserverPort + '/styles/style_vibrant/style.json';
+    var styleApiUrl = tileserverUrl + '/styles/style_vibrant/style.json';
     CURRENT_STYLE_API_URL = styleApiUrl;
     ['style-editor-link', 'style-editor-link-2'].forEach(function(id) {
       var styleLink = document.getElementById(id);
@@ -2236,7 +2265,7 @@ def pelias_status():
 def queue_pelias_action(action, generation=""):
     if action not in {"promote", "rollback"}:
         raise ValueError("Pelias action must be promote or rollback.")
-    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}", generation):
+    if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", generation):
         raise ValueError("An explicit Pelias target generation is required.")
     if pelias_policy().get("enabled") is not True:
         raise RuntimeError("Pelias is disabled in osm-pelias-policy.")
@@ -3142,7 +3171,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path in {"/", "/index.html"}:
             cfg = load_config()
             effective_url = cfg.get("node_url") or cfg.get("detected_node_url", "")
-            body = INDEX_HTML.replace("{{NODE_URL}}", effective_url).encode("utf-8")
+            body = (INDEX_HTML.replace("{{NODE_URL}}", effective_url)
+                    .replace("{{SERVICE_TARGETS_JSON}}", json.dumps(SERVICE_TARGETS).replace("<", "\\u003c"))
+                    .encode("utf-8"))
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))

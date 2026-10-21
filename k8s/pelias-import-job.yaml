@@ -26,8 +26,13 @@ spec:
           if [ "$(cat /custom-ca/ca-enabled 2>/dev/null || true)" = true ]; then
             cat /custom-ca/ca.crt >> /run/pelias-ca.crt
           fi
-          exec python3 /runtime/controller.py build --policy /policy/policy.json
+          case "$PELIAS_AUTOMATIC" in
+            true) exec python3 /runtime/controller.py build --policy /policy/policy.json ;;
+            false) exec python3 /runtime/controller.py build --policy /policy/policy.json --manual ;;
+            *) echo "PELIAS_AUTOMATIC must be true or false" >&2; exit 2 ;;
+          esac
         env:
+        - {name: PELIAS_AUTOMATIC, value: "true"}
         - {name: SSL_CERT_FILE, value: /run/pelias-ca.crt}
         - {name: CURL_CA_BUNDLE, value: /run/pelias-ca.crt}
         - {name: REQUESTS_CA_BUNDLE, value: /run/pelias-ca.crt}

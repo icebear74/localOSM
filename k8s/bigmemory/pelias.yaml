@@ -9,10 +9,10 @@ spec:
   replicas: 0
   strategy: {type: Recreate}
   selector:
-    matchLabels: {app: pelias-generation, generation: disabled}
+    matchLabels: {app: pelias-generation, pelias-generation: disabled}
   template:
     metadata:
-      labels: {app: pelias-generation, generation: disabled}
+      labels: {app: pelias-generation, pelias-generation: disabled}
     spec:
       automountServiceAccountToken: false
       nodeSelector: {osm: "true"}
@@ -80,7 +80,10 @@ spec:
       - name: data
         persistentVolumeClaim: {claimName: pelias-data, readOnly: true}
       - name: config
-        configMap: {name: osm-pelias-config}
+        projected:
+          sources:
+          - configMap: {name: osm-pelias-config}
+          - configMap: {name: osm-pelias-policy}
       - name: policy
         configMap: {name: osm-pelias-policy}
       - name: runtime
@@ -95,6 +98,6 @@ metadata:
   namespace: osm
 spec:
   type: NodePort
-  selector: {app: pelias-generation, generation: disabled}
+  selector: {app: pelias-generation, pelias-generation: disabled}
   ports:
   - {name: api, port: 4000, targetPort: api, nodePort: 30088}

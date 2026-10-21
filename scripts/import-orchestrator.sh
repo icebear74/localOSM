@@ -666,16 +666,15 @@ run_pelias_step() {
   local action target
   action="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("action","build"))' "${REQUEST_FILE}")"
   if [ "${action}" != build ]; then
-    target="$(python3 -c 'import json,sys,re; v=json.load(open(sys.argv[1])).get("generation",""); assert re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}",v); print(v)' "${REQUEST_FILE}")" || return 1
+    target="$(python3 -c 'import json,sys,re; v=json.load(open(sys.argv[1])).get("generation",""); assert re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?",v); print(v)' "${REQUEST_FILE}")" || return 1
     case "${action}" in promote|rollback) ;; *) return 1 ;; esac
     job_json="$(kubectl create --dry-run=client -f "${MANIFEST_DIR}/pelias-promote-job.yaml" -o json)" || return 1
     printf '%s' "${job_json}" | python3 -c '
 import json,sys
 j=json.load(sys.stdin); c=j["spec"]["template"]["spec"]["containers"][0]
-for e in c.get("env",[]):
-    if e["name"] == "PELIAS_ACTION": e["value"]=sys.argv[1]
-    if e["name"] == "PELIAS_GENERATION": e["value"]=sys.argv[2]
-c["args"]=[c["args"][0].replace("--generation \"$PELIAS_GENERATION\"", "--generation \"$PELIAS_GENERATION\" --manual").replace("rollback --policy /policy/policy.json", "rollback --policy /policy/policy.json --generation \"$PELIAS_GENERATION\" --manual")]
+values={"PELIAS_ACTION":sys.argv[1], "PELIAS_GENERATION":sys.argv[2], "PELIAS_AUTOMATIC":"false"}
+c["env"]=[e for e in c.get("env",[]) if e["name"] not in values]
+c["env"].extend({"name":k,"value":v} for k,v in values.items())
 print(json.dumps(j))' "${action}" "${target}" | submit_pelias_job pelias-promote || return 1
     write_state true pelias 90 "Pelias ${action} submitted." "Target ${target}."
     wait_for_job pelias-promote
@@ -690,8 +689,9 @@ print(json.dumps(j))' "${action}" "${target}" | submit_pelias_job pelias-promote
     printf '%s' "${job_json}" | python3 -c '
 import json,sys
 j=json.load(sys.stdin); c=j["spec"]["template"]["spec"]["containers"][0]
-c["args"]=[c["args"][0].rstrip() + " --generation " + sys.argv[1] + (" --manual" if sys.argv[2] == "false" else "")]
-c.setdefault("env",[]).append({"name":"PELIAS_EXPECTED_SOURCE_SHA256","value":sys.argv[3]})
+values={"PELIAS_GENERATION":sys.argv[1], "PELIAS_AUTOMATIC":sys.argv[2], "PELIAS_EXPECTED_SOURCE_SHA256":sys.argv[3]}
+c["env"]=[e for e in c.get("env",[]) if e["name"] not in values]
+c["env"].extend({"name":k,"value":v} for k,v in values.items())
 print(json.dumps(j))' "${generation}" "${automatic}" "${expected}" |
       submit_pelias_job pelias-import || return 1
     local rc=0
@@ -707,10 +707,9 @@ print(json.dumps(j))' "${generation}" "${automatic}" "${expected}" |
     printf '%s' "${job_json}" | python3 -c '
 import json,sys
 j=json.load(sys.stdin); c=j["spec"]["template"]["spec"]["containers"][0]
-for e in c.get("env",[]):
-    if e["name"] == "PELIAS_GENERATION": e["value"]=sys.argv[1]
-if sys.argv[2] == "false":
-    c["args"]=[c["args"][0].replace("--generation \"$PELIAS_GENERATION\"", "--generation \"$PELIAS_GENERATION\" --manual")]
+values={"PELIAS_ACTION":"promote", "PELIAS_GENERATION":sys.argv[1], "PELIAS_AUTOMATIC":sys.argv[2]}
+c["env"]=[e for e in c.get("env",[]) if e["name"] not in values]
+c["env"].extend({"name":k,"value":v} for k,v in values.items())
 print(json.dumps(j))' "${generation}" "${automatic}" |
       submit_pelias_job pelias-promote || return 1
     wait_for_job pelias-promote || return $?

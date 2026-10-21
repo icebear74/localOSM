@@ -71,7 +71,7 @@ def extract(source, destination, scratch):
             configuration.write_text(json.dumps({"linear_tags": True, "area_tags": False}))
             command = [
                 "osmium", "export", str(source), "--geometry-types=linestring",
-                "--output-format=geojsonseq", "--stop-on-error",
+                "--output-format=geojsonseq", "--verbose", "--no-progress",
                 "--index-type=sparse_file_array," + str(Path(temporary) / "locations.idx"),
                 "--config=" + str(configuration),
             ]
