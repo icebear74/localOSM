@@ -376,7 +376,7 @@ spec:
             java -Xmx64g -cp "${PLANETILER_JAR}:${PROFILE_SOURCE_ROOT}" com.onthegomap.planetiler.custom.CustomProfile \
               --osm-path="${SOURCE_OSM}" \
               --tmpdir="${TEMP_DIR}" \
-              --output="${OUTPUT_NEW}" \
+              --output="${OUTPUT_NEW}?format=mbtiles" \
               --force \
               --download=false \
               --data-dir=/osm-temp/tileserver/data \
@@ -391,7 +391,7 @@ spec:
             java -Xmx64g -jar "${PLANETILER_JAR}" \
               --osm-path="${SOURCE_OSM}" \
               --tmpdir="${TEMP_DIR}" \
-              --output="${OUTPUT_NEW}" \
+              --output="${OUTPUT_NEW}?format=mbtiles" \
               --data-dir=/osm-temp/tileserver/data \
               --force \
               --download=false \
