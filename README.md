@@ -7,6 +7,7 @@ A self-hosted OSM stack on K3s with a read-only status dashboard, a routing web 
 - Nominatim (with its bundled, configurably-tuned PostgreSQL/PostGIS)
 - Valhalla
 - TileServer GL
+- Pelias (optional, separate comparison API; see [Pelias](#pelias-parallelbetrieb))
 - Status dashboard
 - Routing web UI
 - Style-Editor (Maputnik)
@@ -60,7 +61,7 @@ Important host subdirectories under `/mnt/OSM`:
 
 Important scratch paths under the shared Kubernetes temp PVC mounted inside the pods:
 
-- `import/` – merged/downloaded `planet.osm.pbf` used as the shared input for Nominatim, Valhalla and Photon
+- `import/` – country-library merge used by parts of the legacy request workflow. This is **not** the authoritative Pelias input: the current Planetiler, Nominatim and Valhalla import jobs read `/planet/europa.osm.pbf` from PVC `planet`.
 - `tileserver/work` – Planetiler work directory, cleaned after the new `planet.mbtiles` has been activated
 - `tileserver/downloads` – reusable Planetiler side downloads that may remain between runs
 - `nominatim/work` – temporary Postgres/Nominatim import working data, cleaned after promotion into the `nominatim` PVC
@@ -288,3 +289,350 @@ style becomes active within seconds — without any manual `scp`/`kubectl` steps
 StorageClasses available in a cluster (fio + PostgreSQL/pgbench workloads,
 IOPS/MB/s/latency, configurable ranking). It never touches the OSM stack
 deployed by this repository; see `storage-perf-tester/README.md` for usage.
+
+## Pelias-Parallelbetrieb
+
+Pelias ergänzt Photon/Nominatim, ersetzt aber weder deren APIs noch qvadis automatisch.
+Die vorhandene Photon-Schnittstelle `/api` ist **nicht** mit Pelias `/v1/*`
+austauschbar. qvadis kann später einen eigenen Pelias-Provider für Vergleichstests
+ergänzen; Routing bleibt bei Valhalla.
+
+### Verbindliche OSM-Quelle und räumliche Grenzen
+
+Pelias liest ausschließlich **PVC `planet`, `/planet/europa.osm.pbf`**, read-only.
+Weder Nominatim-Export noch Country-Library-Datei
+`/osm-temp/import/planet.osm.pbf` noch zusätzlicher OSM-Download werden verwendet.
+Der Name `europa` ist keine Abdeckungsbeschreibung:
+
+* `k8s/auto-update-geojson-config.yaml` enthält im Standardprofil eine größere
+  europäische Polygonmaske; die bigmemory-Variante eine engere Maske um Deutschland.
+* Beide konfigurieren zusätzlich eine Japan-Maske und `privat.osm`.
+* `auto-update/build_karte.sh` ergänzt aus dem Planet abgeleitete Freizeitparkflächen
+  und die Objekte aus `welt_filter.txt`, unter anderem ausgewählte Orte,
+  Verwaltungsgrenzen, Gewässer und Autobahnen.
+
+Maßgeblich bleiben die tatsächlich angewandten ConfigMaps, nicht diese Kurzbeschreibung.
+Außerhalb der Vollauszugsflächen gibt es nur die gefilterten Objekte, keine
+weltweite Hausadressabdeckung. Die Gebietsdefinition wird durch Pelias nicht verändert.
+Private Inhalte der PBF gelangen ebenfalls in den Pelias-Index; Zugriff entsprechend
+begrenzen.
+
+Der aktualisierte Planet-Producer erzeugt `europa.next.osm.pbf`, berechnet SHA-256
+und PBF-Header und veröffentlicht das fertige Ergebnis durch atomisches Umbenennen.
+`europa.osm.pbf.meta.json` und `/status/pelias-input.json` enthalten denselben
+Fingerprint, Größe, mtime und Veröffentlichungszeit. Gemeinsame `flock`-Sperren
+schützen Veröffentlichung und Pelias-Lesephase; Sperrdateien niemals im Betrieb
+löschen. Alte Auto-Update-Images müssen vor Nutzung dieses Protokolls neu gebaut
+werden. Laufende alte Writer zuerst auslaufen lassen.
+
+Es entsteht keine weitere Pelias-Snapshotkopie der ca. 15-GB-PBF. Der Producer benötigt
+während der Erzeugung allerdings Platz für **alte und neue** Ergebnisdatei plus
+seine ohnehin benötigten Extraktionsdateien. Ein Leser kann die Veröffentlichung
+verzögern; das ist beabsichtigt und kein fehlgeschlagener Download.
+
+### Erstinstallation und Einmalimport
+
+Auf dem OSM-Host den absoluten Checkoutpfad setzen; StorageClasses in
+`pelias-persistentvolumeclaims.yaml` vor dem ersten Apply an den Cluster anpassen.
+Die Pelias-PVCs werden separat angelegt, bestehende PVCs nicht ersetzt.
+Das Standardprofil mit `planet: ReadWriteOnce` setzt einen eindeutig gewählten
+OSM-Worker (`osm=true`) voraus. Producer und alle Verbraucher dieses PVCs müssen
+auf demselben Node laufen; bei mehreren geeigneten Nodes vor Installation eine
+explizite gemeinsame Hostname-Affinität festlegen, nicht auf zufälliges Scheduling
+vertrauen. Der Installer prüft das und erlaubt eine gezielte Pelias-Auswahl mit
+`--pelias-node <hostname>` bzw. `PELIAS_NODE_HOSTNAME`; diese Auswahl muss zum
+Node der vorhandenen Planet-Verbraucher passen. Das bigmemory-Planet-PVC ist im vorhandenen Profil RWX; auch dort
+müssen Dateisperren auf der konkreten StorageClass nodeübergreifend funktionieren.
+
+```bash
+REPO=/home/runner/work/localOSM/localOSM  # auf dem Zielhost entsprechend setzen
+bash "$REPO/scripts/build-pelias-images.sh"
+# Bei k3s ohne eigene Registry: auf jeden berechtigten OSM-Worker importieren.
+docker save localosm/pelias-runtime:2026-10-21 localosm/pelias-libpostal:2026-10-21 localosm/pelias-elasticsearch:7.17.27 |
+  sudo k3s ctr images import -
+bash "$REPO/scripts/deploy-osm.sh" --pelias-only --enable-pelias --rollout-management
+# Alternativ Ressourcen-/Storageprofil:
+# bash "$REPO/scripts/deploy-osm.sh" --bigmemory --pelias-only --enable-pelias --rollout-management
+```
+
+`--pelias-only` startet **keine** Import-/Cleanupjobs und skaliert die bestehenden
+Such-/Routing-/Tile-Dienste nicht herunter. Die vorhandene Pelias-Policy bleibt bei
+wiederholter Installation erhalten; `--enable-pelias` ist eine explizite Freigabe.
+`--rollout-management` lädt die aktualisierte Dashboard-/Queue-Integration durch
+Neustart **nur** von Status und Orchestrator. Dieser opt-in Pfad verweigert den
+Neustart bei laufenden Builds/Jobs; dann erst den laufenden Auftrag abschließen
+oder kontrolliert abbrechen. Ohne diesen Schalter werden die Management-Pods
+nicht neu gestartet und bereits laufender alter Code bleibt bis zum Rollout aktiv.
+Eine eigene Registry ist über `PELIAS_IMAGE_REGISTRY` beim Imagebau möglich;
+die Imageverweise in den angewandten Manifesten müssen dann dazu passen.
+Die genauen Quellen/Basisimage-Pins stehen in `pelias/images.lock.json`.
+Buildzeit-CA, Registry-/Containerd-CA und das Laufzeit-CA-Bundle sind getrennte
+Vertrauenskonfigurationen. Keinen TLS-Check abschalten.
+
+Den Producer ebenfalls aus diesem Checkout mit Tag **`pelias-source-v1`** bauen
+und in der bereits verwendeten Registry bereitstellen:
+
+```bash
+docker build -t 127.0.0.1:5000/planet-update:pelias-source-v1 "$REPO/auto-update"
+# bigmemory verwendet stattdessen den in seiner Jobdatei angegebenen Registry-Pfad.
+# Nach Bereitstellung des Images den CronJob aktualisieren:
+kubectl apply --dry-run=client -f "$REPO/k8s/planet-update-job.yaml" -o json |
+  python3 -c 'import json,sys; x=json.load(sys.stdin); print(json.dumps(next(v for v in x["items"] if v["kind"]=="CronJob")))' |
+  kubectl apply -f -
+```
+
+Für bigmemory die entsprechende Jobdatei aus `"$REPO/k8s/bigmemory"` verwenden.
+Das gesamte Multi-Dokument-Manifest würde zusätzlich sofort den manuellen Job
+starten; deshalb oben nur den CronJob anwenden. Bereits laufende alte Writer
+zuerst beenden/auslaufen lassen. Der erste manuelle Updateauftrag verwendet
+anschließend ebenfalls die neue Jobvorlage.
+
+Vor dem ersten Import die JSON-Policy in `osm-pelias-policy` prüfen:
+Hilfsdaten-Länderauswahl, immutable Snapshotversion, Mindestdokumentzahlen,
+vier datensatzgerechte Smoke-Queries und Aktivierungspolitik.
+Landes-/Sprachfilter sind nicht mit räumlicher OSM-Vollabdeckung gleichzusetzen.
+Native Pelias-Konfiguration steht ausschließlich in `osm-pelias-config`;
+Lifecycle-Schalter gehören in die separate Policy, nicht als erfundene
+Pelias-Importoptionen in `pelias.json`.
+
+```bash
+kubectl -n osm edit configmap osm-pelias-policy
+kubectl apply -f /mnt/OSM/manifests/pelias-aux-job.yaml
+kubectl -n osm logs -f job/pelias-aux
+kubectl -n osm wait --for=condition=complete job/pelias-aux --timeout=6h
+# Vorhandene veröffentlichte PBF verwenden, keine Country-Downloads:
+bash "$REPO/scripts/run-import.sh" --pelias-only
+kubectl -n osm logs -f job/pelias-import
+```
+
+Hilfsdownloads werden explizit vorbereitet und persistent versioniert, nicht bei
+jedem OSM-Import erneut geladen. Für ein Hilfsdatenupdate eine **neue**
+Snapshotversion konfigurieren, Aux-Job erneut ausführen und anschließend eine neue
+OSM-/Suchgeneration bauen. Vor erneutem Ausführen eines abgeschlossenen Jobs
+dessen Jobobjekt löschen, nicht seine PVC-Daten.
+
+### Updates, Aktivierung, Rollback und Überwachung
+
+`enabled=true` erlaubt Pelias-Aufträge. `auto_update=true` erlaubt dem
+Orchestrator, erfolgreiche Veröffentlichungen aus `/status/pelias-input.json`
+dedupliziert aufzunehmen; das gilt für manuelle Planet-Jobs und den wöchentlichen
+CronJob, da beide dasselbe Generierungsscript verwenden. Das neue
+Planet-Update-Image muss in **beiden** Jobvorlagen ausgerollt sein. Ein erfolgreicher
+PBF-Job ist noch kein erfolgreicher Pelias-Build. Fehler werden nicht endlos neu
+gestartet: Logs prüfen und gezielt erneut anfordern.
+
+Standardmäßig bleibt `auto_promote=false`: fertige Generation prüfen und im
+Dashboard gezielt aktivieren. Für unbeaufsichtigte Aktivierung zusätzlich
+`auto_promote=true` freigeben; dieselben Feature-/Backendprüfungen gelten weiterhin.
+Die Pelias-Aktivierung ist index-/generationsorientiert, **kein** Teil des
+generischen Copy-Jobs `import-promotion`.
+
+Die API jeder Generation verwendet ihren **konkreten** Index und ihre dazugehörigen
+Hilfsdaten. Die Elasticsearch-Aliasänderung und der Kubernetes-Servicewechsel sind
+zwei getrennte Operationen, keine verteilte atomare Transaktion. Ein Journal erlaubt
+die Wiederaufnahme nach Unterbrechung; während der Endpoint-Propagation bleiben
+alte und neue Antworten jeweils intern generationskonsistent. Der Alias `pelias`
+ist dabei der Lifecycle-Zeiger, nicht ein Anlass, laufende Hilfsdaten umzuschreiben.
+
+```bash
+curl -f http://<node-ip>:30083/api/status
+curl -f -X POST http://<node-ip>:30083/api/pelias/action \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"promote","generation":"<geprüfte-generation>"}'
+curl -f -X POST http://<node-ip>:30083/api/pelias/action \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"rollback","generation":"<letzte-gute-generation>"}'
+```
+
+Die Dashboard-Abbruchfunktion beendet den laufenden Job; bereits aktiver Suchstand
+bleibt erhalten. Nach Abbruch/Fehler gibt es keinen behaupteten Upsert-/Diff-Resume:
+ein erneuter Pelias-Build erzeugt einen vollständigen neuen Index. Erfolgreiche
+andere Schritte eines fortgesetzten Gesamtauftrags bleiben über die bestehende
+Orchestrierung nachverfolgbar. Metadaten einschließlich Quellfingerprint,
+Buildphase, Dokumentzahl und aktiver/letzter guter Generation stehen im Dashboard
+und auf dem Status-PVC in `pelias.json`; die maßgebliche Lifecycle-Datei liegt auf
+dem Pelias-Daten-PVC.
+
+Cleanup ist absichtlich kein automatisch laufender destruktiver CronJob.
+Nur eine explizite, nicht aktive/nicht letzte gute/nicht laufende Generation darf
+gezielt über `pelias-cleanup` entfernt werden; Retention schützt zusätzlich
+erfolgreiche Generationen. Keine Elasticsearch-Dateien von Hand löschen und keine
+PVCs zur Fehlerbehebung entfernen.
+
+```bash
+GENERATION='<explizit-freigegebene-alte-generation>'
+kubectl -n osm delete job pelias-cleanup --ignore-not-found
+kubectl create --dry-run=client -f /mnt/OSM/manifests/pelias-cleanup-job.yaml -o json |
+  python3 -c 'import json,sys; j=json.load(sys.stdin); c=j["spec"]["template"]["spec"]["containers"][0]; c["env"]=[e for e in c.get("env",[]) if e["name"]!="PELIAS_GENERATION"]+[{"name":"PELIAS_GENERATION","value":sys.argv[1]}]; print(json.dumps(j))' "$GENERATION" |
+  kubectl apply -f -
+kubectl -n osm logs -f job/pelias-cleanup
+```
+
+API-Beispiele:
+
+```bash
+curl -fG http://<node-ip>:30088/v1/search --data-urlencode 'text=Clemenshospital Münster'
+curl -fG http://<node-ip>:30088/v1/autocomplete --data-urlencode 'text=Clemens'
+curl -fG http://<node-ip>:30088/v1/search/structured \
+  --data-urlencode 'address=Düesbergweg' --data-urlencode 'locality=Münster'
+curl -fG http://<node-ip>:30088/v1/reverse \
+  --data-urlencode 'point.lat=51.96' --data-urlencode 'point.lon=7.60'
+kubectl -n osm get pods,jobs,pvc | grep -E 'NAME|pelias'
+kubectl -n osm logs job/pelias-import --tail=200
+kubectl -n osm logs pelias-elasticsearch-0 --tail=100
+```
+
+Diese Koordinaten sind nur ein grober Reverse-Testbereich, kein behaupteter
+Adresspunkt. Erforderliche ConfigMap-/CA-Änderungen werden von laufenden
+Node-Prozessen nicht automatisch neu eingelesen. Für geänderte Importoptionen,
+Hilfsdaten, Straßen-/Interpolationsaufbereitung oder Schema eine neue Generation
+bauen; für Images/Runtimekorrekturen bestehende Generationen nicht mit neuen
+Hilfsdaten überschreiben. Upgrades zunächst als Kandidat prüfen, alte Images und
+Generationen für Rollback behalten. Zum Deaktivieren die drei Policy-Schalter
+abschalten und den externen API-Zugang schließen; keine PVCs löschen.
+
+### Optionale eigene POIs und Aliasnamen
+
+Es werden keine medizinischen Stammdaten mitgeliefert. Für eigene, rechtmäßig
+verwendbare POIs unterstützt der gepinnte offizielle CSV-Importer beispielsweise
+die Spalten:
+
+```csv
+id,source,layer,name,name_json,lat,lon
+```
+
+`name` ist der Hauptname; `name_json` enthält ein JSON-Array mit weiteren Namen,
+CSV-konform mit verdoppelten Anführungszeichen escaped. Sprachvarianten heißen
+z.B. `name_de` bzw. `name_json_de`, nicht `aliases` oder `alt_name`. Eindeutige IDs,
+geeignete Quelle/Layer (z.B. `custom`/`venue`) und echte geprüfte Koordinaten
+verwenden; keine geschätzten Krankenhausadressen erfinden.
+
+Eine neue Aux-Version mit einer gepinnten `aux.files`-Datei unter
+`csv/eigene-pois.csv` vorbereiten und in der nativen Konfiguration
+`imports.csv.files: ["eigene-pois.csv"]` setzen. Der Build importiert diese Datei
+vor der Kandidatenprüfung in den **neuen** Index. Eine leere Dateiliste aktiviert
+diesen optionalen Import nicht. Die CSV-Felder sind kein Patch auf existierende
+OSM-Dokumente: gleiche Kombination aus Quelle/Layer/ID kann ein Dokument ersetzen.
+Erwartete eigene Dokumentzahl und Aliassuche zusätzlich als Smoke-Fälle prüfen,
+da upstream fehlerhafte CSV-Zeilen teilweise nur protokolliert/überspringt.
+
+### Kapazität, Betrieb und Relevanzabnahme
+
+#### Upstream-Abgleich und Versionsgrenzen
+
+Die Implementierung richtet sich nach den offiziellen Pelias-Repositories,
+nicht nach einer fremden Compose-Kopie. Der Abgleich erfolgte insbesondere gegen
+[`pelias/docker@3dfa07d`](https://github.com/pelias/docker/tree/3dfa07d580416edd7a27c2d4ff5976c8c1cc6ebc),
+[`schema@41e4f40`](https://github.com/pelias/schema/tree/41e4f4009a82f336fc4beef998e35852c2616420),
+[`api@1e08f14`](https://github.com/pelias/api/tree/1e08f147d6ed00ffaac6f8442fdfc42a7e56580d),
+[`openstreetmap@9668925`](https://github.com/pelias/openstreetmap/tree/9668925dcbb0a447698cf04161da7ffd2773e87a)
+und
+[`interpolation@142c157`](https://github.com/pelias/interpolation/tree/142c1579bd93bac7ec29f4202a667a9fe26159d4).
+`schema.indexName` steuert Schema und Import; **`api.indexName`** steuert die
+Suchanfragen. Der Indexwechsel ist unsere Lifecycle-Steuerung, kein behaupteter
+upstream Diff-/Löschungsimport. OSM-Änderungen werden vollständig neu aufgebaut.
+
+Der offizielle Compose-Stand verwendet Elasticsearch **7.17.27** mit ICU-Plugin.
+Das ist kein Nachweis für OpenSearch- oder Elasticsearch-8/9-Kompatibilität und
+keine Zusage über den Security-Support dieses alten Elasticsearch-Zweigs.
+Vor Internet-/Mehrmandantenbetrieb den Support- und Vulnerability-Status der
+gesamten gepinnten Imagekette separat bewerten; ein Versionspin ersetzt keine
+Sicherheitswartung. Backend ohne externe Veröffentlichung betreiben.
+
+PIP lädt die ausgewählten WOF-SQLite-Polygone beim Start; ein erfundenes
+separates PIP-Buildkommando gibt es hier nicht. Placeholder benötigt dagegen
+Extraktion **und** Datenbankbuild. Interpolation benötigt **street.db und
+address.db** einschließlich Vertexberechnung. Libpostal-Modell-Dateien sind
+Bestandteil des gepinnten offiziellen Images, kein wiederholter OSM-Importdownload.
+
+`pelias/streets.py` erzeugt die benötigten Straßenpolylinien aus **derselben PBF**:
+Osmium exportiert Linien mit einem datenträgergestützten `sparse_file_array`-
+Koordinatenindex; der Konverter schreibt benannte Highways im dokumentierten
+Polyline6-/NUL-Format. Damit wird der upstream `pbf streets`-Wrapper vermieden,
+der wegen speichergebundener Verarbeitung PBFs über 1 GB ablehnt. Der neue Weg
+benötigt entsprechend zusätzlichen Scratchplatz und I/O, aber keinen zweiten
+Straßendownload oder Valhalla-Neubau. Die große Eingabe bleibt clusterseitig zu
+vermessen; der lokale Kleintest ist kein 15-GB-Lastnachweis.
+Nicht auflösbare Randgeometrien werden wie beim normalen Osmium-Export ausgelassen;
+die zusammengefasste Fehlerzahl steht im Joblog. Eine nicht lesbare PBF, ein
+fehlgeschlagener Export oder null benannte Straßen brechen den Build ab.
+
+15 GB Eingabe erlauben keine belastbare Zusage zu Indexgröße oder Importdauer.
+Vor dem ersten Großimport auf den gewählten StorageClasses messen:
+
+1. Freien Platz/Inodes, IOPS und Durchsatz auf `planet`, Pelias-Backend und
+   Hilfsdaten-/Scratch-PVC prüfen; das vorhandene Storage-Performance-Werkzeug ist
+   optional und berührt keine Produktionsdaten.
+2. Gleichzeitig aktiven Index, neuen Index, aufbewahrten Rollbackindex,
+   Elasticsearch-Segment-Merges/Translog sowie Low-/High-Disk-Watermarks einplanen.
+3. Versionierten WOF-/Placeholder-/PIP-Cache, Interpolationsdaten je Generation
+   und Import-Scratch zusätzlich messen. Downloads/Entpacken können zeitweise
+   komprimierte und entpackte Daten benötigen.
+4. Zunächst kleinen echten Import ausführen, dann Dokumentzahl,
+   `_cat/indices?v&bytes=b`, `_cluster/health`, Pod-Maximal-RSS, CPU und Laufzeit
+   protokollieren. Erst anschließend PVCs und Limits für den großen Ausschnitt
+   freigeben. bigmemory ist ein Ressourcenprofil, keine Kapazitätsgarantie.
+
+Backend und Hilfsdienste bleiben ClusterIP/intern. Nur die API ist über NodePort
+30088 erreichbar; diesen Port per Host-/Netzwerk-Firewall auf Vergleichsclients
+begrenzen. Für externen Betrieb stattdessen den API-Service hinter einen
+Ingress mit TLS, Authentisierung, Rate-Limits und konfiguriertem Hostnamen stellen;
+NodePort dann schließen bzw. den Service auf ClusterIP umstellen. Keine
+Backend-Ports veröffentlichen. Ein ClusterIP allein isoliert nicht gegen andere
+Pods; für nicht vertrauenswürdige Mandanten zusätzlich passende NetworkPolicies
+für das verwendete CNI setzen.
+
+Manuelle Relevanz-Regression (keine zugesagten Treffer, keine künstlichen Koordinaten):
+
+| Eingabe | Zu prüfendes Verhalten |
+|---|---|
+| Domagkstraße 16, 48149 Münster | Laut Nutzer existiert Nr. 16 nicht: keinen exakten Hauspunkt behaupten; etwaige Interpolation als Schätzung anzeigen |
+| Clemenshospital Münster / clemens hospital münster | POI, Schreibvarianten, Stadtbezug und Dubletten vergleichen |
+| ev. Krankenhaus Hattingen / hattingen evan | Krankenhaus gegen Parkplatz-/Haltestellentreffer vergleichen; Adresse nicht erfinden |
+| Hindenburgstraße 1, Ostfildern / Nellingen | Gemeinde und Ortsteil in Suchantwort und Hierarchie prüfen |
+| Friedrichstraße 38, Ostfildern / Kemnat | Gemeindebezug, Hausnummer und Ortsranking prüfen |
+
+Bei allen Vergleichen `/v1/search`, `/v1/autocomplete`, `/v1/search/structured`
+und `/v1/reverse` getrennt prüfen. Exakte OSM-Adresspunkte, POI-Schwerpunkte,
+Straßentreffer und interpolierte Positionen sind unterschiedliche Qualitäten;
+eine erfolgreiche HTTP-Antwort allein belegt keine brauchbare Geokodierung.
+
+### Reproduzierbare Prüfungen und Grenzen der Abnahme
+
+Die Tests verwenden `unittest`; die Manifesttests benötigen zusätzlich PyYAML
+(z.B. das Distributionspaket `python3-yaml`). Kein Planetdownload:
+
+```bash
+python3 -m unittest discover -s "$REPO/tests" -v
+python3 -m unittest discover -s "$REPO/pelias" -p 'test_*.py' -v
+bash -n "$REPO/scripts/deploy-osm.sh" "$REPO/scripts/import-orchestrator.sh" \
+  "$REPO/scripts/run-import.sh" "$REPO/auto-update/build_karte.sh"
+```
+
+Die Straßentests erzeugen ein winziges neutrales OSM-XML/PBF im Tempverzeichnis,
+testen echtes Osmium einschließlich unvollständiger Randreferenzen und enthalten
+keine erfundenen medizinischen Einrichtungen. Zusätzlich wurde die offizielle
+Pelias-OSM-Testregion **Queens Village** erfolgreich durch den Straßenkonverter
+verarbeitet: 2.280.564 Byte, 1.248 benannte Straßenzeilen. Reproduktion ausschließlich
+als Test, niemals die Produktions-PBF damit überschreiben:
+
+```bash
+mkdir -p /tmp/pelias-fixture
+curl -fL https://raw.githubusercontent.com/pelias/openstreetmap/9668925dcbb0a447698cf04161da7ffd2773e87a/test/queens_village_ny.osm.pbf \
+  -o /tmp/pelias-fixture/queens.osm.pbf
+echo '06a8f23bc9e4a23431ce7d2a563be069aead24d690957e6cced89d5241fc5f4b  /tmp/pelias-fixture/queens.osm.pbf' | sha256sum -c -
+python3 "$REPO/pelias/streets.py" /tmp/pelias-fixture/queens.osm.pbf \
+  /tmp/pelias-fixture/streets.0sv --scratch /tmp/pelias-fixture/scratch
+```
+
+Quelle/Lizenz: offizielles `pelias/openstreetmap`-Testfixture am genannten Commit;
+OSM-Daten © OpenStreetMap-Mitwirkende, ODbL. Das historische Fixture ist kein
+aktueller Produktionsausschnitt und enthält unvollständige Randgeometrien.
+
+Lokale Unit-/Manifesttests, reale Schemaerstellung, Libpostal-Parsing und
+Straßenkonvertierung ersetzen **keinen** vollständigen 15-GB-Import, keine
+Speicher-/Lastmessung und keinen Nachweis der genannten Relevanzfälle.
+Ohne Zugriff auf den Nutzercluster/PVC wird hier keine erfolgreiche Installation
+behauptet. Dort sind Imagebereitstellung, Hilfsdatenvorbereitung, echter Import,
+Feature-/Reverse-Prüfung, Aktivierung und Rollback sowie Firewall-/Ingressabnahme
+noch auszuführen.

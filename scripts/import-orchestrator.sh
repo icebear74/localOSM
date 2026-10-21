@@ -564,11 +564,14 @@ PY
 # "steps" means "run all four", which keeps older/manual requests (e.g.
 # written by scripts/run-import.sh) working unchanged.
 request_steps() {
-  python3 - "${REQUEST_FILE}" <<'PY'
+  local policy
+  policy="$(pelias_policy)"
+  python3 - "${REQUEST_FILE}" "${policy}" <<'PY'
 import json
 import sys
 
 path = sys.argv[1]
+policy = json.loads(sys.argv[2])
 with open(path, 'r', encoding='utf-8') as handle:
     request = json.load(handle)
 # Missing "steps" key means "run all four" (back-compat with older/manual
@@ -578,7 +581,9 @@ with open(path, 'r', encoding='utf-8') as handle:
 if 'steps' in request:
     steps = request.get('steps') or []
 else:
-    steps = ['tileserver', 'nominatim', 'valhalla', 'photon', 'pelias']
+    steps = ['tileserver', 'nominatim', 'valhalla', 'photon']
+    if policy.get('enabled') is True:
+        steps.append('pelias')
 normalized = []
 seen = set()
 for raw in steps:
@@ -589,10 +594,140 @@ for raw in steps:
         raise SystemExit(f'Unsupported step: {step}')
     if step in seen:
         raise SystemExit(f'Duplicate step requested: {step}')
+    if step == 'pelias' and policy.get('enabled') is not True:
+        raise SystemExit('Pelias is disabled in osm-pelias-policy.')
     seen.add(step)
     normalized.append(step)
 print(' '.join(normalized))
 PY
+}
+
+pelias_policy() {
+  local config
+  config="$(kubectl -n "${NAMESPACE}" get configmap osm-pelias-policy -o json 2>/dev/null || echo '{}')"
+  python3 -c 'import json,sys; c=json.loads(sys.argv[1]); print(c.get("data",{}).get("policy.json","{}"))' "${config}"
+}
+
+poll_pelias_input() {
+  local policy
+  policy="$(pelias_policy)"
+  python3 - "${STATE_DIR}" "${policy}" <<'PY'
+import fcntl, json, os, re, sys
+from datetime import datetime, timezone
+root, raw_policy = sys.argv[1:]
+policy = json.loads(raw_policy)
+if policy.get("enabled") is not True or policy.get("auto_update") is not True:
+    raise SystemExit(0)
+def read(name, default):
+    try:
+        with open(os.path.join(root, name)) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+def save(name, value):
+    path = os.path.join(root, name)
+    with open(path + ".new", "w") as f:
+        json.dump(value, f)
+    os.replace(path + ".new", path)
+with open(os.path.join(root, "import-request.lock"), "a+") as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    version = read("pelias-input.json", {})
+    sha = version.get("sha256", "")
+    if not re.fullmatch(r"[a-f0-9]{64}", sha) or not version.get("size"):
+        raise SystemExit(0)
+    seen = read("pelias-input-versions.json", {})
+    if sha in seen:
+        raise SystemExit(0)
+    queue = read("import-request-queue.json", [])
+    existing = queue + [read("import-request.json", {})]
+    if not any(r.get("pelias_source_sha256") == sha for r in existing):
+        queue.append({"requested_at": datetime.now(timezone.utc).isoformat(),
+                      "steps": ["pelias"], "countries": [], "count": 0,
+                      "merge_requested": False, "automatic": True,
+                      "auto_promote": policy.get("auto_promote") is True,
+                      "pelias_source_sha256": sha, "input_version": version})
+        save("import-request-queue.json", queue)
+    # Record submission, not success: a failed source must not retry forever.
+    seen[sha] = version
+    save("pelias-input-versions.json", seen)
+PY
+}
+
+run_pelias_step() {
+  local job_json generation automatic expected policy
+  policy="$(pelias_policy)"
+  python3 -c 'import json,sys; p=json.loads(sys.argv[1]); sys.exit(0 if p.get("enabled") is True else 1)' "${policy}" || {
+    write_state false failed 0 "Pelias is disabled." "Enable osm-pelias-policy before requesting Pelias."
+    return 1
+  }
+  generation="osm-$(request_fingerprint | cut -c1-24)"
+  automatic="$(python3 -c 'import json,sys; print("true" if json.load(open(sys.argv[1])).get("automatic") else "false")' "${REQUEST_FILE}")"
+  expected="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("pelias_source_sha256",""))' "${REQUEST_FILE}")"
+  local action target
+  action="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("action","build"))' "${REQUEST_FILE}")"
+  if [ "${action}" != build ]; then
+    target="$(python3 -c 'import json,sys,re; v=json.load(open(sys.argv[1])).get("generation",""); assert re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?",v); print(v)' "${REQUEST_FILE}")" || return 1
+    case "${action}" in promote|rollback) ;; *) return 1 ;; esac
+    job_json="$(kubectl create --dry-run=client -f "${MANIFEST_DIR}/pelias-promote-job.yaml" -o json)" || return 1
+    printf '%s' "${job_json}" | python3 -c '
+import json,sys
+j=json.load(sys.stdin); c=j["spec"]["template"]["spec"]["containers"][0]
+values={"PELIAS_ACTION":sys.argv[1], "PELIAS_GENERATION":sys.argv[2], "PELIAS_AUTOMATIC":"false"}
+c["env"]=[e for e in c.get("env",[]) if e["name"] not in values]
+c["env"].extend({"name":k,"value":v} for k,v in values.items())
+print(json.dumps(j))' "${action}" "${target}" | submit_pelias_job pelias-promote || return 1
+    write_state true pelias 90 "Pelias ${action} submitted." "Target ${target}."
+    wait_for_job pelias-promote
+    return $?
+  fi
+  if [ "${automatic}" = true ]; then
+    python3 -c 'import json,sys; sys.exit(0 if json.loads(sys.argv[1]).get("auto_update") is True else 1)' "${policy}" || return 1
+  fi
+  if ! step_already_done pelias-build; then
+    write_state true pelias 10 "Pelias build started." "Generation ${generation}."
+    job_json="$(kubectl create --dry-run=client -f "${MANIFEST_DIR}/pelias-import-job.yaml" -o json)" || return 1
+    printf '%s' "${job_json}" | python3 -c '
+import json,sys
+j=json.load(sys.stdin); c=j["spec"]["template"]["spec"]["containers"][0]
+values={"PELIAS_GENERATION":sys.argv[1], "PELIAS_AUTOMATIC":sys.argv[2], "PELIAS_EXPECTED_SOURCE_SHA256":sys.argv[3]}
+c["env"]=[e for e in c.get("env",[]) if e["name"] not in values]
+c["env"].extend({"name":k,"value":v} for k,v in values.items())
+print(json.dumps(j))' "${generation}" "${automatic}" "${expected}" |
+      submit_pelias_job pelias-import || return 1
+    local rc=0
+    wait_for_job pelias-import || rc=$?
+    [ "${rc}" -eq 0 ] || return "${rc}"
+    mark_step_done pelias-build
+  fi
+  if [ "${AUTO_PROMOTE}" = true ]; then
+    if [ "${automatic}" = true ] && ! python3 -c 'import json,sys; sys.exit(0 if json.loads(sys.argv[1]).get("auto_promote") is True else 1)' "${policy}"; then
+      return 0
+    fi
+    job_json="$(kubectl create --dry-run=client -f "${MANIFEST_DIR}/pelias-promote-job.yaml" -o json)" || return 1
+    printf '%s' "${job_json}" | python3 -c '
+import json,sys
+j=json.load(sys.stdin); c=j["spec"]["template"]["spec"]["containers"][0]
+values={"PELIAS_ACTION":"promote", "PELIAS_GENERATION":sys.argv[1], "PELIAS_AUTOMATIC":sys.argv[2]}
+c["env"]=[e for e in c.get("env",[]) if e["name"] not in values]
+c["env"].extend({"name":k,"value":v} for k,v in values.items())
+print(json.dumps(j))' "${generation}" "${automatic}" |
+      submit_pelias_job pelias-promote || return 1
+    wait_for_job pelias-promote || return $?
+  fi
+}
+
+submit_pelias_job() {
+  local name="$1" desired existing identity
+  desired="$(cat)"
+  identity="$(printf '%s' "${desired}" | sha256sum | awk '{print $1}')"
+  desired="$(printf '%s' "${desired}" | python3 -c 'import json,sys; j=json.load(sys.stdin); j["metadata"].setdefault("annotations",{})["localosm/request-spec"]=sys.argv[1]; print(json.dumps(j))' "${identity}")"
+  existing="$(kubectl -n "${NAMESPACE}" get job "${name}" -o json 2>/dev/null || echo '{}')"
+  # Resume a Job submitted for this request rather than deleting a live build.
+  if python3 -c 'import json,sys; j=json.loads(sys.argv[1]); sys.exit(0 if j.get("metadata",{}).get("annotations",{}).get("localosm/request-spec") == sys.argv[2] else 1)' "${existing}" "${identity}"; then
+    return 0
+  fi
+  kubectl -n "${NAMESPACE}" delete job "${name}" --ignore-not-found --wait=true >/dev/null || return 1
+  printf '%s' "${desired}" | kubectl -n "${NAMESPACE}" apply -f - >/dev/null
 }
 
 # Whether a successfully imported step should be swapped into production
@@ -875,6 +1010,7 @@ main() {
 
   while true; do
     check_config_change
+    poll_pelias_input || log "Unable to poll Pelias published input."
     # Planet-Update-Trigger verarbeiten
     if [ -f "${PLANET_UPDATE_REQUEST_FILE}" ]; then
       handle_planet_update_request
@@ -899,6 +1035,7 @@ main() {
     sync_completed_steps
     if ! REQUESTED_STEPS="$(request_steps)"; then
       log "Invalid import request steps; archiving request and scratch data to prevent retry loop."
+      write_state false failed 0 "Invalid import request." "Unsupported steps or Pelias disabled in osm-pelias-policy."
       archive_file "${REQUEST_FILE}" "failed"
       cleanup_import_scratch
       clear_abort_flag
@@ -908,7 +1045,7 @@ main() {
     AUTO_PROMOTE="$(request_auto_promote)"
     log "Requested steps: ${REQUESTED_STEPS} (auto_promote=${AUTO_PROMOTE})."
 
-    if request_has_countries; then
+    if [ "${REQUESTED_STEPS}" != "pelias" ] && request_has_countries; then
       local prc=0
       prepare_import_data || prc=$?
       if [ "${prc}" -ne 0 ]; then
@@ -1006,12 +1143,14 @@ main() {
     elif step_already_done "pelias"; then
       log "Pelias already promoted for this request (resumed after restart); skipping re-import."
     else
-      run_step "pelias" "pelias-import" "pelias-import-job.yaml" "${DATA_DIR}/pelias/active" "${TEMP_DIR}/pelias/staging" "pelias" "${AUTO_PROMOTE}" || prc3=$?
+      run_pelias_step || prc3=$?
       if [ "${prc3}" -ne 0 ]; then
         if [ "${prc3}" -eq 2 ]; then
+          write_state false aborted 0 "Pelias operation aborted." "The lifecycle Job was cancelled."
           log "Import aborted by user during Pelias import; archiving import request and scratch data for recovery."
           archive_file "${REQUEST_FILE}" "aborted"
         else
+          write_state false failed 0 "Pelias operation failed." "See pelias-import or pelias-promote Job logs and pelias.json."
           log "Pelias import failed; archiving import request and scratch data to prevent retry loop while preserving data."
           archive_file "${REQUEST_FILE}" "failed"
         fi
@@ -1023,7 +1162,7 @@ main() {
       mark_step_done "pelias"
     fi
 
-    if [ "${AUTO_PROMOTE}" = "true" ]; then
+    if [ "${AUTO_PROMOTE}" = "true" ] && [ -n "${REQUESTED_STEPS//pelias/}" ]; then
       local promotion_rc=0
       run_import_promotion_job || promotion_rc=$?
       if [ "${promotion_rc}" -ne 0 ]; then
@@ -1056,4 +1195,6 @@ main() {
   done
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

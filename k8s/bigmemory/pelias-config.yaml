@@ -1,0 +1,87 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: osm-pelias-config
+  namespace: osm
+data:
+  pelias.json: |
+    {
+      "logger": {"level": "info"},
+      "esclient": {
+        "hosts": [{"host": "pelias-elasticsearch", "port": 9200}],
+        "requestTimeout": 120000
+      },
+      "schema": {"indexName": "pelias-disabled"},
+      "api": {
+        "indexName": "pelias-disabled",
+        "host": "0.0.0.0",
+        "port": 4000,
+        "services": {
+          "libpostal": {"url": "http://pelias-libpostal:4400"},
+          "placeholder": {"url": "http://127.0.0.1:4100"},
+          "pip": {"url": "http://127.0.0.1:4200"},
+          "interpolation": {"url": "http://127.0.0.1:4300"}
+        }
+      },
+      "imports": {
+        "adminLookup": {"enabled": true},
+        "openstreetmap": {
+          "datapath": "/planet",
+          "leveldbpath": "/data/work",
+          "import": [{"filename": "europa.osm.pbf"}]
+        },
+        "whosonfirst": {"datapath": "/data/aux/whosonfirst"},
+        "polyline": {"datapath": "/data/aux/polylines"}
+      }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: osm-pelias-policy
+  namespace: osm
+data:
+  policy.json: |
+    {
+      "enabled": false,
+      "auto_update": false,
+      "auto_promote": false,
+      "alias": "pelias",
+      "serving": {
+        "mode": "kubernetes",
+        "namespace": "osm",
+        "service": "pelias",
+        "deployment_template": "pelias-generation-template",
+        "container": "pelias"
+      },
+      "min_documents": 1000,
+      "retain_generations": 2,
+      "startup_timeout": 900,
+      "aux": {
+        "version": "configure-immutable-aux-v1",
+        "countries": ["DEU"],
+        "files": []
+      },
+      "smoke": [
+        {
+          "endpoint": "search",
+          "params": {"text": "Berlin", "size": 3},
+          "expect": {"min_features": 1, "label_contains": "Berlin"}
+        },
+        {
+          "endpoint": "autocomplete",
+          "params": {"text": "Berl", "size": 3},
+          "expect": {"min_features": 1}
+        },
+        {
+          "endpoint": "search/structured",
+          "params": {"locality": "Berlin", "country": "Germany", "size": 3},
+          "expect": {"min_features": 1, "label_contains": "Berlin"}
+        },
+        {
+          "endpoint": "reverse",
+          "params": {"point.lat": 52.517, "point.lon": 13.389, "size": 3},
+          "expect": {"min_features": 1}
+        }
+      ]
+    }

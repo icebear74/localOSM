@@ -1,0 +1,28 @@
+ARG GO_IMAGE=golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd
+ARG LIBPOSTAL_IMAGE=pelias/libpostal_baseimage@sha256:8de11bf50ce8ace5bf5dcdb258c1e0be7a39e20bab983b90401cb8fbab9d899b
+FROM ${GO_IMAGE} AS go
+FROM ${LIBPOSTAL_IMAGE} AS builder
+USER root
+COPY --from=go /usr/local/go /usr/local/go
+ENV PATH=/usr/local/go/bin:$PATH
+ENV GO111MODULE=off
+ENV TMPDIR=/var/cache/pelias-build
+RUN mkdir -p "$TMPDIR" && apt-get update && apt-get install -y --no-install-recommends git make pkg-config build-essential \
+    && rm -rf /var/lib/apt/lists/*
+ARG LIBPOSTAL_SERVER_COMMIT
+WORKDIR /code/libpostal-server
+RUN test -n "$LIBPOSTAL_SERVER_COMMIT" \
+    && git init --quiet \
+    && git remote add origin https://github.com/whosonfirst/go-whosonfirst-libpostal.git \
+    && git fetch --quiet --depth=1 origin "$LIBPOSTAL_SERVER_COMMIT" \
+    && git checkout --quiet --detach FETCH_HEAD \
+    && test "$(git rev-parse HEAD)" = "$LIBPOSTAL_SERVER_COMMIT" \
+    && make bin
+
+FROM ${LIBPOSTAL_IMAGE}
+COPY --from=builder /code/libpostal-server/bin/wof-libpostal-server /usr/local/bin/wof-libpostal-server
+USER root
+RUN ldconfig
+USER pelias
+EXPOSE 4400
+ENTRYPOINT ["/usr/local/bin/wof-libpostal-server", "-host", "0.0.0.0", "-port", "4400"]

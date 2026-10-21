@@ -1,0 +1,93 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pelias-promote
+  namespace: osm
+  labels: {app: pelias, osm-job-type: pelias-promote}
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app: pelias, osm-job-type: pelias-promote}
+    spec:
+      serviceAccountName: pelias-lifecycle
+      nodeSelector: {osm: "true"}
+      restartPolicy: Never
+      terminationGracePeriodSeconds: 120
+      initContainers:
+      - name: initialize-legacy-source-lock
+        image: localosm/pelias-runtime:2026-10-21
+        imagePullPolicy: IfNotPresent
+        command: ["python3", "-c"]
+        args:
+        - |
+          import os
+          os.umask(0)
+          fd = os.open("/planet/.pelias-source.lock", os.O_CREAT | os.O_RDONLY, 0o666)
+          os.close(fd)
+        resources:
+          requests: {cpu: 10m, memory: 16Mi}
+          limits: {cpu: 100m, memory: 64Mi}
+        volumeMounts:
+        - {name: source-lock-initializer, mountPath: /planet}
+      containers:
+      - name: pelias-promote
+        image: localosm/pelias-runtime:2026-10-21
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-ec"]
+        args:
+        - |
+          cp /etc/ssl/certs/ca-certificates.crt /run/pelias-ca.crt
+          if [ "$(cat /custom-ca/ca-enabled 2>/dev/null || true)" = true ]; then
+            cat /custom-ca/ca.crt >> /run/pelias-ca.crt
+          fi
+          case "$PELIAS_AUTOMATIC" in
+            true) python3 -c 'import json; p=json.load(open("/policy/policy.json")); assert p.get("auto_promote") is True, "automatic promotion is disabled"' ;;
+            false) ;;
+            *) echo "PELIAS_AUTOMATIC must be true or false" >&2; exit 2 ;;
+          esac
+          case "$PELIAS_ACTION" in
+            promote) test -n "$PELIAS_GENERATION"
+              exec python3 /runtime/controller.py promote --policy /policy/policy.json --generation "$PELIAS_GENERATION" ;;
+            rollback) exec python3 /runtime/controller.py rollback --policy /policy/policy.json ;;
+            *) echo "PELIAS_ACTION must be promote or rollback" >&2; exit 2 ;;
+          esac
+        env:
+        - {name: PELIAS_AUTOMATIC, value: "false"}
+        - {name: PELIAS_ACTION, value: promote}
+        - {name: PELIAS_GENERATION, value: ""}
+        - {name: SSL_CERT_FILE, value: /run/pelias-ca.crt}
+        - {name: CURL_CA_BUNDLE, value: /run/pelias-ca.crt}
+        - {name: REQUESTS_CA_BUNDLE, value: /run/pelias-ca.crt}
+        - {name: NODE_EXTRA_CA_CERTS, value: /run/pelias-ca.crt}
+        - {name: PELIAS_CONFIG, value: /config/pelias.json}
+        - {name: PELIAS_NAMESPACE, value: osm}
+        resources:
+          requests: {cpu: 100m, memory: 128Mi}
+          limits: {cpu: "1", memory: 512Mi}
+        volumeMounts:
+        - {name: planet, mountPath: /planet, readOnly: true}
+        - {name: data, mountPath: /data}
+        - {name: status, mountPath: /status}
+        - {name: config, mountPath: /config, readOnly: true}
+        - {name: policy, mountPath: /policy, readOnly: true}
+        - {name: runtime, mountPath: /runtime, readOnly: true}
+        - {name: custom-ca, mountPath: /custom-ca, readOnly: true}
+      volumes:
+      - name: source-lock-initializer
+        persistentVolumeClaim: {claimName: planet}
+      - name: planet
+        persistentVolumeClaim: {claimName: planet, readOnly: true}
+      - name: data
+        persistentVolumeClaim: {claimName: pelias-data}
+      - name: status
+        persistentVolumeClaim: {claimName: osm-status}
+      - name: config
+        configMap: {name: osm-pelias-config}
+      - name: policy
+        configMap: {name: osm-pelias-policy}
+      - name: runtime
+        configMap: {name: osm-pelias-runtime, defaultMode: 365}
+      - name: custom-ca
+        configMap: {name: osm-ca-bundle, optional: true}

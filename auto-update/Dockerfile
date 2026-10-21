@@ -11,6 +11,7 @@ RUN apt-get update && \
         curl \
         wget \
         ca-certificates \
+        util-linux \
         nodejs \
         npm && \
     rm -rf /var/lib/apt/lists/*

@@ -40,6 +40,21 @@ TEMP_DIR = os.environ.get("OSM_TEMP_DIR", "/mnt/OSM/TempDir")
 NAMESPACE = os.environ.get("OSM_NAMESPACE", "osm")
 OSM_NODE_URL = os.environ.get("OSM_NODE_URL", "").strip()
 
+
+def _load_service_targets():
+    raw = os.environ.get("SERVICE_TARGETS_JSON", "")
+    try:
+        payload = json.loads(raw) if raw else {}
+    except ValueError:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {key: value.strip() for key, value in payload.items()
+            if isinstance(value, str) and value.strip()}
+
+
+SERVICE_TARGETS = _load_service_targets()
+
 STATUS_DIR = os.path.join(DATA_DIR, "status")
 LIBRARY_DIR = os.path.join(DATA_DIR, "library")
 IMPORT_DIR = os.path.join(TEMP_DIR, "import")
@@ -58,7 +73,8 @@ IMPORT_REQUEST_LOCK_FILE = os.path.join(STATUS_DIR, "import-request.lock")
 # ABORT_FLAG_FILE to cancel whatever it is currently doing.
 ORCHESTRATOR_STATE_FILE = os.path.join(STATUS_DIR, "import-orchestrator.json")
 ABORT_FLAG_FILE = os.path.join(STATUS_DIR, "import-abort.flag")
-IMPORT_JOB_NAMES = ("import-prep", "tileserver-import", "nominatim-import", "valhalla-import", "photon-import")
+IMPORT_JOB_NAMES = ("import-prep", "tileserver-import", "nominatim-import", "valhalla-import", "photon-import", "pelias-import", "pelias-promote")
+PELIAS_STATE_FILE = os.path.join(STATUS_DIR, "pelias.json")
 PROMOTE_POD_TERMINATION_TIMEOUT_SECONDS = 240
 PROMOTE_READY_TIMEOUT_SECONDS = 900
 PROMOTE_NOMINATIM_READY_TIMEOUT_SECONDS = 1200
@@ -87,7 +103,7 @@ PROMOTE_SERVICES = {
 }
 
 # Fixed pipeline order the import-orchestrator always runs these steps in.
-BUILD_STEPS = ("tileserver", "nominatim", "valhalla", "photon")
+BUILD_STEPS = ("tileserver", "nominatim", "valhalla", "photon", "pelias")
 
 CONFIG_DEFAULTS = {
     "node_url": "",
@@ -98,7 +114,7 @@ CONFIG_DEFAULTS = {
     # "download_merge": Download & Merge (kein Build der Dienste).
     # "custom": nur die in auto_update_steps ausgewählten Build-Schritte.
     "auto_update_mode": "download_merge",
-    "auto_update_steps": list(BUILD_STEPS),
+    "auto_update_steps": [step for step in BUILD_STEPS if step != "pelias"],
     "auto_update_auto_promote": True,
 }
 
@@ -113,6 +129,7 @@ SERVICES = [
     ("nominatim", "nominatim.osm.svc.cluster.local", 8080, "http", "/status"),
     ("valhalla", "valhalla.osm.svc.cluster.local", 8002, "http", "/"),
     ("photon", "photon.osm.svc.cluster.local", 2322, "http", "/status"),
+    ("pelias", "pelias.osm.svc.cluster.local", 4000, "http", "/v1/search?text=Berlin"),
     ("web", "web.osm.svc.cluster.local", 8080, "http", "/healthz"),
 ]
 
@@ -936,6 +953,7 @@ INDEX_HTML = """<!doctype html>
           <button id="build-step-nominatim-btn" class="subtle" onclick="startStepBuild('nominatim')">Nominatim bauen</button>
           <button id="build-step-valhalla-btn" class="subtle" onclick="startStepBuild('valhalla')">Valhalla bauen</button>
           <button id="build-step-photon-btn" class="subtle" onclick="startStepBuild('photon')">Photon bauen</button>
+          <button id="build-step-pelias-btn" class="subtle" onclick="startStepBuild('pelias')">Pelias bauen (bestehende PBF)</button>
         </div>
       </div>
     </div>
@@ -990,8 +1008,13 @@ INDEX_HTML = """<!doctype html>
     </div>
   </div>
 
+  <script id="service-targets-json" type="application/json">{{SERVICE_TARGETS_JSON}}</script>
   <script>
   var NODE_URL = "{{NODE_URL}}";
+  var SERVICE_TARGETS = {};
+  try {
+    SERVICE_TARGETS = JSON.parse(document.getElementById('service-targets-json').textContent || '{}');
+  } catch (e) {}
   var ALL_COUNTRIES = [];
   var refreshTimer = null;
   var WORKFLOW_RUNNING = false;
@@ -999,9 +1022,20 @@ INDEX_HTML = """<!doctype html>
 
   function updateLinks() {
     var baseUrl = (NODE_URL || (location.protocol + '//' + location.hostname)).replace(/\\/+$/, '');
+    function resolveServiceTarget(key, fallbackBase) {
+      var configured = (SERVICE_TARGETS && SERVICE_TARGETS[key]) || '';
+      return (configured || fallbackBase).replace(/\\/+$/, '');
+    }
+    var tileserverUrl = resolveServiceTarget('tileserver', baseUrl + ':30085');
+    var targets = {
+      'web-link': resolveServiceTarget('web', baseUrl + ':30084'),
+      'valhalla-link': resolveServiceTarget('valhalla', baseUrl + ':30082'),
+      'nominatim-link': resolveServiceTarget('nominatim', baseUrl + ':30081'),
+      'tileserver-link': tileserverUrl
+    };
     ['web-link','valhalla-link','nominatim-link','tileserver-link'].forEach(function(id) {
       var a = document.getElementById(id);
-      if (a && a.dataset.port) a.href = baseUrl + ':' + a.dataset.port + '/';
+      if (a) a.href = targets[id] + '/';
     });
     // Point Maputnik at TileServer-GL's own resolved style endpoint, not the raw
     // stored style.json (served via /api/style): the stored file's source uses
@@ -1009,9 +1043,7 @@ INDEX_HTML = """<!doctype html>
     // itself rewrites into real tile/TileJSON URLs when serving /styles/<id>/style.json.
     // Loading the raw file directly left Maputnik with an unresolvable source, so
     // no basemap was drawn and the source inspector showed empty/localhost fields.
-    var tileserverLink = document.getElementById('tileserver-link');
-    var tileserverPort = (tileserverLink && tileserverLink.dataset.port) || '30085';
-    var styleApiUrl = baseUrl + ':' + tileserverPort + '/styles/style_vibrant/style.json';
+    var styleApiUrl = tileserverUrl + '/styles/style_vibrant/style.json';
     CURRENT_STYLE_API_URL = styleApiUrl;
     ['style-editor-link', 'style-editor-link-2'].forEach(function(id) {
       var styleLink = document.getElementById(id);
@@ -1096,7 +1128,7 @@ INDEX_HTML = """<!doctype html>
     var running = !!(workflow && workflow.running);
     WORKFLOW_RUNNING = running;
     var phase = workflow && workflow.phase ? workflow.phase : 'idle';
-    var activeStep = ['tileserver', 'nominatim', 'valhalla', 'photon'].indexOf(phase) !== -1 ? phase : null;
+    var activeStep = ['tileserver', 'nominatim', 'valhalla', 'photon', 'pelias'].indexOf(phase) !== -1 ? phase : null;
     var pct = workflow && typeof workflow.progress === 'number' ? workflow.progress : 0;
     var statusClass = 'status-ready';
     var statusText = 'bereit';
@@ -1129,7 +1161,7 @@ INDEX_HTML = """<!doctype html>
     document.getElementById('download-merge-btn').disabled = running;
     document.getElementById('download-only-btn').disabled = running;
     document.getElementById('check-updates-btn').disabled = running;
-    ['tileserver', 'nominatim', 'valhalla', 'photon'].forEach(function(step) {
+    ['tileserver', 'nominatim', 'valhalla', 'photon', 'pelias'].forEach(function(step) {
       var stepBtn = document.getElementById('build-step-' + step + '-btn');
       if (stepBtn) stepBtn.disabled = running;
     });
@@ -1164,8 +1196,35 @@ INDEX_HTML = """<!doctype html>
         '<button class="subtle" style="width:auto" onclick="promoteService(&#39;' + esc(name) + '&#39;)" ' + disabled + '>Promote</button>' +
         '</div></div>';
     });
+    var pelias = services.pelias || {};
+    var candidate = pelias.candidate || {};
+    var generations = pelias.generations || {};
+    var current = generations[pelias.active] || {};
+    var source = current.source || {};
+    html += '<div class="country-row"><div><b>Pelias</b> · ' + (pelias.enabled ? 'enabled' : 'disabled') +
+      '<div class="country-meta">Active: ' + esc(pelias.active || 'none') +
+      '<br>Candidate: ' + esc(candidate.id || 'none') +
+      '<br>Last good: ' + esc(pelias.last_good || 'none') +
+      '<br>Source SHA256: ' + esc(source.sha256 || '') +
+      '<br>Operation: ' + esc(JSON.stringify(pelias.operation || {})) + '</div></div><div>' +
+      '<button class="subtle" data-generation="' + esc(candidate.id || '') + '" onclick="peliasAction(&#39;promote&#39;,this.dataset.generation)" ' +
+      (WORKFLOW_RUNNING || !pelias.enabled || !candidate.id ? 'disabled' : '') + '>Promote Pelias</button>' +
+      '<button class="subtle" data-generation="' + esc(pelias.last_good || '') + '" onclick="peliasAction(&#39;rollback&#39;,this.dataset.generation)" ' +
+      (WORKFLOW_RUNNING || !pelias.enabled || !pelias.last_good ? 'disabled' : '') + '>Rollback Pelias</button></div></div>';
     html += '</div>';
     el.innerHTML = html;
+  }
+
+  async function peliasAction(action, generation) {
+    try {
+      var resp = await fetch('/api/pelias/action', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: action, generation: generation})
+      });
+      var data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Pelias action failed');
+      alert('Pelias ' + action + ' queued: ' + generation);
+    } catch (err) { alert(err.message); }
   }
 
   function renderCountries(countries) {
@@ -2175,10 +2234,56 @@ def promote_status():
             "staged": staged,
             "can_promote": staged["exists"],
         }
+    services["pelias"] = pelias_status()
     return {"services": services}
 
 
+def pelias_policy():
+    try:
+        cm = KUBE._request("GET", f"/api/v1/namespaces/{NAMESPACE}/configmaps/osm-pelias-policy")
+        policy = json.loads(cm.get("data", {}).get("policy.json", "{}"))
+        return policy if isinstance(policy, dict) else {}
+    except (RuntimeError, OSError, ValueError):
+        return {}
+
+
+def default_build_steps():
+    return [step for step in BUILD_STEPS if step != "pelias" or pelias_policy().get("enabled") is True]
+
+
+def pelias_status():
+    state = load_json(PELIAS_STATE_FILE, {})
+    policy = pelias_policy()
+    generations = state.get("generations", {})
+    candidates = [g for g in generations.values()
+                  if g.get("phase") == "built" and g.get("id") != state.get("active")]
+    candidate = max(candidates, key=lambda g: g.get("built_at", ""), default={})
+    return dict(state, enabled=policy.get("enabled") is True, candidate=candidate,
+                can_promote=bool(candidate), service="pelias")
+
+
+def queue_pelias_action(action, generation=""):
+    if action not in {"promote", "rollback"}:
+        raise ValueError("Pelias action must be promote or rollback.")
+    if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", generation):
+        raise ValueError("An explicit Pelias target generation is required.")
+    if pelias_policy().get("enabled") is not True:
+        raise RuntimeError("Pelias is disabled in osm-pelias-policy.")
+    with import_request_lock():
+        queue = load_import_request_queue()
+        request = {"requested_at": now_iso(), "steps": ["pelias"],
+                   "action": action, "generation": generation,
+                   "countries": [], "merge_requested": False, "auto_promote": False}
+        if any(import_request_signature(r) == import_request_signature(request) for r in queue):
+            raise RuntimeError("An identical Pelias action is already queued.")
+        queue.append(request)
+        save_import_request_queue(queue)
+    return request
+
+
 def promote_service(service):
+    if service == "pelias":
+        raise ValueError("Use /api/pelias/action with an explicit action and generation.")
     if service not in PROMOTE_SERVICES:
         raise ValueError("Unknown service.")
 
@@ -2394,6 +2499,7 @@ def collect_status():
         "queued_count": len([record for record in records if record.get("status") == "queued"]),
         "workflow": combined_workflow_state(),
         "promote": promote_status(),
+        "pelias": pelias_status(),
     }
 
 
@@ -2441,6 +2547,9 @@ def import_request_signature(payload):
     return json.dumps(
         {
             "steps": [str(step) for step in steps],
+            "action": payload.get("action", "build"),
+            "generation": payload.get("generation", ""),
+            "pelias_source_sha256": payload.get("pelias_source_sha256", ""),
             "auto_promote": bool(payload.get("auto_promote", True)),
             "merge_requested": bool(merge_requested),
             "countries": normalized_countries,
@@ -2458,6 +2567,12 @@ def write_import_request(
     merge_requested=True,
     force_slugs=None,
 ):
+    steps = default_build_steps() if steps is None else list(steps)
+    if "pelias" in steps and pelias_policy().get("enabled") is not True:
+        raise RuntimeError("Pelias is disabled in osm-pelias-policy.")
+    if steps == ["pelias"]:
+        include_countries = False
+        merge_requested = False
     countries_payload = (
         [
             {
@@ -2480,7 +2595,7 @@ def write_import_request(
         # explicit empty list means "run no build steps at all" (used by the
         # dedicated Download & Merge workflow), so it must NOT fall back to
         # the default here.
-        "steps": list(steps) if steps is not None else list(BUILD_STEPS),
+        "steps": steps,
         "auto_promote": bool(auto_promote),
         "merge_requested": bool(merge_requested),
         "force_slugs": list(force_slugs) if force_slugs else [],
@@ -2745,7 +2860,7 @@ def run_build_workflow(country=None, steps=None, auto_promote=True):
             for record in list_library_records()
             if record.get("status") in {"queued", "ready"}
         ]
-        if not records:
+        if not records and steps != ["pelias"]:
             raise RuntimeError("No queued or ready countries available for a build.")
         # A build only triggers an implicit download & merge when there is no
         # merged extract yet. Once one exists, "Build" reuses it as-is; use
@@ -2947,6 +3062,10 @@ def start_build_workflow(auto_promote=True):
 def start_step_build_workflow(step):
     if step not in BUILD_STEPS:
         raise ValueError(f"Unknown build step '{step}'.")
+    if step == "pelias":
+        request = write_import_request([], steps=["pelias"], auto_promote=False,
+                                       include_countries=False, merge_requested=False)
+        return {"step": step, "count": request["count"]}
     country = {"name": f"Build: {step}", "slug": f"build-{step}", "url": ""}
     thread = threading.Thread(
         target=run_build_workflow,
@@ -3052,7 +3171,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path in {"/", "/index.html"}:
             cfg = load_config()
             effective_url = cfg.get("node_url") or cfg.get("detected_node_url", "")
-            body = INDEX_HTML.replace("{{NODE_URL}}", effective_url).encode("utf-8")
+            body = (INDEX_HTML.replace("{{NODE_URL}}", effective_url)
+                    .replace("{{SERVICE_TARGETS_JSON}}", json.dumps(SERVICE_TARGETS).replace("<", "\\u003c"))
+                    .encode("utf-8"))
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -3106,6 +3227,8 @@ class Handler(BaseHTTPRequestHandler):
                 ok, detail = check_http("http://valhalla.osm.svc.cluster.local:8002/")
             elif name == "photon":
                 ok, detail = check_http("http://photon.osm.svc.cluster.local:2322/status")
+            elif name == "pelias":
+                ok, detail = check_http("http://pelias.osm.svc.cluster.local:4000/v1/search?text=Berlin")
             elif name == "web":
                 ok, detail = check_http("http://web.osm.svc.cluster.local:8080/healthz")
             else:
@@ -3219,6 +3342,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(exc)}, 409)
                 return
             self._send_json({"status": "aborted"})
+            return
+
+        if self.path == "/api/pelias/action":
+            try:
+                result = queue_pelias_action(payload.get("action"), payload.get("generation", ""))
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 400)
+                return
+            except RuntimeError as exc:
+                self._send_json({"error": str(exc)}, 409)
+                return
+            self._send_json({"status": "queued", "request": result})
             return
 
         if self.path.startswith("/api/promote/"):

@@ -383,6 +383,11 @@ generate_glyph_pbf_files() {
 }
 
 main() {
+    if [ "${1:-}" = "--pelias-only" ]; then
+        shift
+        OSM_DATA_DIR="${DATA_DIR}" bash "$(dirname "${BASH_SOURCE[0]}")/deploy-osm.sh" --pelias-only "$@"
+        return $?
+    fi
     echo ""
     log_info "=========================================="
     log_info "localOSM Initial Setup"

@@ -1,0 +1,3 @@
+ARG ELASTICSEARCH_IMAGE=pelias/elasticsearch:7.17.27@sha256:8aa3c622abd74192eceaf53e9a3dfd51c1a75e50ee7a537d7f912aa7f80bab05
+FROM ${ELASTICSEARCH_IMAGE}
+RUN bin/elasticsearch-plugin list | grep -qx analysis-icu

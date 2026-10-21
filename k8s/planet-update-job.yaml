@@ -112,7 +112,7 @@ spec:
       - name: planet-update
           # Das Image wird aus auto-update/Dockerfile gebaut.
           # Ersetze den Image-Namen mit dem tatsächlichen Registry-Pfad.
-        image: 127.0.0.1:5000/planet-update:latest
+        image: 127.0.0.1:5000/planet-update:pelias-source-v1
         imagePullPolicy: Always
         env:
         - name: WORK_DIR
@@ -207,7 +207,7 @@ spec:
             runAsUser: 1000
           containers:
           - name: planet-update
-            image: 127.0.0.1:5000/planet-update:latest
+            image: 127.0.0.1:5000/planet-update:pelias-source-v1
             imagePullPolicy: IfNotPresent
             env:
             - name: WORK_DIR
