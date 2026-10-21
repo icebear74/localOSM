@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NAMESPACE="osm"
-BASE_DIR="/mnt/OSM"
+BASE_DIR="${OSM_DATA_DIR:-/mnt/OSM}"
 TEMP_BASE_DIR="${OSM_TEMP_DIR:-${BASE_DIR}/TempDir}"
 DEPLOYMENTS=(tileserver-gl nominatim valhalla photon pelias import-orchestrator status web)
 PRESERVE_PATHS=("${BASE_DIR}/library" "${BASE_DIR}/status")
@@ -12,10 +12,12 @@ PRESERVE_DOWNLOADS=false
 NODE_URL=""
 MANIFEST_SOURCE_DIR="${REPO_ROOT}/k8s"
 BIGMEMORY_MODE=false
+PELIAS_ONLY=false
+ENABLE_PELIAS=false
 
 usage() {
   cat <<EOF
-Usage: $0 [--clean] [--preserve-downloads] [--node-url <url>] [--temp-dir <path>] [--bigmemory]
+Usage: $0 [--clean] [--preserve-downloads] [--node-url <url>] [--temp-dir <path>] [--bigmemory] [--pelias-only] [--enable-pelias]
 EOF
 }
 
@@ -26,6 +28,8 @@ while [[ $# -gt 0 ]]; do
     --node-url) NODE_URL="$2"; shift 2 ;;
     --temp-dir) TEMP_BASE_DIR="$2"; shift 2 ;;
     --bigmemory) MANIFEST_SOURCE_DIR="${REPO_ROOT}/k8s/bigmemory"; BIGMEMORY_MODE=true; shift ;;
+    --pelias-only) PELIAS_ONLY=true; shift ;;
+    --enable-pelias) ENABLE_PELIAS=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -91,6 +95,51 @@ resolve_manifest_source() {
   fi
   printf '%s\n' "${REPO_ROOT}/k8s/${manifest}"
 }
+
+install_pelias() {
+  local manifest source
+  ${SUDO} mkdir -p "${BASE_DIR}/manifests" "${BASE_DIR}/status" "${BASE_DIR}/pelias" "${BASE_DIR}/scripts"
+  ${SUDO} cp "${REPO_ROOT}/scripts/import-orchestrator.sh" "${BASE_DIR}/scripts/import-orchestrator.sh"
+  ${SUDO} chmod +x "${BASE_DIR}/scripts/import-orchestrator.sh"
+  for source in "${REPO_ROOT}"/k8s/pelias*.yaml; do
+    manifest="$(basename "${source}")"
+    source="$(resolve_manifest_source "${manifest}")"
+    sed "s|__OSM_TEMP_DIR__|${TEMP_BASE_DIR}|g" "${source}" | ${SUDO} tee "${BASE_DIR}/manifests/${manifest}" >/dev/null
+  done
+  kubectl apply -f "${REPO_ROOT}/k8s/namespace.yaml"
+  local -a runtime_files=()
+  for source in "${REPO_ROOT}"/pelias/*.py "${REPO_ROOT}"/pelias/*.json; do
+    [ -f "${source}" ] || continue
+    runtime_files+=("--from-file=$(basename "${source}")=${source}")
+  done
+  kubectl -n "${NAMESPACE}" create configmap osm-pelias-runtime "${runtime_files[@]}" --dry-run=client -o yaml | kubectl apply -f -
+  kubectl -n "${NAMESPACE}" create configmap osm-status-app --from-file=app.py="${REPO_ROOT}/status/app.py" --dry-run=client -o yaml | kubectl apply -f -
+  # The config manifest contains native config and the default-disabled policy.
+  # Never overwrite an operator's existing policy during a repeat deployment.
+  kubectl create --dry-run=client -f "${BASE_DIR}/manifests/pelias-config.yaml" -o json |
+    python3 -c 'import json,sys; obj=json.load(sys.stdin); items=obj.get("items",[obj]); print(json.dumps({"apiVersion":"v1","kind":"List","items":[x for x in items if x["metadata"]["name"] != "osm-pelias-policy"]}))' |
+    kubectl apply -f -
+  if ! kubectl -n "${NAMESPACE}" get configmap osm-pelias-policy >/dev/null 2>&1; then
+    kubectl create --dry-run=client -f "${BASE_DIR}/manifests/pelias-config.yaml" -o json |
+      python3 -c 'import json,sys; obj=json.load(sys.stdin); items=obj.get("items",[obj]); print(json.dumps(next(x for x in items if x["metadata"]["name"] == "osm-pelias-policy")))' |
+      kubectl apply -f -
+  fi
+  if [ "${ENABLE_PELIAS}" = true ]; then
+    kubectl -n "${NAMESPACE}" get configmap osm-pelias-policy -o json |
+      python3 -c 'import json,sys; c=json.load(sys.stdin); p=json.loads(c["data"]["policy.json"]); p["enabled"]=True; c["data"]["policy.json"]=json.dumps(p); print(json.dumps(c))' |
+      kubectl apply -f -
+  fi
+  for manifest in pelias-rbac.yaml pelias-persistentvolumeclaims.yaml pelias-elasticsearch.yaml pelias-libpostal.yaml pelias.yaml; do
+    kubectl apply -f "${BASE_DIR}/manifests/${manifest}"
+  done
+}
+
+if [ "${PELIAS_ONLY}" = true ]; then
+  [ "${CLEAN}" = false ] || { echo "--pelias-only cannot be combined with --clean" >&2; exit 1; }
+  install_pelias
+  echo "Pelias installed without stopping other services or starting imports. Use --enable-pelias to explicitly enable its preserved policy."
+  exit 0
+fi
 
 clean_data_directory() {
   echo ">>> Deleting contents of data directory ${BASE_DIR} …"
@@ -244,6 +293,12 @@ for manifest in \
   pelias.yaml \
   pelias-import-job.yaml \
   pelias-cleanup-job.yaml \
+  pelias-promote-job.yaml \
+  pelias-aux-job.yaml \
+  pelias-rbac.yaml \
+  pelias-persistentvolumeclaims.yaml \
+  pelias-elasticsearch.yaml \
+  pelias-libpostal.yaml \
   status.yaml \
   status-deployment.yaml \
   status-config.yaml \
@@ -323,10 +378,13 @@ kubectl apply -f "${CA_BUNDLE_SRC}"
 
 kubectl -n "${NAMESPACE}" create configmap osm-status-config --from-file=config.json="${CONFIG_PATH}" --dry-run=client -o yaml | kubectl apply -f -
 
-for manifest in osm-persistentvolumeclaims.yaml planetiler-rbac.yaml tileserver-gl-deployment.yaml nominatim.yaml nominatim-promotion-job.yaml nominatim-postgres-tuning-config.yaml valhalla-config.yaml valhalla-traffic-config.yaml valhalla-traffic-cronjob.yaml valhalla.yaml valhalla-import-config.yaml photon-config.yaml photon.yaml pelias-config.yaml pelias.yaml pelias-import-job.yaml pelias-cleanup-job.yaml status.yaml status-deployment.yaml nominatim-import-config.yaml tileserver-import-config.yaml tileserver-import-profile-config.yaml import-promotion-config.yaml import-promotion-job.yaml import-orchestrator.yaml web.yaml style-editor.yaml mc-admin.yaml; do
+install_pelias
+for manifest in osm-persistentvolumeclaims.yaml planetiler-rbac.yaml tileserver-gl-deployment.yaml nominatim.yaml nominatim-promotion-job.yaml nominatim-postgres-tuning-config.yaml valhalla-config.yaml valhalla-traffic-config.yaml valhalla-traffic-cronjob.yaml valhalla.yaml valhalla-import-config.yaml photon-config.yaml photon.yaml status.yaml status-deployment.yaml nominatim-import-config.yaml tileserver-import-config.yaml tileserver-import-profile-config.yaml import-promotion-config.yaml import-promotion-job.yaml import-orchestrator.yaml web.yaml style-editor.yaml mc-admin.yaml; do
   echo ">>> Applying ${manifest}"
   kubectl apply -f "${BASE_DIR}/manifests/${manifest}"
 done
+
+kubectl -n "${NAMESPACE}" create configmap osm-status-app --from-file=app.py="${REPO_ROOT}/status/app.py" --dry-run=client -o yaml | kubectl apply -f -
 
 echo ">>> Waiting for core services (status, web, import orchestrator) …"
 for deployment in status web import-orchestrator; do

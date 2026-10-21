@@ -1,0 +1,63 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pelias-import
+  namespace: osm
+  labels: {app: pelias, osm-job-type: pelias-import}
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {app: pelias, osm-job-type: pelias-import}
+    spec:
+      serviceAccountName: pelias-lifecycle
+      nodeSelector: {osm: "true"}
+      restartPolicy: Never
+      terminationGracePeriodSeconds: 120
+      containers:
+      - name: pelias-import
+        image: localosm/pelias-runtime:2026-10-21
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-ec"]
+        args:
+        - |
+          cp /etc/ssl/certs/ca-certificates.crt /run/pelias-ca.crt
+          if [ "$(cat /custom-ca/ca-enabled 2>/dev/null || true)" = true ]; then
+            cat /custom-ca/ca.crt >> /run/pelias-ca.crt
+          fi
+          exec python3 /runtime/controller.py build --policy /policy/policy.json
+        env:
+        - {name: SSL_CERT_FILE, value: /run/pelias-ca.crt}
+        - {name: CURL_CA_BUNDLE, value: /run/pelias-ca.crt}
+        - {name: REQUESTS_CA_BUNDLE, value: /run/pelias-ca.crt}
+        - {name: NODE_EXTRA_CA_CERTS, value: /run/pelias-ca.crt}
+        - {name: PELIAS_CONFIG, value: /config/pelias.json}
+        - {name: PELIAS_NAMESPACE, value: osm}
+        - {name: NODE_OPTIONS, value: "--max-old-space-size=8192"}
+        resources:
+          requests: {cpu: "1", memory: 4Gi}
+          limits: {cpu: "4", memory: 16Gi}
+        volumeMounts:
+        - {name: planet, mountPath: /planet, readOnly: true}
+        - {name: data, mountPath: /data}
+        - {name: status, mountPath: /status}
+        - {name: config, mountPath: /config, readOnly: true}
+        - {name: policy, mountPath: /policy, readOnly: true}
+        - {name: runtime, mountPath: /runtime, readOnly: true}
+        - {name: custom-ca, mountPath: /custom-ca, readOnly: true}
+      volumes:
+      - name: planet
+        persistentVolumeClaim: {claimName: planet, readOnly: true}
+      - name: data
+        persistentVolumeClaim: {claimName: pelias-data}
+      - name: status
+        persistentVolumeClaim: {claimName: osm-status}
+      - name: config
+        configMap: {name: osm-pelias-config}
+      - name: policy
+        configMap: {name: osm-pelias-policy}
+      - name: runtime
+        configMap: {name: osm-pelias-runtime, defaultMode: 365}
+      - name: custom-ca
+        configMap: {name: osm-ca-bundle, optional: true}

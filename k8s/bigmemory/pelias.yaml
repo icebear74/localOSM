@@ -1,0 +1,100 @@
+# The lifecycle controller clones this zero-replica template per immutable
+# generation. API and helpers share one supervisor, config, and generation.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pelias-generation-template
+  namespace: osm
+spec:
+  replicas: 0
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: pelias-generation, generation: disabled}
+  template:
+    metadata:
+      labels: {app: pelias-generation, generation: disabled}
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector: {osm: "true"}
+      terminationGracePeriodSeconds: 120
+      containers:
+      - name: pelias
+        image: localosm/pelias-runtime:2026-10-21
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-ec"]
+        args:
+        - |
+          cp /etc/ssl/certs/ca-certificates.crt /run/pelias-ca.crt
+          if [ "$(cat /custom-ca/ca-enabled 2>/dev/null || true)" = true ]; then
+            cat /custom-ca/ca.crt >> /run/pelias-ca.crt
+          fi
+          exec python3 /runtime/controller.py serve --policy /policy/policy.json --generation "$PELIAS_GENERATION"
+        env:
+        - {name: PELIAS_GENERATION, value: disabled}
+        - {name: PELIAS_READINESS_QUERY, value: Berlin}
+        - {name: SSL_CERT_FILE, value: /run/pelias-ca.crt}
+        - {name: CURL_CA_BUNDLE, value: /run/pelias-ca.crt}
+        - {name: REQUESTS_CA_BUNDLE, value: /run/pelias-ca.crt}
+        - {name: NODE_EXTRA_CA_CERTS, value: /run/pelias-ca.crt}
+        - {name: PELIAS_CONFIG, value: /config/pelias.json}
+        - {name: NODE_OPTIONS, value: "--max-old-space-size=8192"}
+        ports:
+        - {name: api, containerPort: 4000}
+        - {name: placeholder, containerPort: 4100}
+        - {name: pip, containerPort: 4200}
+        - {name: interpolation, containerPort: 4300}
+        resources:
+          requests: {cpu: "2", memory: 8Gi}
+          limits: {cpu: "12", memory: 40Gi}
+        startupProbe:
+          tcpSocket: {port: api}
+          periodSeconds: 10
+          failureThreshold: 90
+        readinessProbe:
+          exec:
+            command:
+            - python3
+            - -c
+            - |
+              import json, os, urllib.parse, urllib.request
+              query = urllib.parse.urlencode({"text": os.environ["PELIAS_READINESS_QUERY"], "size": 1})
+              with urllib.request.urlopen("http://127.0.0.1:4000/v1/search?" + query, timeout=8) as response:
+                  body = json.load(response)
+              assert body.get("type") == "FeatureCollection"
+              assert body.get("features") and body["features"][0].get("geometry")
+              assert body["features"][0].get("properties", {}).get("label")
+          periodSeconds: 20
+          timeoutSeconds: 10
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket: {port: api}
+          periodSeconds: 30
+          failureThreshold: 10
+        volumeMounts:
+        - {name: data, mountPath: /data, readOnly: true}
+        - {name: config, mountPath: /config, readOnly: true}
+        - {name: policy, mountPath: /policy, readOnly: true}
+        - {name: runtime, mountPath: /runtime, readOnly: true}
+        - {name: custom-ca, mountPath: /custom-ca, readOnly: true}
+      volumes:
+      - name: data
+        persistentVolumeClaim: {claimName: pelias-data, readOnly: true}
+      - name: config
+        configMap: {name: osm-pelias-config}
+      - name: policy
+        configMap: {name: osm-pelias-policy}
+      - name: runtime
+        configMap: {name: osm-pelias-runtime, defaultMode: 365}
+      - name: custom-ca
+        configMap: {name: osm-ca-bundle, optional: true}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pelias
+  namespace: osm
+spec:
+  type: NodePort
+  selector: {app: pelias-generation, generation: disabled}
+  ports:
+  - {name: api, port: 4000, targetPort: api, nodePort: 30088}

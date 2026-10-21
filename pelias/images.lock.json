@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "resolved_at": "2026-10-21",
+  "elasticsearch": "7.17.27",
+  "bases": {
+    "node": "node:22.22.0-bookworm@sha256:20a424ecd1d2064a44e12fe287bf3dae443aab31dc5e0c0cb6c74bef9c78911c",
+    "go": "golang:1.26.5-bookworm@sha256:53eeac89074db483fdf0ab3be1df32bf6e47562263d2d0d6baa7f26acb4957dd",
+    "libpostal": "pelias/libpostal_baseimage@sha256:8de11bf50ce8ace5bf5dcdb258c1e0be7a39e20bab983b90401cb8fbab9d899b",
+    "elasticsearch": "pelias/elasticsearch:7.17.27@sha256:8aa3c622abd74192eceaf53e9a3dfd51c1a75e50ee7a537d7f912aa7f80bab05"
+  },
+  "repositories": {
+    "api": {
+      "url": "https://github.com/pelias/api.git",
+      "commit": "1e08f147d6ed00ffaac6f8442fdfc42a7e56580d"
+    },
+    "schema": {
+      "url": "https://github.com/pelias/schema.git",
+      "commit": "41e4f4009a82f336fc4beef998e35852c2616420"
+    },
+    "openstreetmap": {
+      "url": "https://github.com/pelias/openstreetmap.git",
+      "commit": "9668925dcbb0a447698cf04161da7ffd2773e87a"
+    },
+    "whosonfirst": {
+      "url": "https://github.com/pelias/whosonfirst.git",
+      "commit": "fc508c6c708e638dc186fc3a01009eebce7f463d"
+    },
+    "polylines": {
+      "url": "https://github.com/pelias/polylines.git",
+      "commit": "4d5769655f3194b59455c98eb53e9a93549387c7"
+    },
+    "placeholder": {
+      "url": "https://github.com/pelias/placeholder.git",
+      "commit": "6dcf308c3ebce5889f325f531189f48c5d403adf"
+    },
+    "pip-service": {
+      "url": "https://github.com/pelias/pip-service.git",
+      "commit": "9478b5befbb307e5339f4a9b23db5e9ab6affe70"
+    },
+    "interpolation": {
+      "url": "https://github.com/pelias/interpolation.git",
+      "commit": "142c1579bd93bac7ec29f4202a667a9fe26159d4"
+    },
+    "csv-importer": {
+      "url": "https://github.com/pelias/csv-importer.git",
+      "commit": "78ecee4465879621653e83ddc8f24d5481ae132e"
+    },
+    "libpostal-server": {
+      "url": "https://github.com/whosonfirst/go-whosonfirst-libpostal.git",
+      "commit": "2113ee5c78f98374b3b4cd7a5ecb2150a3b6fd2c"
+    }
+  }
+}

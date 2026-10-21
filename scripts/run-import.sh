@@ -2,13 +2,18 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BASE_DIR="/mnt/OSM"
+BASE_DIR="${OSM_DATA_DIR:-/mnt/OSM}"
 TEMP_DIR="${OSM_TEMP_DIR:-/mnt/OSM/TempDir}"
 DEST="${TEMP_DIR}/import/planet.osm.pbf"
 URL=""
+PELIAS_ONLY=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --pelias-only)
+      PELIAS_ONLY=true
+      shift
+      ;;
     --url)
       URL="$2"
       shift 2
@@ -18,7 +23,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      echo "Usage: $0 --url <https://...osm.pbf> [--dest /mnt/OSM/TempDir/import/planet.osm.pbf]"
+      echo "Usage: $0 --url <https://...osm.pbf> [--dest path] | --pelias-only"
       exit 0
       ;;
     *)
@@ -27,6 +32,33 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [ "${PELIAS_ONLY}" = true ]; then
+  [ -z "${URL}" ] || { echo "--pelias-only uses the existing /planet/europa.osm.pbf; do not specify --url" >&2; exit 1; }
+  mkdir -p "${BASE_DIR}/status"
+  python3 - "${BASE_DIR}/status" <<'PY'
+import datetime, fcntl, json, os, sys
+root = sys.argv[1]
+with open(os.path.join(root, "import-request.lock"), "a+") as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    path = os.path.join(root, "import-request-queue.json")
+    try:
+        with open(path) as f:
+            queue = json.load(f)
+    except FileNotFoundError:
+        queue = []
+    if any(r.get("steps") == ["pelias"] and r.get("action", "build") == "build" for r in queue):
+        raise SystemExit("A Pelias build is already queued.")
+    queue.append({"requested_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                  "steps": ["pelias"], "countries": [], "count": 0,
+                  "merge_requested": False, "auto_promote": False})
+    with open(path + ".new", "w") as f:
+        json.dump(queue, f)
+    os.replace(path + ".new", path)
+PY
+  echo "Queued Pelias-only build using the existing published PBF (no download or merge)."
+  exit 0
+fi
 
 if [ -z "$URL" ]; then
   echo "Missing --url" >&2

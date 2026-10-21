@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pelias-elasticsearch
+  namespace: osm
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: csi-ceph-rbd-temp
+  resources:
+    requests:
+      storage: 500Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pelias-data
+  namespace: osm
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: csi-cephfs-replicated
+  resources:
+    requests:
+      storage: 600Gi

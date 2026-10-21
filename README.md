@@ -7,6 +7,7 @@ A self-hosted OSM stack on K3s with a read-only status dashboard, a routing web 
 - Nominatim (with its bundled, configurably-tuned PostgreSQL/PostGIS)
 - Valhalla
 - TileServer GL
+- Pelias (optional, separate comparison API; see [Pelias](#pelias-parallelbetrieb))
 - Status dashboard
 - Routing web UI
 - Style-Editor (Maputnik)
@@ -60,7 +61,7 @@ Important host subdirectories under `/mnt/OSM`:
 
 Important scratch paths under the shared Kubernetes temp PVC mounted inside the pods:
 
-- `import/` – merged/downloaded `planet.osm.pbf` used as the shared input for Nominatim, Valhalla and Photon
+- `import/` – country-library merge used by parts of the legacy request workflow. This is **not** the authoritative Pelias input: the current Planetiler, Nominatim and Valhalla import jobs read `/planet/europa.osm.pbf` from PVC `planet`.
 - `tileserver/work` – Planetiler work directory, cleaned after the new `planet.mbtiles` has been activated
 - `tileserver/downloads` – reusable Planetiler side downloads that may remain between runs
 - `nominatim/work` – temporary Postgres/Nominatim import working data, cleaned after promotion into the `nominatim` PVC
@@ -288,3 +289,121 @@ style becomes active within seconds — without any manual `scp`/`kubectl` steps
 StorageClasses available in a cluster (fio + PostgreSQL/pgbench workloads,
 IOPS/MB/s/latency, configurable ranking). It never touches the OSM stack
 deployed by this repository; see `storage-perf-tester/README.md` for usage.
+
+## Pelias-Parallelbetrieb
+
+Pelias ergänzt Photon/Nominatim, ersetzt aber weder deren APIs noch qvadis automatisch.
+Die vorhandene Photon-Schnittstelle `/api` ist **nicht** mit Pelias `/v1/*`
+austauschbar. qvadis kann später einen eigenen Pelias-Provider für Vergleichstests
+ergänzen; Routing bleibt bei Valhalla.
+
+### Verbindliche OSM-Quelle und räumliche Grenzen
+
+Pelias liest ausschließlich **PVC `planet`, `/planet/europa.osm.pbf`**, read-only.
+Weder Nominatim-Export noch Country-Library-Datei
+`/osm-temp/import/planet.osm.pbf` noch zusätzlicher OSM-Download werden verwendet.
+Der Name `europa` ist keine Abdeckungsbeschreibung:
+
+* `k8s/auto-update-geojson-config.yaml` enthält im Standardprofil eine größere
+  europäische Polygonmaske; die bigmemory-Variante eine engere Maske um Deutschland.
+* Beide konfigurieren zusätzlich eine Japan-Maske und `privat.osm`.
+* `auto-update/build_karte.sh` ergänzt aus dem Planet abgeleitete Freizeitparkflächen
+  und die Objekte aus `welt_filter.txt`, unter anderem ausgewählte Orte,
+  Verwaltungsgrenzen, Gewässer und Autobahnen.
+
+Maßgeblich bleiben die tatsächlich angewandten ConfigMaps, nicht diese Kurzbeschreibung.
+Außerhalb der Vollauszugsflächen gibt es nur die gefilterten Objekte, keine
+weltweite Hausadressabdeckung. Die Gebietsdefinition wird durch Pelias nicht verändert.
+Private Inhalte der PBF gelangen ebenfalls in den Pelias-Index; Zugriff entsprechend
+begrenzen.
+
+Der aktualisierte Planet-Producer erzeugt `europa.next.osm.pbf`, berechnet SHA-256
+und PBF-Header und veröffentlicht das fertige Ergebnis durch atomisches Umbenennen.
+`europa.osm.pbf.meta.json` und `/status/pelias-input.json` enthalten denselben
+Fingerprint, Größe, mtime und Veröffentlichungszeit. Gemeinsame `flock`-Sperren
+schützen Veröffentlichung und Pelias-Lesephase; Sperrdateien niemals im Betrieb
+löschen. Alte Auto-Update-Images müssen vor Nutzung dieses Protokolls neu gebaut
+werden. Laufende alte Writer zuerst auslaufen lassen.
+
+Es entsteht keine weitere Pelias-Snapshotkopie der ca. 15-GB-PBF. Der Producer benötigt
+während der Erzeugung allerdings Platz für **alte und neue** Ergebnisdatei plus
+seine ohnehin benötigten Extraktionsdateien. Ein Leser kann die Veröffentlichung
+verzögern; das ist beabsichtigt und kein fehlgeschlagener Download.
+
+### Kapazität, Betrieb und Relevanzabnahme
+
+#### Upstream-Abgleich und Versionsgrenzen
+
+Die Implementierung richtet sich nach den offiziellen Pelias-Repositories,
+nicht nach einer fremden Compose-Kopie. Der Abgleich erfolgte insbesondere gegen
+[`pelias/docker@3dfa07d`](https://github.com/pelias/docker/tree/3dfa07d580416edd7a27c2d4ff5976c8c1cc6ebc),
+[`schema@41e4f40`](https://github.com/pelias/schema/tree/41e4f4009a82f336fc4beef998e35852c2616420),
+[`api@1e08f14`](https://github.com/pelias/api/tree/1e08f147d6ed00ffaac6f8442fdfc42a7e56580d),
+[`openstreetmap@9668925`](https://github.com/pelias/openstreetmap/tree/9668925dcbb0a447698cf04161da7ffd2773e87a)
+und
+[`interpolation@142c157`](https://github.com/pelias/interpolation/tree/142c1579bd93bac7ec29f4202a667a9fe26159d4).
+`schema.indexName` steuert Schema und Import; **`api.indexName`** steuert die
+Suchanfragen. Der Indexwechsel ist unsere Lifecycle-Steuerung, kein behaupteter
+upstream Diff-/Löschungsimport. OSM-Änderungen werden vollständig neu aufgebaut.
+
+Der offizielle Compose-Stand verwendet Elasticsearch **7.17.27** mit ICU-Plugin.
+Das ist kein Nachweis für OpenSearch- oder Elasticsearch-8/9-Kompatibilität und
+keine Zusage über den Security-Support dieses alten Elasticsearch-Zweigs.
+Vor Internet-/Mehrmandantenbetrieb den Support- und Vulnerability-Status der
+gesamten gepinnten Imagekette separat bewerten; ein Versionspin ersetzt keine
+Sicherheitswartung. Backend ohne externe Veröffentlichung betreiben.
+
+PIP lädt die ausgewählten WOF-SQLite-Polygone beim Start; ein erfundenes
+separates PIP-Buildkommando gibt es hier nicht. Placeholder benötigt dagegen
+Extraktion **und** Datenbankbuild. Interpolation benötigt **street.db und
+address.db** einschließlich Vertexberechnung. Libpostal-Modell-Dateien sind
+Bestandteil des gepinnten offiziellen Images, kein wiederholter OSM-Importdownload.
+
+`pelias/streets.py` erzeugt die benötigten Straßenpolylinien aus **derselben PBF**:
+Osmium exportiert Linien mit einem datenträgergestützten `sparse_file_array`-
+Koordinatenindex; der Konverter schreibt benannte Highways im dokumentierten
+Polyline6-/NUL-Format. Damit wird der upstream `pbf streets`-Wrapper vermieden,
+der wegen speichergebundener Verarbeitung PBFs über 1 GB ablehnt. Der neue Weg
+benötigt entsprechend zusätzlichen Scratchplatz und I/O, aber keinen zweiten
+Straßendownload oder Valhalla-Neubau. Die große Eingabe bleibt clusterseitig zu
+vermessen; der lokale Kleintest ist kein 15-GB-Lastnachweis.
+
+15 GB Eingabe erlauben keine belastbare Zusage zu Indexgröße oder Importdauer.
+Vor dem ersten Großimport auf den gewählten StorageClasses messen:
+
+1. Freien Platz/Inodes, IOPS und Durchsatz auf `planet`, Pelias-Backend und
+   Hilfsdaten-/Scratch-PVC prüfen; das vorhandene Storage-Performance-Werkzeug ist
+   optional und berührt keine Produktionsdaten.
+2. Gleichzeitig aktiven Index, neuen Index, aufbewahrten Rollbackindex,
+   Elasticsearch-Segment-Merges/Translog sowie Low-/High-Disk-Watermarks einplanen.
+3. Versionierten WOF-/Placeholder-/PIP-Cache, Interpolationsdaten je Generation
+   und Import-Scratch zusätzlich messen. Downloads/Entpacken können zeitweise
+   komprimierte und entpackte Daten benötigen.
+4. Zunächst kleinen echten Import ausführen, dann Dokumentzahl,
+   `_cat/indices?v&bytes=b`, `_cluster/health`, Pod-Maximal-RSS, CPU und Laufzeit
+   protokollieren. Erst anschließend PVCs und Limits für den großen Ausschnitt
+   freigeben. bigmemory ist ein Ressourcenprofil, keine Kapazitätsgarantie.
+
+Backend und Hilfsdienste bleiben ClusterIP/intern. Nur die API ist über NodePort
+30088 erreichbar; diesen Port per Host-/Netzwerk-Firewall auf Vergleichsclients
+begrenzen. Für externen Betrieb stattdessen den API-Service hinter einen
+Ingress mit TLS, Authentisierung, Rate-Limits und konfiguriertem Hostnamen stellen;
+NodePort dann schließen bzw. den Service auf ClusterIP umstellen. Keine
+Backend-Ports veröffentlichen. Ein ClusterIP allein isoliert nicht gegen andere
+Pods; für nicht vertrauenswürdige Mandanten zusätzlich passende NetworkPolicies
+für das verwendete CNI setzen.
+
+Manuelle Relevanz-Regression (keine zugesagten Treffer, keine künstlichen Koordinaten):
+
+| Eingabe | Zu prüfendes Verhalten |
+|---|---|
+| Domagkstraße 16, 48149 Münster | Laut Nutzer existiert Nr. 16 nicht: keinen exakten Hauspunkt behaupten; etwaige Interpolation als Schätzung anzeigen |
+| Clemenshospital Münster / clemens hospital münster | POI, Schreibvarianten, Stadtbezug und Dubletten vergleichen |
+| ev. Krankenhaus Hattingen / hattingen evan | Krankenhaus gegen Parkplatz-/Haltestellentreffer vergleichen; Adresse nicht erfinden |
+| Hindenburgstraße 1, Ostfildern / Nellingen | Gemeinde und Ortsteil in Suchantwort und Hierarchie prüfen |
+| Friedrichstraße 38, Ostfildern / Kemnat | Gemeindebezug, Hausnummer und Ortsranking prüfen |
+
+Bei allen Vergleichen `/v1/search`, `/v1/autocomplete`, `/v1/search/structured`
+und `/v1/reverse` getrennt prüfen. Exakte OSM-Adresspunkte, POI-Schwerpunkte,
+Straßentreffer und interpolierte Positionen sind unterschiedliche Qualitäten;
+eine erfolgreiche HTTP-Antwort allein belegt keine brauchbare Geokodierung.

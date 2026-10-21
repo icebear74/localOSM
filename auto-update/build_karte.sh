@@ -19,6 +19,8 @@ PRIVAT_OSM="${CONF_DIR}/privat.osm"
 WELT_FILTER="${CONF_DIR}/welt_filter.txt"
 
 OUTPUT_PBF="${WORK_DIR}/europa.osm.pbf"
+NEXT_PBF="${WORK_DIR}/europa.next.osm.pbf"
+SOURCE_LOCK="${WORK_DIR}/.pelias-source.lock"
 STATUS_FILE="${STATUS_DIR}/planet-update.json"
 LOCK_FILE="${WORK_DIR}/.planet-update.lock"
 
@@ -63,10 +65,7 @@ cleanup() {
   cleanup_file "${TEMP_MASKE}"
   cleanup_file "${TEMP_EXTRACT_PBF}"
   cleanup_file "${TEMP_HILF_WELT}"
-  # Lockfile freigeben
-  if [ -f "${LOCK_FILE}" ]; then
-    rm -f "${LOCK_FILE}" && log "  Lockfile freigegeben." || log "  WARNUNG: Lockfile konnte nicht freigegeben werden."
-  fi
+  cleanup_file "${NEXT_PBF}"
 
   local now
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -117,17 +116,18 @@ with open(path, 'w') as fh:
 " 2>/dev/null || true
   fi
 }
-trap cleanup EXIT ERR INT TERM
-
 # ------------------------------------------------------------------------------
 # 1. Lockfile – verhindert doppelte gleichzeitige Ausführung
 # ------------------------------------------------------------------------------
 mkdir -p "${WORK_DIR}" "${STATUS_DIR}"
-if [ -f "${LOCK_FILE}" ]; then
+exec 9>"${LOCK_FILE}"
+if ! flock -n -x 9; then
   log "❌ Fehler: Eine andere Instanz läuft bereits (Lockfile: ${LOCK_FILE}). Abbruch." >&2
   exit 1
 fi
-echo "$$" > "${LOCK_FILE}"
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 log "Lockfile gesetzt (PID $$)."
 
 # Status-Datei: läuft jetzt
@@ -150,7 +150,7 @@ with open(path, 'w') as fh:
 # ------------------------------------------------------------------------------
 log "Prüfe Voraussetzungen..."
 
-for cmd in pyosmium-up-to-date osmium mapshaper python3; do
+for cmd in pyosmium-up-to-date osmium mapshaper python3 flock; do
   if ! command -v "${cmd}" &> /dev/null; then
     log "❌ Fehler: '${cmd}' ist nicht installiert oder nicht im PATH." >&2
     exit 1
@@ -259,7 +259,52 @@ log "[6/7] Schneide Europa und alle Weltweit-Parks aus..."
 osmium extract -p "${TEMP_MASKE}" "${PLANET_FILE}" -o "${TEMP_EXTRACT_PBF}" --overwrite
 
 log "[7/7] Merge extrahierte Daten mit deiner privat.osm..."
-osmium merge "${TEMP_EXTRACT_PBF}" "${PRIVAT_OSM}" "${TEMP_HILF_WELT}" -o "${OUTPUT_PBF}" --overwrite
+osmium merge "${TEMP_EXTRACT_PBF}" "${PRIVAT_OSM}" "${TEMP_HILF_WELT}" -o "${NEXT_PBF}" --overwrite
+# Readers retain this shared lock for the complete import. Never unlink lock files:
+# replacing their inode would allow another writer past an existing reader.
+python3 - "${NEXT_PBF}" "${OUTPUT_PBF}" "${SOURCE_LOCK}" "${STATUS_DIR}" <<'PY'
+import datetime
+import fcntl
+import hashlib
+import json
+import os
+import subprocess
+import sys
+
+pending, destination, lock_path, status_dir = sys.argv[1:]
+with open(lock_path, "a+b") as lock:
+    os.chmod(lock_path, 0o664)
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    digest = hashlib.sha256()
+    with open(pending, "rb") as source:
+        for chunk in iter(lambda: source.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+        os.fsync(source.fileno())
+    info = json.loads(subprocess.check_output(["osmium", "fileinfo", "-j", pending]))
+    stat = os.stat(pending)
+    metadata = {
+        "source": "/planet/europa.osm.pbf",
+        "sha256": digest.hexdigest(),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+        "header": info.get("header", {}),
+        "published_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    os.replace(pending, destination)
+    for path in (destination + ".meta.json", os.path.join(status_dir, "pelias-input.json")):
+        temporary = path + ".tmp"
+        with open(temporary, "w") as output:
+            json.dump(metadata, output, indent=2)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+    for directory in {os.path.dirname(destination), status_dir}:
+        descriptor = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+PY
 log "Trimming Filesystem. "
 fstrim . -v || log "⚠️ fstrim übersprungen oder nicht unterstützt."
 

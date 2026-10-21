@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: pelias-elasticsearch
+  namespace: osm
+spec:
+  serviceName: pelias-elasticsearch
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pelias-elasticsearch
+  template:
+    metadata:
+      labels:
+        app: pelias-elasticsearch
+    spec:
+      nodeSelector:
+        osm: "true"
+      securityContext:
+        fsGroup: 1000
+      containers:
+      - name: elasticsearch
+        image: localosm/pelias-elasticsearch:7.17.27
+        imagePullPolicy: IfNotPresent
+        env:
+        - {name: discovery.type, value: single-node}
+        - {name: xpack.security.enabled, value: "false"}
+        - {name: xpack.ml.enabled, value: "false"}
+        - {name: node.store.allow_mmap, value: "false"}
+        - {name: ES_JAVA_OPTS, value: "-Xms16g -Xmx16g"}
+        ports:
+        - {name: http, containerPort: 9200}
+        resources:
+          requests: {cpu: "2", memory: 20Gi}
+          limits: {cpu: "12", memory: 48Gi}
+        startupProbe:
+          httpGet: {path: "/_cluster/health?wait_for_status=yellow&timeout=2s", port: http}
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 90
+        readinessProbe:
+          httpGet: {path: "/_cluster/health?wait_for_status=yellow&timeout=2s", port: http}
+          periodSeconds: 10
+          timeoutSeconds: 5
+        livenessProbe:
+          tcpSocket: {port: http}
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 10
+        volumeMounts:
+        - {name: elasticsearch, mountPath: /usr/share/elasticsearch/data}
+      volumes:
+      - name: elasticsearch
+        persistentVolumeClaim:
+          claimName: pelias-elasticsearch
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pelias-elasticsearch
+  namespace: osm
+spec:
+  clusterIP: None
+  selector:
+    app: pelias-elasticsearch
+  ports:
+  - {name: http, port: 9200, targetPort: http}
