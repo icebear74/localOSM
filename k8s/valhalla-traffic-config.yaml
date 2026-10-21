@@ -13,16 +13,22 @@ data:
     import tarfile
     import time
     import urllib.error
+    import urllib.parse
     import urllib.request
 
     VALHALLA_URL = os.environ.get("VALHALLA_URL_LOCAL", "http://127.0.0.1:8002").rstrip("/")
-    ROADWORKS_URL = os.environ.get(
-        "ROADWORKS_URL",
-        "https://verkehr.autobahn.de/o/autobahn/A1/services/roadworks",
+    ROADWORKS_LIST_URL = os.environ.get(
+        "ROADWORKS_LIST_URL",
+        "https://verkehr.autobahn.de/o/autobahn/",
+    )
+    ROADWORKS_DETAILS_URL_TEMPLATE = os.environ.get(
+        "ROADWORKS_DETAILS_URL_TEMPLATE",
+        "https://verkehr.autobahn.de/o/autobahn/{road}/services/roadworks",
     )
     TRAFFIC_TAR_PATH = os.environ.get("TRAFFIC_TAR_PATH", "/shared-data/active/traffic.tar")
     STATE_FILE = os.environ.get("ROADWORKS_STATE_FILE", "/shared-data/active/roadworks-state.json")
     LOCK_DIR = os.environ.get("ROADWORKS_LOCK_DIR", "/shared-data/active/.roadworks-update.lock")
+    RUN_ONCE = str(os.environ.get("ROADWORKS_RUN_ONCE", "")).strip().lower() in {"1", "true", "yes", "ja"}
     REFRESH_SECONDS = max(300, int(os.environ.get("ROADWORKS_REFRESH_SECONDS", "3600")))
     HTTP_TIMEOUT_SECONDS = max(5, int(os.environ.get("ROADWORKS_HTTP_TIMEOUT_SECONDS", "30")))
     STARTUP_TIMEOUT_SECONDS = max(30, int(os.environ.get("ROADWORKS_STARTUP_TIMEOUT_SECONDS", "600")))
@@ -50,11 +56,52 @@ data:
     INDEX_ENTRY_STRUCT = struct.Struct("<QLL")
     TRAFFIC_SPEED_STRUCT = struct.Struct("<Q")
 
-    CLOSURE_TEXT_RE = re.compile(r"\b(vollsperr\w*|voll gesperrt|gesperrt)\b", re.IGNORECASE)
+    FULL_CLOSURE_PATTERNS = [
+        re.compile(pattern, re.IGNORECASE)
+        for pattern in (
+            r"\bvollsperr\w*\b",
+            r"\bvoll\s+gesperrt\b",
+            r"\bausfahrt\b.*\bgesperrt\b",
+            r"\bauffahrt\b.*\bgesperrt\b",
+            r"\banschlussstelle\b.*\bgesperrt\b",
+            r"\bverbindungsfahrbahn\b.*\bgesperrt\b",
+            r"\brichtungsfahrbahn\b.*\bgesperrt\b",
+            r"\bgesperrt\b.*\bkeine\s+durchfahrt\b",
+            r"\bgesperrt\b.*\bumleitung\b",
+            r"\bsperrung\s+as\b",
+            r"\b(as|anschlussstelle|ausfahrt|auffahrt)\b.*\bsperrung\b",
+        )
+    ]
+    PARTIAL_CLOSURE_PATTERNS = [
+        re.compile(pattern, re.IGNORECASE)
+        for pattern in (
+            r"\bfahrstreifen\b",
+            r"\bfahrspur\b",
+            r"\bseitenstreifen\b",
+            r"\bstandstreifen\b",
+            r"\bspur\s+gesperrt\b",
+            r"\b\d+\s+von\s+\d+\b",
+            r"\bteilsperr\w*\b",
+        )
+    ]
 
 
     def log(message):
         print(f"[roadworks-updater] {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {message}", flush=True)
+
+
+    def format_exception(exc):
+        detail = str(exc).strip()
+        if isinstance(exc, urllib.error.HTTPError):
+            code = getattr(exc, "code", None)
+            reason = getattr(exc, "reason", None)
+            return f"{exc.__class__.__name__}(status={code}, reason={reason!r})"
+        if isinstance(exc, urllib.error.URLError):
+            reason = getattr(exc, "reason", None)
+            return f"{exc.__class__.__name__}(reason={reason!r})"
+        if detail:
+            return f"{exc.__class__.__name__}: {detail}"
+        return repr(exc)
 
 
     def ensure_parent_dir(path):
@@ -74,22 +121,52 @@ data:
             return json.loads(response.read().decode("utf-8"))
 
 
+    def _probe_valhalla():
+        try:
+            http_json(f"{VALHALLA_URL}/status", {"verbose": False}, timeout=5)
+            return True
+        except Exception:
+            pass
+        try:
+            urllib.request.urlopen(
+                urllib.request.Request(VALHALLA_URL, headers={"User-Agent": "localosm-valhalla-roadworks/1.0"}),
+                timeout=5,
+            ).read(1)
+            return True
+        except Exception:
+            return False
+
+
     def wait_for_startup():
         deadline = time.time() + STARTUP_TIMEOUT_SECONDS
+        last_report = 0.0
         while time.time() < deadline:
-            if os.path.isfile(TRAFFIC_TAR_PATH):
-                try:
-                    urllib.request.urlopen(
-                        urllib.request.Request(VALHALLA_URL, headers={"User-Agent": "localosm-valhalla-roadworks/1.0"}),
-                        timeout=5,
-                    ).read(1)
-                    return
-                except Exception:
-                    pass
+            if os.path.isfile(TRAFFIC_TAR_PATH) and _probe_valhalla():
+                return
+            now = time.time()
+            if now - last_report >= 30:
+                log(
+                    f"Waiting for startup readiness: traffic.tar={'yes' if os.path.isfile(TRAFFIC_TAR_PATH) else 'no'}, "
+                    f"valhalla_api={'yes' if _probe_valhalla() else 'no'}"
+                )
+                last_report = now
             time.sleep(5)
         raise RuntimeError(
-            f"Valhalla or traffic.tar was not ready within {STARTUP_TIMEOUT_SECONDS} seconds."
+            f"Valhalla API and/or traffic.tar was not ready within {STARTUP_TIMEOUT_SECONDS} seconds."
         )
+
+
+    def wait_until_ready_forever():
+        while True:
+            try:
+                wait_for_startup()
+                log("Startup readiness reached; traffic updater loop is active.")
+                return
+            except Exception as exc:
+                if RUN_ONCE:
+                    raise
+                log(f"Startup readiness check failed: {exc}. Retrying in 30 seconds.")
+                time.sleep(30)
 
 
     def parse_bool(value):
@@ -110,6 +187,59 @@ data:
         return []
 
 
+    def fetch_roads():
+        payload = http_json(ROADWORKS_LIST_URL)
+        roads = []
+        if isinstance(payload, dict):
+            candidates = payload.get("roads")
+            if isinstance(candidates, list):
+                roads = candidates
+        elif isinstance(payload, list):
+            roads = payload
+        normalized = []
+        seen = set()
+        for value in roads:
+            road = str(value).strip()
+            if not road or road in seen:
+                continue
+            seen.add(road)
+            normalized.append(road)
+        if not normalized:
+            log(f"Roadworks road list at {ROADWORKS_LIST_URL} returned no roads; treating as empty update.")
+            return []
+        return normalized
+
+
+    def fetch_all_roadworks():
+        roads = fetch_roads()
+        entries = []
+        failed_roads = []
+        successful_roads = 0
+        for road in roads:
+            details_url = ROADWORKS_DETAILS_URL_TEMPLATE.replace("{road}", urllib.parse.quote(road, safe=""))
+            try:
+                payload = http_json(details_url)
+                road_entries = roadworks_from_payload(payload)
+                successful_roads += 1
+                for item in road_entries:
+                    if isinstance(item, dict):
+                        enriched = dict(item)
+                        enriched.setdefault("_road", road)
+                        entries.append(enriched)
+            except Exception as exc:
+                failed_roads.append(road)
+                log(f"Roadworks fetch failed for {road} ({details_url}): {format_exception(exc)}")
+        log(
+            f"Roadworks fetch summary: roads_total={len(roads)} roads_failed={len(failed_roads)} "
+            f"entries_total={len(entries)}"
+        )
+        if roads and successful_roads == 0:
+            raise RuntimeError(
+                f"Roadworks fetch failed for all roads ({len(roads)} total); keeping previous traffic state."
+            )
+        return entries
+
+
     def roadwork_text(item):
         parts = []
         for key in ("title", "subtitle"):
@@ -128,9 +258,29 @@ data:
         if not isinstance(value, str):
             return None
         try:
-            lon1, lat1, lon2, lat2 = [float(part.strip()) for part in value.split(",")]
+            a1, b1, a2, b2 = [float(part.strip()) for part in value.split(",")]
         except (TypeError, ValueError):
             return None
+        def normalize_pair(first, second):
+            candidates = []
+            if abs(first) <= 90 and abs(second) <= 180:
+                candidates.append((first, second))
+            if abs(second) <= 90 and abs(first) <= 180:
+                candidates.append((second, first))
+            if not candidates:
+                return None
+            if len(candidates) == 1:
+                return candidates[0]
+            for lat, lon in candidates:
+                if abs(lat) >= abs(lon):
+                    return (lat, lon)
+            return candidates[0]
+        pair1 = normalize_pair(a1, b1)
+        pair2 = normalize_pair(a2, b2)
+        if not pair1 or not pair2:
+            return None
+        lat1, lon1 = pair1
+        lat2, lon2 = pair2
         min_lon = min(lon1, lon2)
         max_lon = max(lon1, lon2)
         min_lat = min(lat1, lat2)
@@ -150,7 +300,12 @@ data:
     def should_close_roadwork(item):
         if parse_bool(item.get("isBlocked")):
             return True
-        return bool(CLOSURE_TEXT_RE.search(roadwork_text(item)))
+        text = roadwork_text(item).strip()
+        if not text:
+            return False
+        if any(pattern.search(text) for pattern in PARTIAL_CLOSURE_PATTERNS):
+            return False
+        return any(pattern.search(text) for pattern in FULL_CLOSURE_PATTERNS)
 
 
     def sample_locations(extent):
@@ -198,12 +353,43 @@ data:
         return None
 
 
+    def extract_graph_id_from_edge(edge):
+        candidates = [
+            edge.get("graph_id"),
+            edge.get("id"),
+            edge.get("edge_id"),
+            edge.get("directed_edge_id"),
+            edge.get("edge"),
+            edge.get("graphid"),
+        ]
+        for candidate in candidates:
+            graph_id = parse_graph_id(candidate)
+            if graph_id is not None:
+                return graph_id
+        if all(key in edge for key in ("level", "tile_id", "id")):
+            graph_id = parse_graph_id(
+                {"level": edge.get("level"), "tile_id": edge.get("tile_id"), "id": edge.get("id")}
+            )
+            if graph_id is not None:
+                return graph_id
+        nested = edge.get("graph")
+        if isinstance(nested, dict):
+            graph_id = parse_graph_id(nested.get("graph_id"))
+            if graph_id is not None:
+                return graph_id
+            graph_id = parse_graph_id(nested)
+            if graph_id is not None:
+                return graph_id
+        return None
+
+
     def locate_graph_ids(points):
         payload = {"locations": points, "verbose": True}
         response = http_json(f"{VALHALLA_URL}/locate", payload)
         if isinstance(response, dict):
             response = response.get("locations") or response.get("results") or []
         graph_ids = set()
+        debug_logged = getattr(locate_graph_ids, "_debug_logged", False)
         for entry in response if isinstance(response, list) else []:
             edges = entry.get("edges") or entry.get("correlated_edges") or []
             for edge in edges:
@@ -217,9 +403,18 @@ data:
                     bool(access.get(key)) for key in ("car", "auto", "taxi", "truck")
                 ):
                     continue
-                graph_id = parse_graph_id(edge.get("graph_id"))
+                graph_id = extract_graph_id_from_edge(edge)
                 if graph_id is not None:
                     graph_ids.add(graph_id)
+                    continue
+                if not debug_logged:
+                    log(
+                        "Valhalla locate edge had no parseable graph id; "
+                        f"keys={sorted(edge.keys())[:20]}, "
+                        f"graph_id={edge.get('graph_id')!r}, id={edge.get('id')!r}"
+                    )
+                    debug_logged = True
+                    locate_graph_ids._debug_logged = True
         return graph_ids
 
 
@@ -376,23 +571,28 @@ data:
 
 
     def collect_closed_graph_ids():
-        payload = http_json(ROADWORKS_URL)
-        entries = roadworks_from_payload(payload)
+        entries = fetch_all_roadworks()
         closed_graph_ids = set()
+        text_matched_roadworks = 0
+        extent_matched_roadworks = 0
         matched_roadworks = 0
         for item in entries:
             if not isinstance(item, dict) or not should_close_roadwork(item):
                 continue
+            text_matched_roadworks += 1
             extent = parse_extent(item.get("extent"))
             if not extent:
                 continue
+            extent_matched_roadworks += 1
             graph_ids = locate_graph_ids(sample_locations(extent))
             if not graph_ids:
                 continue
             matched_roadworks += 1
             closed_graph_ids.update(graph_ids)
         log(
-            f"Feed returned {len(entries)} roadworks; matched {matched_roadworks} closure candidate(s) to {len(closed_graph_ids)} edge(s)."
+            f"Feed returned {len(entries)} roadworks; text-matched {text_matched_roadworks}, "
+            f"extent-usable {extent_matched_roadworks}, edge-matched {matched_roadworks} "
+            f"closure candidate(s) to {len(closed_graph_ids)} edge(s)."
         )
         return closed_graph_ids
 
@@ -410,15 +610,20 @@ data:
 
 
     def main():
-        wait_for_startup()
+        wait_until_ready_forever()
         while True:
             cycle_started = time.time()
             try:
                 run_cycle()
+                if RUN_ONCE:
+                    log("ROADWORKS_RUN_ONCE enabled; stopping after one update cycle.")
+                    return
             except urllib.error.URLError as exc:
                 log(f"Roadworks update failed while fetching data: {exc}")
             except Exception as exc:
                 log(f"Roadworks update failed: {exc}")
+                if RUN_ONCE:
+                    raise
             sleep_seconds = REFRESH_SECONDS - (time.time() - cycle_started)
             if sleep_seconds > 0:
                 time.sleep(sleep_seconds)

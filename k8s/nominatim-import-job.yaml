@@ -37,8 +37,6 @@ spec:
               key: import_cache_mb
         - name: PGDATA
           value: /osm-temp/nominatim/work/current
-        - name: PGDATA_TARGET_ROOT
-          value: /nominatim-data-prod
         - name: SSL_CERT_FILE
           value: /ca-certs/ca.crt
         - name: CURL_CA_BUNDLE
@@ -59,7 +57,6 @@ spec:
         - |
           set -euo pipefail
           PGDATA_DIR="${PGDATA:-/nominatim-data/current}"
-          WORK_ROOT="$(dirname "${PGDATA_DIR}")"
           PBF_SOURCE="${PBF_PATH:-/planet/europa.osm.pbf}"
           trim_mount() {
             local mountpoint="$1"
@@ -74,7 +71,6 @@ spec:
           }
           cleanup() {
             trim_mount /osm-temp
-            trim_mount /nominatim-data-prod
             trim_mount /tmp
           }
           trap cleanup EXIT
@@ -160,12 +156,6 @@ spec:
           echo "Warte 5 Sekunden auf WAL-Flush..."
           sleep 5
 
-          SOURCE_DATA_DIR="${PGDATA:-/nominatim-data/current}"
-          TARGET_ROOT="${PGDATA_TARGET_ROOT:-/nominatim-data-prod}"
-          TARGET_STAGED="${TARGET_ROOT}/staging"
-          TARGET_CURRENT="${TARGET_ROOT}/current"
-          TARGET_PREVIOUS="${TARGET_ROOT}/previous"
-
           echo "Starte PostgreSQL, um die temporäre Datenbank vor dem Copy-Upgrade zu bereinigen..."
           mkdir -p /etc/postgresql/16/main/conf.d
           cat > /etc/postgresql/16/main/conf.d/zz-promotion.conf <<EOF
@@ -193,29 +183,12 @@ spec:
           echo "Stoppe PostgreSQL vor dem Kopieren des Datenverzeichnisses..."
           service postgresql stop
 
-          echo "Preparing the compacted database in the production staging directory..."
-          mkdir -p "${TARGET_ROOT}"
-          rm -rf "${TARGET_STAGED}" "${TARGET_PREVIOUS}" 2>/dev/null || true
-          mkdir -p "${TARGET_STAGED}"
-
-          echo "Copying the database into the production staging directory..."
-          cp -a "${SOURCE_DATA_DIR}/." "${TARGET_STAGED}/"
-          chown -R 100:100 "${TARGET_STAGED}"
-          chmod 0700 "${TARGET_STAGED}" 2>/dev/null || true
-          touch "${TARGET_STAGED}/import-finished"
-
-          echo "WAL-Flush abgeschlossen. Setze import-finished Marker..."
-          touch "${SOURCE_DATA_DIR}/import-finished"
-
-          echo "Cleaning temporary Nominatim work directory..."
-          find "${WORK_ROOT}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-
-          echo "Temporary and production volumes will be trimmed before exit."
+          echo "WAL-Flush abgeschlossen. Setze import-finished Marker in ${PGDATA_DIR} ..."
+          touch "${PGDATA_DIR}/import-finished"
+          echo "Nominatim build data bleibt unter ${PGDATA_DIR}; zentraler Copy-/Promotion-Job übernimmt die Aktivierung."
         volumeMounts:
         - name: osm-temp
           mountPath: /osm-temp
-        - name: nominatim-production-data
-          mountPath: /nominatim-data-prod
         - name: nominatim-postgres-tuning
           mountPath: /etc/postgresql/16/main/conf.d/zz-tuning.conf
           subPath: import-tuning.conf
@@ -232,12 +205,8 @@ spec:
         persistentVolumeClaim:
           claimName: planet
       - name: osm-temp
-        hostPath:
-          path: /mnt/osm-temp
-          type: DirectoryOrCreate
-      - name: nominatim-production-data
         persistentVolumeClaim:
-          claimName: nominatim
+          claimName: osm-temp
       - name: nominatim-postgres-tuning
         configMap:
           name: nominatim-postgres-tuning

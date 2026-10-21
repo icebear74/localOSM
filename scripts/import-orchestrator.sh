@@ -741,14 +741,11 @@ run_step() {
     return 1
   fi
   if [ "${service}" = "nominatim" ] || [ "${service}" = "valhalla" ] || [ "${service}" = "photon" ] || [ "${service}" = "pelias" ]; then
-    write_state false "${service}" 100 "${service} import completed." "The import job handles promotion and cleanup internally."
+    write_state false "${service}" 100 "${service} import completed." "Build output was staged to osm-temp; central promotion handles activation."
     return 0
   fi
   if [ "${service}" = "tileserver" ]; then
-    if [ "${auto_promote}" != "true" ]; then
-      log "${service} import already promotes data inside the tileserver-gl PVC; auto-promote=false has no separate staging step to keep."
-    fi
-    write_state false "${service}" 100 "${service} import promoted." "tileserver-gl is serving the newly imported data from its PVC."
+    write_state false "${service}" 100 "${service} import completed." "MBTiles output was staged to osm-temp; central promotion handles activation."
     return 0
   fi
   if [ "${auto_promote}" != "true" ]; then
@@ -833,6 +830,24 @@ run_parallel_step_group() {
   done
 
   return "${overall_rc}"
+}
+
+run_import_promotion_job() {
+  local rc=0
+  log "Starting central import-promotion job."
+  write_state true "promotion" 95 "Importe erstellt." "Aktiviere zentrale Promotion für vorhandene Datenbereiche."
+  kubectl -n "${NAMESPACE}" delete job import-promotion --ignore-not-found >/dev/null 2>&1 || true
+  kubectl -n "${NAMESPACE}" apply -f "${MANIFEST_DIR}/import-promotion-job.yaml" >/dev/null
+  wait_for_job "import-promotion" || rc=$?
+  if [ "${rc}" -eq 2 ]; then
+    write_state false "aborted" 0 "Promotion abgebrochen." "Import wurde vom Benutzer abgebrochen."
+    return 2
+  fi
+  if [ "${rc}" -ne 0 ]; then
+    write_state false "failed" 0 "Promotion fehlgeschlagen." "Der zentrale Copy-/Promotion-Job meldete Fehler."
+    return 1
+  fi
+  return 0
 }
 
 handle_planet_update_request() {
@@ -1006,6 +1021,26 @@ main() {
         continue
       fi
       mark_step_done "pelias"
+    fi
+
+    if [ "${AUTO_PROMOTE}" = "true" ]; then
+      local promotion_rc=0
+      run_import_promotion_job || promotion_rc=$?
+      if [ "${promotion_rc}" -ne 0 ]; then
+        if [ "${promotion_rc}" -eq 2 ]; then
+          log "Central promotion aborted by user; archiving import request and scratch data for recovery."
+          archive_file "${REQUEST_FILE}" "aborted"
+        else
+          log "Central promotion failed; archiving import request and scratch data to prevent retry loop while preserving data."
+          archive_file "${REQUEST_FILE}" "failed"
+        fi
+        cleanup_import_scratch
+        clear_abort_flag
+        clear_completed_steps
+        continue
+      fi
+    else
+      log "auto_promote=false: keeping importer outputs in /osm-temp for manual promotion."
     fi
 
     # The merged planet.osm.pbf itself is intentionally kept (see

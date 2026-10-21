@@ -169,7 +169,7 @@ spec:
           set -eu
           echo '=== Planetiler Tile Generation ==='
           test -f /planet/europa.osm.pbf
-          mkdir -p /tileserver-gl /osm-temp/tileserver/work /tools /osm-status
+          mkdir -p /osm-temp/tileserver/work /tools /osm-status
         resources:
           requests:
             cpu: "50m"
@@ -180,8 +180,6 @@ spec:
         volumeMounts:
         - name: planet
           mountPath: /planet
-        - name: tileserver-gl
-          mountPath: /tileserver-gl
         - name: osm-temp
           mountPath: /osm-temp
         - name: tools
@@ -207,15 +205,7 @@ spec:
         - |
           set -eu
           if [ ! -s /tools/planetiler.jar ]; then
-            curl -fsSL -o /tools/planetiler.jar https://github.com/onthegomap/planetiler/releases/latest/download/planetiler.jar
-          fi
-          if [ ! -x /tools/kubectl ]; then
-            KUBECTL_VERSION=$(curl -fsSL https://dl.k8s.io/release/stable.txt 2>/dev/null || true)
-            if [ -z "${KUBECTL_VERSION}" ]; then
-              KUBECTL_VERSION="v1.30.0"
-            fi
-            curl -fsSL -o /tools/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
-            chmod 0755 /tools/kubectl
+            curl --cacert /ca-certs/ca.crt -fsSL -o /tools/planetiler.jar https://github.com/onthegomap/planetiler/releases/latest/download/planetiler.jar
           fi
         resources:
           requests:
@@ -250,13 +240,13 @@ spec:
           set -eu
           mkdir -p /osm-temp/tileserver/data/sources /osm-temp/tileserver/work
           if [ ! -s /osm-temp/tileserver/data/sources/lake_centerline.shp.zip ]; then
-            wget -q -O /osm-temp/tileserver/data/sources/lake_centerline.shp.zip https://github.com/acalcutt/osm-lakelines/releases/latest/download/lake_centerline.shp.zip
+            wget --ca-certificate=/ca-certs/ca.crt -q -O /osm-temp/tileserver/data/sources/lake_centerline.shp.zip https://github.com/acalcutt/osm-lakelines/releases/latest/download/lake_centerline.shp.zip
           fi
           if [ ! -s /osm-temp/tileserver/data/sources/water-polygons-split-3857.zip ]; then
-            wget -q -O /osm-temp/tileserver/data/sources/water-polygons-split-3857.zip https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip
+            wget --ca-certificate=/ca-certs/ca.crt -q -O /osm-temp/tileserver/data/sources/water-polygons-split-3857.zip https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip
           fi
           if [ ! -s /osm-temp/tileserver/data/sources/natural_earth_vector.sqlite.zip ]; then
-            wget -q -O /osm-temp/tileserver/data/sources/natural_earth_vector.sqlite.zip https://naciscdn.org/naturalearth/packages/natural_earth_vector.sqlite.zip
+            wget --ca-certificate=/ca-certs/ca.crt -q -O /osm-temp/tileserver/data/sources/natural_earth_vector.sqlite.zip https://naciscdn.org/naturalearth/packages/natural_earth_vector.sqlite.zip
           fi
         resources:
           requests:
@@ -303,25 +293,18 @@ spec:
         - |
           set -eu
 
-          KUBECTL=/tools/kubectl
           PLANETILER_JAR=/tools/planetiler.jar
           SOURCE_OSM=/planet/europa.osm.pbf
           SOURCE_DIR=/osm-temp/tileserver/data/sources
           TEMP_DIR=/osm-temp/tileserver/work
-          OUTPUT_NEW=/tileserver-gl/planet-NEW.mbtiles
-          OUTPUT_ACTIVE=/tileserver-gl/planet.mbtiles
-          SCALED_DOWN=0
-          ORIGINAL_REPLICAS=0
+          OUTPUT_NEW="${TEMP_DIR}/planet.mbtiles.new"
+          OUTPUT_READY="${TEMP_DIR}/planet.mbtiles"
 
           trim_mount() {
             mountpoint="$1"
             if command -v fstrim >/dev/null 2>&1; then
               echo "[INFO] fstrim ${mountpoint}"
-              if ! fstrim "${mountpoint}"; then
-                echo "[WARN] fstrim failed for ${mountpoint}; continuing"
-              fi
-            else
-              echo "[INFO] fstrim not available for ${mountpoint}; continuing."
+              fstrim "${mountpoint}" || echo "[WARN] fstrim failed for ${mountpoint}; continuing"
             fi
           }
 
@@ -331,47 +314,24 @@ spec:
             fi
           }
 
-          scale_deployment() {
-            local replicas="$1"
-            if "${KUBECTL}" scale deployment tileserver-gl --replicas="${replicas}" -n osm >/dev/null 2>&1; then
-              return 0
-            fi
-            echo "[WARN] Could not scale deployment/tileserver-gl to ${replicas}; continuing without a deployment restart"
-            return 1
-          }
-
           cleanup() {
-            if [ "${SCALED_DOWN}" = "1" ] && [ "${ORIGINAL_REPLICAS}" -gt 0 ]; then
-              echo "[INFO] Restoring deployment/tileserver-gl after premature exit"
-              "${KUBECTL}" scale deployment tileserver-gl --replicas="${ORIGINAL_REPLICAS}" -n osm || true
-            fi
             cleanup_temp_dir
             trim_mount /planet
             trim_mount /osm-temp
-            trim_mount /tileserver-gl
-            trim_mount /osm-status
             trim_mount /tools
           }
           trap cleanup EXIT
 
-          rm -f "${OUTPUT_NEW}"
+          rm -f "${OUTPUT_NEW}" "${OUTPUT_READY}"
           mkdir -p "${TEMP_DIR}" "${SOURCE_DIR}"
 
-          check_required_sources() {
-            for source_file in \
-              lake_centerline.shp.zip \
-              water-polygons-split-3857.zip \
-              natural_earth_vector.sqlite.zip; do
-              source_path="${SOURCE_DIR}/${source_file}"
-              if [ -s "${source_path}" ]; then
-                source_size=$(wc -c < "${source_path}" | tr -d '[:space:]')
-                echo "[OK] ${source_path} (${source_size} bytes)"
-              else
-                echo "[ERROR] Missing or empty source file: ${source_path}" >&2
-                exit 1
-              fi
-            done
-          }
+          for source_file in lake_centerline.shp.zip water-polygons-split-3857.zip natural_earth_vector.sqlite.zip; do
+            source_path="${SOURCE_DIR}/${source_file}"
+            if [ ! -s "${source_path}" ]; then
+              echo "[ERROR] Missing or empty source file: ${source_path}" >&2
+              exit 1
+            fi
+          done
 
           detect_java_truststore_type() {
             if [ ! -s /ca-certs/cacerts ]; then
@@ -394,13 +354,7 @@ spec:
               fi
             fi
             JAVA_TRUSTSTORE_OPTIONS="-Djavax.net.ssl.trustStore=/ca-certs/cacerts -Djavax.net.ssl.trustStoreType=${JAVA_TRUSTSTORE_TYPE} -Djavax.net.ssl.trustStorePassword=changeit"
-            JAVA_TOOL_OPTIONS_BASE="$(printf '%s\n' "${JAVA_TOOL_OPTIONS:-}" | sed \
-              -e 's/[[:space:]]*-Djavax\.net\.ssl\.trustStore=[^[:space:]]*//g' \
-              -e 's/[[:space:]]*-Djavax\.net\.ssl\.trustStoreType=[^[:space:]]*//g' \
-              -e 's/[[:space:]]*-Djavax\.net\.ssl\.trustStorePassword=[^[:space:]]*//g' \
-              -e 's/^[[:space:]]*//' \
-              -e 's/[[:space:]]*$//' \
-              -e 's/[[:space:]][[:space:]]*/ /g')"
+            JAVA_TOOL_OPTIONS_BASE="$(printf '%s\n' "${JAVA_TOOL_OPTIONS:-}" | sed -e 's/[[:space:]]*-Djavax\.net\.ssl\.trustStore=[^[:space:]]*//g' -e 's/[[:space:]]*-Djavax\.net\.ssl\.trustStoreType=[^[:space:]]*//g' -e 's/[[:space:]]*-Djavax\.net\.ssl\.trustStorePassword=[^[:space:]]*//g' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/[[:space:]][[:space:]]*/ /g')"
             if [ -n "${JAVA_TOOL_OPTIONS_BASE}" ]; then
               export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS_BASE} ${JAVA_TRUSTSTORE_OPTIONS}"
             else
@@ -416,7 +370,6 @@ spec:
             USE_JAVA="$(tr '[:upper:]' '[:lower:]' < /config/use_java | tr -d '[:space:]')"
           fi
           detect_java_truststore_type
-          check_required_sources
 
           if [ "${USE_JAVA}" = "true" ] && [ -f /config/CustomProfile.java ]; then
             cp /config/CustomProfile.java "${PROFILE_SOURCE}"
@@ -427,9 +380,9 @@ spec:
               --output="${OUTPUT_NEW}" \
               --force \
               --download=false \
+              --data-dir=/osm-temp/tileserver/data \
               --nodemap-type=sparsearray \
               --nodemap-storage=ram \
-              --data-dir=/osm-temp/tileserver/data \
               --threads=16 \
               --arguments=journal_mode=WAL,synchronous=OFF \
               --minzoom=0 \
@@ -452,36 +405,12 @@ spec:
               --extra-osm-tags=shop,building,construction,name,name:de,name:en,wheelchair,amenity,highway,landuse,tourism,attraction,railway,roller_coaster,colour,color,layer,maxspeed,oneway
           fi
 
-          trim_mount /tileserver-gl
-          trim_mount /osm-temp
-          trim_mount /tools
-
-          ORIGINAL_REPLICAS=$("${KUBECTL}" get deployment tileserver-gl -n osm -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0")
-          ORIGINAL_REPLICAS="${ORIGINAL_REPLICAS:-0}"
-          if [ "${ORIGINAL_REPLICAS}" -gt 0 ]; then
-            if scale_deployment 0; then
-              SCALED_DOWN=1
-            fi
-          fi
-
-          mv -f "${OUTPUT_NEW}" "${OUTPUT_ACTIVE}"
-
-          trim_mount /tileserver-gl
-
-          if [ "${SCALED_DOWN}" = "1" ] && [ "${ORIGINAL_REPLICAS}" -gt 0 ]; then
-            scale_deployment "${ORIGINAL_REPLICAS}" || true
-            SCALED_DOWN=0
-          fi
-
-          cleanup_temp_dir
-
-          trim_mount /osm-temp
-          trim_mount /tools
+          sync
+          mv -f "${OUTPUT_NEW}" "${OUTPUT_READY}"
+          echo "[INFO] Planetiler build finished at ${OUTPUT_READY}; central copy/promote job will activate it."
         volumeMounts:
         - name: planet
           mountPath: /planet
-        - name: tileserver-gl
-          mountPath: /tileserver-gl
         - name: osm-temp
           mountPath: /osm-temp
         - name: osm-status
@@ -510,9 +439,6 @@ spec:
       - name: osm-temp
         persistentVolumeClaim:
           claimName: osm-temp
-      - name: tileserver-gl
-        persistentVolumeClaim:
-          claimName: tileserver-gl
       - name: osm-status
         persistentVolumeClaim:
           claimName: osm-status
