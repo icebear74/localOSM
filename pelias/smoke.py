@@ -14,6 +14,8 @@ def validate_cases(cases):
     if not isinstance(cases, list):
         raise ValueError("smoke must be a list of feature-based cases")
     covered = set()
+    osm_searches = set()
+    address_or_poi = False
     for case in cases:
         endpoint = case.get("endpoint")
         if endpoint not in ENDPOINTS or not isinstance(case.get("params"), dict):
@@ -22,9 +24,17 @@ def validate_cases(cases):
         minimum = expect.get("min_features", 1) if isinstance(expect, dict) else None
         if not isinstance(minimum, int) or isinstance(minimum, bool) or minimum < 1:
             raise ValueError("smoke checks must require at least one real feature")
+        if expect.get("source") == "openstreetmap":
+            osm_searches.add(endpoint)
+            if expect.get("layer") in ("address", "venue"):
+                address_or_poi = True
         covered.add(endpoint)
     if covered != ENDPOINTS:
         raise ValueError("smoke must cover search, autocomplete, search/structured and reverse")
+    if not {"search", "autocomplete"}.issubset(osm_searches):
+        raise ValueError("smoke search and autocomplete must require OpenStreetMap features")
+    if not address_or_poi:
+        raise ValueError("smoke must include a meaningful OpenStreetMap address or venue case")
 
 
 def run(base_url, cases, timeout=30):
@@ -59,15 +69,18 @@ def run(base_url, cases, timeout=30):
                 raise RuntimeError("smoke feature has no point geometry: " + url)
             if not properties.get("label") or not properties.get("layer"):
                 raise RuntimeError("smoke feature has no label/layer: " + url)
-        if expect.get("label_contains") and not any(
-            expect["label_contains"].casefold() in f["properties"]["label"].casefold()
-            for f in features
-        ):
-            raise RuntimeError("smoke label did not match: " + url)
-        for key in ("layer", "source"):
-            if expect.get(key) and not any(
-                f["properties"].get(key) == expect[key] for f in features
+        def matches(feature):
+            properties = feature["properties"]
+            if any(
+                expect.get(key) and properties.get(key) != expect[key]
+                for key in ("layer", "source")
             ):
-                raise RuntimeError("smoke %s did not match: %s" % (key, url))
+                return False
+            return not expect.get("label_contains") or (
+                expect["label_contains"].casefold() in properties["label"].casefold()
+            )
+
+        if not any(matches(feature) for feature in features):
+            raise RuntimeError("smoke source/layer/label expectations did not match one feature: " + url)
         results.append({"endpoint": case["endpoint"], "features": len(features)})
     return results

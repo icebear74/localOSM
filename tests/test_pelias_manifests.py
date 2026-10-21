@@ -110,6 +110,28 @@ class PeliasManifestsTest(unittest.TestCase):
             self.assertIn('p.get("auto_promote") is True', promote["args"][0])
             self.assertIn('test -n "$PELIAS_GENERATION"', promote["args"][0])
 
+    def test_legacy_initializer_can_only_create_the_shared_lock(self):
+        for profile in PROFILES:
+            for name in ("pelias-import", "pelias-promote"):
+                pod = find(profile, "Job", name)["spec"]["template"]["spec"]
+                initializer = pod["initContainers"][0]
+                self.assertEqual(["python3", "-c"], initializer["command"])
+                with mock.patch("os.open", return_value=42) as opened, \
+                     mock.patch("os.close") as closed, mock.patch("os.umask"):
+                    exec(compile(initializer["args"][0], "<lock-initializer>", "exec"), {})
+                opened.assert_called_once_with(
+                    "/planet/.pelias-source.lock", os.O_CREAT | os.O_RDONLY, 0o666,
+                )
+                closed.assert_called_once_with(42)
+                self.assertEqual(
+                    [{"name": "source-lock-initializer", "mountPath": "/planet"}],
+                    initializer["volumeMounts"],
+                )
+                self.assertNotIn("europa.osm.pbf", initializer["args"][0])
+                main = pod["containers"][0]
+                source = next(m for m in main["volumeMounts"] if m["mountPath"] == "/planet")
+                self.assertTrue(source["readOnly"])
+
     def test_embedded_shell_commands_parse(self):
         for profile in PROFILES:
             for doc in documents(profile):
@@ -314,6 +336,7 @@ fs.mkdirSync(directory, {recursive:true});
 fs.mkdirSync('/data/source', {recursive:true});
 const entries = require('/code/whosonfirst/test/resources/france.json').tavel;
 for (const entry of entries) {
+  // This metadata-only upstream fixture uses bbox polygons only for isolated tests.
   const bbox = entry.properties['geom:bbox'].split(',').map(Number);
   const [w,s,e,n] = bbox;
   entry.geometry = {type:'Polygon',coordinates:[[[w,s],[e,s],[e,n],[w,n],[w,s]]]};

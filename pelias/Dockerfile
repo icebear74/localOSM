@@ -11,7 +11,7 @@ RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 ENV TMPDIR=/var/cache/pelias-build
 RUN mkdir -p "$TMPDIR" && apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git python3 build-essential pkg-config \
-    sqlite3 libsqlite3-dev zlib1g-dev osmium-tool unzip bzip2 gdal-bin \
+    sqlite3 libsqlite3-dev zlib1g-dev osmium-tool unzip bzip2 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pelias/images.lock.json /opt/pelias/images.lock.json

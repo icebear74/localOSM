@@ -21,6 +21,7 @@ import sqlite3
 import ssl
 import subprocess
 import sys
+import tarfile
 import time
 import urllib.error
 import urllib.parse
@@ -429,14 +430,15 @@ class Controller:
         return record
 
     def aux_spec(self):
-        spec = self.policy["aux"]
+        spec = copy.deepcopy(self.policy["aux"])
+        spec.setdefault("files", [])
         version = spec["version"]
         if not isinstance(version, str) or not GENERATION.fullmatch(version):
             raise ValueError("aux.version must be an immutable safe version name")
-        if not spec.get("countries") or not spec.get("files"):
-            raise ValueError("aux countries and pinned files are required")
+        if not spec.get("countries") or not isinstance(spec["files"], list):
+            raise ValueError("aux countries and an optional file list are required")
         if not isinstance(spec["countries"], list) or not all(
-            isinstance(country, str) and re.fullmatch(r"[A-Z]{2,3}", country)
+            isinstance(country, str) and re.fullmatch(r"[A-Z]{2}", country)
             for country in spec["countries"]
         ):
             raise ValueError("aux countries must be explicit ISO country codes")
@@ -445,15 +447,15 @@ class Controller:
             path = Path(item["path"])
             if (
                 path.is_absolute() or ".." in path.parts or str(path) in seen
-                or str(path) in (".", "manifest.json")
+                or str(path) in (".", "manifest.json", "inventory.json")
             ):
                 raise ValueError("unsafe or duplicate auxiliary path")
             seen.add(str(path))
             if not re.fullmatch(r"[0-9a-f]{64}", item["sha256"]):
                 raise ValueError("every auxiliary file requires a SHA256")
             compression = item.get("compression", "none")
-            if compression not in ("none", "gzip", "bz2", "xz"):
-                raise ValueError("auxiliary compression must be none, gzip, bz2 or xz")
+            if compression not in ("none", "gzip", "bz2", "xz", "tar.bz2"):
+                raise ValueError("unsupported auxiliary compression")
             if compression != "none" and not re.fullmatch(
                 r"[0-9a-f]{64}", item.get("content_sha256", ""),
             ):
@@ -464,16 +466,89 @@ class Controller:
                 raise ValueError("auxiliary downloads require explicit HTTPS URLs")
         return spec
 
+    def aux_selection(self, spec):
+        wof = self.native.get("imports", {}).get("whosonfirst", {})
+        host = wof.get("dataHost", "https://data.geocode.earth/wof/dist").rstrip("/")
+        parsed = urllib.parse.urlsplit(host)
+        if parsed.scheme != "https" or not parsed.netloc or parsed.query or parsed.fragment:
+            raise ValueError("WOF dataHost must be an HTTPS inventory base URL")
+        postalcodes = wof.get("importPostalcodes", False)
+        if not isinstance(postalcodes, bool):
+            raise ValueError("imports.whosonfirst.importPostalcodes must be a JSON boolean")
+        return {
+            "data_host": host, "countries": spec["countries"],
+            "import_postalcodes": postalcodes,
+        }
+
+    def resolve_aux(self, spec, pending):
+        # Selection follows the pinned upstream utils/download_sqlite_all.js,
+        # but downloads fail closed instead of accepting curl/pipeline failures.
+        selection = self.aux_selection(spec)
+        inventory_url = selection["data_host"] + "/sqlite/inventory.json"
+        with urllib.request.urlopen(inventory_url, timeout=120) as response:
+            raw = response.read()
+        inventory = json.loads(raw)
+        if not isinstance(inventory, list):
+            raise RuntimeError("official WOF inventory must be an array")
+        countries = {country.lower() for country in spec["countries"]}
+        selected = {}
+        for entry in inventory:
+            compressed = entry.get("name_compressed", "")
+            match = re.match(r"^whosonfirst-data-(admin|postalcode)-([a-z]{2})-latest", compressed)
+            if not match or match[2] not in countries:
+                continue
+            if match[1] == "postalcode" and not selection["import_postalcodes"]:
+                continue
+            name = entry.get("name", "")
+            if (
+                Path(name).name != name
+                or not re.fullmatch(r"whosonfirst-data-[a-z0-9-]+\.db", name)
+                or Path(compressed).name != compressed
+            ):
+                raise RuntimeError("unsafe SQLite filename in WOF inventory")
+            if not compressed.endswith((".db.bz2", ".db.tar.bz2")):
+                raise RuntimeError("unsupported SQLite archive in official WOF inventory")
+            previous = selected.get(name)
+            if not previous or entry["last_modified"] > previous["last_modified"]:
+                selected[name] = entry
+        for country in countries:
+            if not any(
+                entry["name_compressed"].startswith("whosonfirst-data-admin-" + country + "-latest")
+                for entry in selected.values()
+            ):
+                raise RuntimeError("official WOF inventory has no admin data for " + country.upper())
+        entries = [selected[name] for name in sorted(selected)]
+        files = [{
+            "path": "whosonfirst/sqlite/" + entry["name"],
+            "url": selection["data_host"] + "/sqlite/" + entry["name_compressed"],
+            "compression": "tar.bz2" if entry["name_compressed"].endswith(".tar.bz2") else "bz2",
+        } for entry in entries]
+        (pending / "inventory.json").write_bytes(raw)
+        return {
+            "policy": spec, "selection": selection, "files": files, "created_at": now(),
+            "inventory": {
+                "url": inventory_url, "sha256": hashlib.sha256(raw).hexdigest(),
+                "retrieved_at": now(), "selected": entries,
+            },
+        }
+
     def verified_aux(self):
         spec = self.aux_spec()
         root = self.data / "aux" / spec["version"]
-        if read_json(root / "manifest.json") != spec:
+        manifest = read_json(root / "manifest.json")
+        if manifest.get("policy", manifest) != spec:
             raise RuntimeError("auxiliary cache does not match policy; run aux explicitly")
-        self.verify_aux_files(root, spec)
+        if not spec["files"] and manifest.get("selection") != self.aux_selection(spec):
+            raise RuntimeError("WOF selection changed; choose a new immutable aux.version")
+        self.verify_aux_files(root, manifest)
         return root
 
     def verify_aux_files(self, root, spec):
         expected = {item["path"] for item in spec["files"]} | {"manifest.json"}
+        if spec.get("inventory"):
+            expected.add("inventory.json")
+            if digest(root / "inventory.json") != spec["inventory"]["sha256"]:
+                raise RuntimeError("cached WOF inventory checksum mismatch")
         actual = set()
         for path in root.rglob("*"):
             if path.is_symlink():
@@ -501,7 +576,9 @@ class Controller:
             archive.unlink()
         pending.mkdir(parents=True)
         try:
-            for item in spec["files"]:
+            automatic = not spec["files"]
+            manifest = self.resolve_aux(spec, pending) if automatic else spec
+            for item in manifest["files"]:
                 target = pending / item["path"]
                 target.parent.mkdir(parents=True, exist_ok=True)
                 compression = item.get("compression", "none")
@@ -509,16 +586,41 @@ class Controller:
                 with urllib.request.urlopen(item["url"], timeout=120) as source:
                     with open(downloaded, "xb") as destination:
                         shutil.copyfileobj(source, destination, 1024 * 1024)
-                if digest(downloaded) != item["sha256"]:
+                checksum = digest(downloaded)
+                if not automatic and checksum != item["sha256"]:
                     raise RuntimeError("auxiliary download checksum mismatch")
+                item["sha256"] = checksum
                 if compression != "none":
-                    opener = {"gzip": gzip.open, "bz2": bz2.open, "xz": lzma.open}[compression]
-                    with opener(archive, "rb") as source, open(target, "xb") as destination:
-                        shutil.copyfileobj(source, destination, 1024 * 1024)
+                    if compression == "tar.bz2":
+                        with tarfile.open(archive, "r:bz2") as bundle:
+                            members = [
+                                member for member in bundle.getmembers()
+                                if member.isfile() and Path(member.name).name == target.name
+                            ]
+                            if len(members) != 1:
+                                raise RuntimeError("WOF archive must contain exactly the selected SQLite database")
+                            with bundle.extractfile(members[0]) as source, open(target, "xb") as destination:
+                                shutil.copyfileobj(source, destination, 1024 * 1024)
+                    else:
+                        opener = {"gzip": gzip.open, "bz2": bz2.open, "xz": lzma.open}[compression]
+                        with opener(archive, "rb") as source, open(target, "xb") as destination:
+                            shutil.copyfileobj(source, destination, 1024 * 1024)
                     archive.unlink()
-                    if digest(target) != item["content_sha256"]:
+                    checksum = digest(target)
+                    if not automatic and checksum != item["content_sha256"]:
                         raise RuntimeError("auxiliary expanded checksum mismatch")
-            atomic_json(pending / "manifest.json", spec)
+                    item["content_sha256"] = checksum
+                if item["path"].startswith("whosonfirst/sqlite/") and target.suffix == ".db":
+                    with sqlite3.connect(target.resolve().as_uri() + "?mode=ro", uri=True) as database:
+                        tables = {row[0] for row in database.execute(
+                            "SELECT name FROM sqlite_master WHERE type='table'",
+                        )}
+                        if (
+                            database.execute("PRAGMA quick_check").fetchone() != ("ok",)
+                            or not {"geojson", "spr"}.issubset(tables)
+                        ):
+                            raise RuntimeError("downloaded WOF SQLite database is invalid")
+            atomic_json(pending / "manifest.json", manifest)
             os.replace(pending, root)
         finally:
             if pending.exists():
@@ -609,6 +711,17 @@ class Controller:
         if count < minimum:
             raise RuntimeError("candidate has %d documents; minimum is %d" % (count, minimum))
         record["documents"] = count
+        minimum_osm = self.policy.get("min_osm_documents", 1000)
+        if not isinstance(minimum_osm, int) or isinstance(minimum_osm, bool) or minimum_osm < 1:
+            raise ValueError("min_osm_documents must be a positive integer")
+        osm_count = self.es.request("POST", "/" + index + "/_count", {
+            "query": {"term": {"source": "openstreetmap"}},
+        })["count"]
+        record["osm_documents"] = osm_count
+        if osm_count < minimum_osm:
+            raise RuntimeError(
+                "candidate has %d OpenStreetMap documents; minimum is %d" % (osm_count, minimum_osm),
+            )
 
     def activate(self, identifier, rollback=False, source=None):
         self.check_enabled()
@@ -792,6 +905,7 @@ class Controller:
         wof = imports.setdefault("whosonfirst", {})
         wof["datapath"] = str(aux_root / "whosonfirst")
         wof["countryCode"] = self.policy["aux"]["countries"]
+        wof.setdefault("importPostalcodes", False)
         # A cache must contain ready-to-import SQLite, not an archive or a URL.
         if not list((aux_root / "whosonfirst" / "sqlite").glob("whosonfirst-data-*.db")):
             raise RuntimeError("aux cache needs whosonfirst/sqlite/whosonfirst-data-*.db")

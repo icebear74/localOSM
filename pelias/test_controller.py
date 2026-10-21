@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import signal
 import sqlite3
+import tarfile
 import tempfile
 import unittest
 from unittest import mock
@@ -19,7 +20,10 @@ import smoke
 
 
 CASES = [
-    {"endpoint": endpoint, "params": {"text": "Berlin"}}
+    {"endpoint": endpoint, "params": {"text": "Berlin"}, "expect": (
+        {"source": "openstreetmap", "layer": "address"} if endpoint == "search"
+        else {"source": "openstreetmap"} if endpoint == "autocomplete" else {}
+    )}
     for endpoint in sorted(smoke.ENDPOINTS)
 ]
 
@@ -29,6 +33,7 @@ class FakeES:
         self.active = None
         self.calls = []
         self.count = 20
+        self.osm_count = 20
 
     def target(self, _alias):
         return self.active
@@ -44,6 +49,8 @@ class FakeES:
         if "/_cluster/health/" in path:
             return {"status": "yellow", "timed_out": False}
         if path.endswith("/_count"):
+            if body and body.get("query") == {"term": {"source": "openstreetmap"}}:
+                return {"count": self.osm_count}
             return {"count": self.count}
         if method == "GET":
             return {}
@@ -81,7 +88,7 @@ class ControllerTests(unittest.TestCase):
         self.root = Path(self.scratch.name)
         self.policy = {
             "enabled": True, "auto_update": True, "auto_promote": False,
-            "min_documents": 10, "retain_generations": 2, "smoke": CASES,
+            "min_documents": 10, "min_osm_documents": 10, "retain_generations": 2, "smoke": CASES,
             "aux": {"version": "v1", "countries": ["DE"], "files": [{
                 "path": "wof/a.db", "url": "https://example.invalid/a.db",
                 "sha256": hashlib.sha256(b"aux").hexdigest(),
@@ -170,6 +177,17 @@ class ControllerTests(unittest.TestCase):
         self.c.es.active = "unknown"
         with self.assertRaisesRegex(RuntimeError, "disagree"):
             self.c.activate("g1")
+        self.c.candidate_smoke.assert_not_called()
+
+    def test_wof_document_count_cannot_mask_an_empty_osm_import(self):
+        self.record("g1")
+        self.c.es.count = 100000
+        self.c.es.osm_count = 0
+        with self.assertRaisesRegex(RuntimeError, "0 OpenStreetMap documents"):
+            self.c.activate("g1")
+        self.assertEqual(self.c.generation("g1")["osm_documents"], 0)
+        self.assertIsNone(self.c.state["active"])
+        self.assertIsNone(self.c.es.active)
         self.c.candidate_smoke.assert_not_called()
 
     def test_rollback_keeps_previous_generation(self):
@@ -495,6 +513,97 @@ class ControllerTests(unittest.TestCase):
         self.assertFalse(aux.with_name(aux.name + ".download").exists())
         self.assertFalse(aux.with_name(aux.name + ".next").exists())
 
+    def automatic_aux_fixture(self):
+        self.c.policy["aux"]["files"] = []
+        path = self.root / "official-inventory-fixture.db"
+        with sqlite3.connect(path) as database:
+            database.execute("CREATE TABLE geojson (id INTEGER, body TEXT)")
+            database.execute("CREATE TABLE spr (id INTEGER)")
+        content = path.read_bytes()
+        entry = {
+            "name": "whosonfirst-data-admin-de.db",
+            "name_compressed": "whosonfirst-data-admin-de-latest.db.bz2",
+            "last_modified": "2026-01-01T00:00:00Z",
+        }
+        return content, entry
+
+    def downloaded(self, content):
+        response = mock.MagicMock()
+        response.__enter__.return_value = io.BytesIO(content)
+        return response
+
+    def test_official_inventory_aux_resolves_countries_captures_hashes_and_never_refreshes(self):
+        content, entry = self.automatic_aux_fixture()
+        compressed = bz2.compress(content)
+        inventory = json.dumps([
+            dict(entry, name_compressed="whosonfirst-data-admin-de-latest.db.tar.bz2",
+                 last_modified="2025-01-01T00:00:00Z"),
+            entry,
+            dict(entry, name="whosonfirst-data-admin-us.db",
+                 name_compressed="whosonfirst-data-admin-us-latest.db.bz2"),
+            dict(entry, name="whosonfirst-data-postalcode-de.db",
+                 name_compressed="whosonfirst-data-postalcode-de-latest.db.bz2"),
+        ]).encode()
+        with mock.patch("urllib.request.urlopen", side_effect=[
+            self.downloaded(inventory), self.downloaded(compressed),
+        ]) as request:
+            self.c.aux()
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(
+            request.call_args_list[0].args[0],
+            "https://data.geocode.earth/wof/dist/sqlite/inventory.json",
+        )
+        aux = self.c.verified_aux()
+        manifest = controller.read_json(aux / "manifest.json")
+        self.assertEqual(manifest["policy"]["files"], [])
+        self.assertEqual(manifest["inventory"]["sha256"], hashlib.sha256(inventory).hexdigest())
+        self.assertEqual(manifest["inventory"]["selected"], [entry])
+        self.assertEqual(manifest["files"][0]["sha256"], hashlib.sha256(compressed).hexdigest())
+        self.assertEqual(manifest["files"][0]["content_sha256"], hashlib.sha256(content).hexdigest())
+        self.assertEqual((aux / manifest["files"][0]["path"]).read_bytes(), content)
+        with mock.patch("urllib.request.urlopen") as request:
+            self.c.aux()
+            request.assert_not_called()
+        self.c.native["imports"] = {"whosonfirst": {"importPostalcodes": True}}
+        with self.assertRaisesRegex(RuntimeError, "selection changed"):
+            self.c.verified_aux()
+
+    def test_official_inventory_requires_every_requested_country(self):
+        _content, entry = self.automatic_aux_fixture()
+        self.c.policy["aux"]["countries"] = ["DE", "JP"]
+        inventory = json.dumps([entry]).encode()
+        with mock.patch("urllib.request.urlopen", return_value=self.downloaded(inventory)):
+            with self.assertRaisesRegex(RuntimeError, "no admin data for JP"):
+                self.c.aux()
+        self.assertFalse((self.c.data / "aux" / "v1").exists())
+
+    def test_official_inventory_tar_bz2_is_streamed_without_extracting_other_members(self):
+        content, entry = self.automatic_aux_fixture()
+        entry["name_compressed"] = "whosonfirst-data-admin-de-latest.db.tar.bz2"
+        output = io.BytesIO()
+        with tarfile.open(fileobj=output, mode="w:bz2") as archive:
+            member = tarfile.TarInfo("nested/" + entry["name"])
+            member.size = len(content)
+            archive.addfile(member, io.BytesIO(content))
+            unrelated = tarfile.TarInfo("../unselected")
+            unrelated.size = 3
+            archive.addfile(unrelated, io.BytesIO(b"bad"))
+        with mock.patch("urllib.request.urlopen", side_effect=[
+            self.downloaded(json.dumps([entry]).encode()), self.downloaded(output.getvalue()),
+        ]):
+            self.c.aux()
+        aux = self.c.verified_aux()
+        self.assertEqual((aux / "whosonfirst" / "sqlite" / entry["name"]).read_bytes(), content)
+        self.assertFalse((aux.parent / "unselected").exists())
+
+    def test_official_inventory_cannot_escape_cache_paths(self):
+        _content, entry = self.automatic_aux_fixture()
+        entry["name"] = "../escaped.db"
+        with mock.patch("urllib.request.urlopen", return_value=self.downloaded(json.dumps([entry]).encode())):
+            with self.assertRaisesRegex(RuntimeError, "unsafe SQLite filename"):
+                self.c.aux()
+        self.assertFalse((self.c.data / "aux" / "escaped.db").exists())
+
     def test_generation_native_config_isolated_and_keeps_csv_api_targets(self):
         self.record("g1")
         root = self.c.generations / "g1"
@@ -722,6 +831,14 @@ class SmokeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "at least one"):
             smoke.validate_cases([{"endpoint": "search", "params": {}, "expect": {"min_features": 0}}])
 
+    def test_wof_only_city_smokes_are_rejected(self):
+        cases = [dict(case, expect={"source": "whosonfirst", "layer": "locality"}) for case in CASES]
+        with self.assertRaisesRegex(ValueError, "search and autocomplete"):
+            smoke.validate_cases(cases)
+        cases = [dict(case, expect={"source": "openstreetmap", "layer": "street"}) for case in CASES]
+        with self.assertRaisesRegex(ValueError, "address or venue"):
+            smoke.validate_cases(cases)
+
     def response(self, features):
         response = mock.MagicMock()
         response.__enter__.return_value.read.return_value = json.dumps({
@@ -738,13 +855,26 @@ class SmokeTests(unittest.TestCase):
         feature = {
             "type": "Feature",
             "geometry": {"type": "Point", "coordinates": [13.4, 52.5]},
-            "properties": {"label": "Berlin", "layer": "locality", "source": "whosonfirst"},
+            "properties": {"label": "Berlin", "layer": "address", "source": "openstreetmap"},
         }
         with mock.patch("urllib.request.urlopen", return_value=self.response([feature])):
             self.assertEqual(len(smoke.run("http://candidate:14000", CASES)), 4)
-            cases = [dict(case, expect={"label_contains": "not berlin"}) for case in CASES]
+            cases = [
+                dict(case, expect=dict(case["expect"], label_contains="not berlin")) for case in CASES
+            ]
             with self.assertRaisesRegex(RuntimeError, "label"):
                 smoke.run("http://candidate:14000", cases)
+
+    def test_source_layer_and_label_must_match_the_same_feature(self):
+        features = [
+            {"type": "Feature", "geometry": {"type": "Point", "coordinates": [13.4, 52.5]},
+             "properties": {"label": "Berlin", "layer": "venue", "source": "openstreetmap"}},
+            {"type": "Feature", "geometry": {"type": "Point", "coordinates": [13.4, 52.5]},
+             "properties": {"label": "Berlin", "layer": "address", "source": "whosonfirst"}},
+        ]
+        with mock.patch("urllib.request.urlopen", return_value=self.response(features)):
+            with self.assertRaisesRegex(RuntimeError, "one feature"):
+                smoke.run("http://candidate:14000", CASES)
 
 
 if __name__ == "__main__":

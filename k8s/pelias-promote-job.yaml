@@ -15,6 +15,22 @@ spec:
       nodeSelector: {osm: "true"}
       restartPolicy: Never
       terminationGracePeriodSeconds: 120
+      initContainers:
+      - name: initialize-legacy-source-lock
+        image: localosm/pelias-runtime:2026-10-21
+        imagePullPolicy: IfNotPresent
+        command: ["python3", "-c"]
+        args:
+        - |
+          import os
+          os.umask(0)
+          fd = os.open("/planet/.pelias-source.lock", os.O_CREAT | os.O_RDONLY, 0o666)
+          os.close(fd)
+        resources:
+          requests: {cpu: 10m, memory: 16Mi}
+          limits: {cpu: 100m, memory: 64Mi}
+        volumeMounts:
+        - {name: source-lock-initializer, mountPath: /planet}
       containers:
       - name: pelias-promote
         image: localosm/pelias-runtime:2026-10-21
@@ -60,6 +76,8 @@ spec:
         - {name: runtime, mountPath: /runtime, readOnly: true}
         - {name: custom-ca, mountPath: /custom-ca, readOnly: true}
       volumes:
+      - name: source-lock-initializer
+        persistentVolumeClaim: {claimName: planet}
       - name: planet
         persistentVolumeClaim: {claimName: planet, readOnly: true}
       - name: data
